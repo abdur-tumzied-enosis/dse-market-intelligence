@@ -106,6 +106,14 @@ async def job_quarterly() -> None:
     logger.info("job_quarterly: complete")
 
 
+async def job_health_checks() -> None:
+    """6-hourly source health checks — populates source_health + fires alerts."""
+    from extraction.observability import run_health_checks
+    logger.info("job_health_checks: starting")
+    await run_health_checks()
+    logger.info("job_health_checks: complete")
+
+
 # ── Scheduler Configuration ────────────────────────────────────────────
 
 
@@ -116,7 +124,7 @@ def configure_scheduler(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         job_live_prices,
         trigger="cron",
-        day_of_week="sun-thu",
+        day_of_week="mon,tue,wed,thu,sun",
         hour="10-14",
         minute="0,15,30,45",
         id="live_price_pull",
@@ -127,7 +135,7 @@ def configure_scheduler(scheduler: AsyncIOScheduler) -> None:
     scheduler.add_job(
         job_eod_snapshot,
         trigger="cron",
-        day_of_week="sun-thu",
+        day_of_week="mon,tue,wed,thu,sun",
         hour=14,
         minute=35,
         id="eod_snapshot",
@@ -187,7 +195,16 @@ def configure_scheduler(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
     )
 
-    logger.info("scheduler: all 7 jobs registered")
+    # Every 6 hours — source health checks
+    scheduler.add_job(
+        job_health_checks,
+        trigger="interval",
+        hours=6,
+        id="health_checks",
+        replace_existing=True,
+    )
+
+    logger.info("scheduler: all 8 jobs registered")
 
 
 async def start_scheduler(scheduler: AsyncIOScheduler) -> None:

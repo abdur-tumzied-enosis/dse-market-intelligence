@@ -1,0 +1,84 @@
+{
+  "title": "DSE Pipeline Health",
+  "uid": "dse_pipeline_health",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Job Status (Last 24h)",
+      "type": "stat",
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "datasource": { "type": "postgres", "uid": "dse_postgres" },
+      "targets": [{
+        "rawSql": "SELECT COUNT(*) as value, status as metric FROM pipeline_jobs WHERE started_at > NOW() - INTERVAL '24h' GROUP BY status",
+        "format": "table"
+      }],
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "background" },
+      "fieldConfig": {
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "success" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }] },
+          { "matcher": { "id": "byName", "options": "failed" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }] },
+          { "matcher": { "id": "byName", "options": "running" }, "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "blue" } }] }
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "title": "Source Health",
+      "type": "table",
+      "gridPos": { "x": 6, "y": 0, "w": 10, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "dse_postgres" },
+      "targets": [{
+        "rawSql": "SELECT DISTINCT ON (source_name) source_name, reachable, status_code, response_ms, checked_at, hash_changed FROM source_health ORDER BY source_name, checked_at DESC",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "reachable" }, "properties": [{ "id": "custom.displayMode", "value": "color-background" }, { "id": "mappings", "value": [{ "type": "value", "options": { "true": { "text": "UP", "color": "green" }, "false": { "text": "DOWN", "color": "red" } } }] }] }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "title": "Unacknowledged Alerts",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 4, "w": 16, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "dse_postgres" },
+      "targets": [{
+        "rawSql": "SELECT created_at, severity, stream_name, message FROM pipeline_alerts WHERE acknowledged_at IS NULL ORDER BY created_at DESC LIMIT 50",
+        "format": "table"
+      }],
+      "fieldConfig": {
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "severity" }, "properties": [{ "id": "custom.displayMode", "value": "color-background" }, { "id": "mappings", "value": [{ "type": "value", "options": { "CRITICAL": { "color": "red" }, "WARNING": { "color": "orange" }, "INFO": { "color": "blue" } } }] }] }
+        ]
+      }
+    },
+    {
+      "id": 4,
+      "title": "Job Duration (ms) by Name",
+      "type": "bargauge",
+      "gridPos": { "x": 0, "y": 12, "w": 16, "h": 6 },
+      "datasource": { "type": "postgres", "uid": "dse_postgres" },
+      "targets": [{
+        "rawSql": "SELECT job_name, AVG(duration_ms) as avg_ms, MAX(duration_ms) as max_ms FROM pipeline_jobs WHERE started_at > NOW() - INTERVAL '24h' AND status = 'success' GROUP BY job_name ORDER BY avg_ms DESC",
+        "format": "table"
+      }],
+      "options": { "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 5,
+      "title": "Jobs Timeline",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 18, "w": 24, "h": 8 },
+      "datasource": { "type": "postgres", "uid": "dse_postgres" },
+      "targets": [{
+        "rawSql": "SELECT started_at AS time, COUNT(*) FILTER (WHERE status='success') as success, COUNT(*) FILTER (WHERE status='failed') as failed FROM pipeline_jobs WHERE $__timeFilter(started_at) GROUP BY time_bucket('1 hour', started_at) ORDER BY 1",
+        "format": "time_series"
+      }]
+    }
+  ]
+}

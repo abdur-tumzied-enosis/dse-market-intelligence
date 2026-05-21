@@ -103,7 +103,7 @@
 
 - [-] `BsecPDFAdapter` — **CANCELLED**: BSEC (sec.gov.bd) has no queryable company PDF portal. Annual reports are on per-company IR pages only. `annual_reports_pdf` stream remains stubbed.
 
-### Phase 1F — News Adapters
+### Phase 1F — News Adapters (skip this for now)
 
 - [ ] `extraction/adapters/news/tbs_rss.py` — `TBSNewsRSSAdapter` (RSS feed parse)
 - [ ] `extraction/adapters/news/financial_express.py` — RSS + BS4 fallback
@@ -142,29 +142,29 @@
 - [x] `extraction/bulk_load/bdshare_fallback.py` — BDShare fallback for 6 bond tickers (ABBLPBOND, DBLPBOND, MBPLCPBOND, SEB1PBOND, UCB2PBOND, USMANIAGL): 475 rows each = 2,850 rows inserted, quality_flag='ok' (full OHLCV). 20 confirmed-dead tickers marked is_active=false.
 - [x] **Phase 1I COMPLETE**: 406 active companies, 20 inactive. Total stock_prices rows: ~55,484 (52,634 AmarStock no_ohlc + 2,850 BDShare ok). Remaining gap: AmarStock data is trade-day-sparse; BDShare full backfill (2012–present all tickers) deferred to pre-ML phase.
 
-### Phase 1J — Observability
+### Phase 1J — Observability (COMPLETE 2026-05-21)
 
-- [ ] `source_health` table populated by 6-hourly health checks
-- [ ] `pipeline_jobs` table — every run logged
-- [ ] `pipeline_alerts` table — all alerts recorded
-- [ ] Grafana + Prometheus Docker services added to compose
-- [ ] Pipeline health dashboard (job status grid + freshness bars + error rate)
-- [ ] Alert routing: WhatsApp (CRITICAL) + email (WARNING)
+- [x] `source_health` table populated by 6-hourly health checks — `extraction/observability.py:run_health_checks()` + scheduler job
+- [x] `pipeline_jobs` table — every run logged — `extraction/jobs.py` real asyncpg INSERT/UPDATE (was TODO stubs)
+- [x] `pipeline_alerts` table — all alerts recorded — `extraction/observability.py:fire_alert()`
+- [x] Grafana + Prometheus Docker services added to compose — `docker-compose.yml`; configs in `monitoring/`
+- [x] Pipeline health dashboard (job status grid + freshness bars + error rate) — `monitoring/grafana/dashboards/pipeline_health.json`; PostgreSQL datasource provisioned
+- [x] Alert routing: WhatsApp (CRITICAL) + email (WARNING) — `extraction/observability.py`; email via smtplib; WhatsApp via Twilio (optional, env-gated)
 
-### Phase 1K — Management API + UI (extraction layer only)
+### Phase 1K — Management API + UI (COMPLETE 2026-05-21)
 
-- [ ] FastAPI app skeleton: `mgmt/main.py`
-- [ ] `/mgmt/streams` endpoints (GET all, GET one, adapter list)
-- [ ] `/mgmt/adapters/{name}/promote|demote|pause|resume`
-- [ ] `/mgmt/jobs` endpoints (status, history, trigger, pause, resume)
-- [ ] `/mgmt/quality/failures` + `/mgmt/freshness`
-- [ ] `/mgmt/health` endpoints + `/mgmt/structure-hashes`
-- [ ] `/mgmt/alerts` endpoints
-- [ ] AI Ops Agent: `mgmt/agent/ops_agent.py` — scheduled sweep + alert hook + chat
-- [ ] `/mgmt/agent` endpoints (status, run, decisions, queue, approve/reject, chat SSE)
-- [ ] Next.js management UI: `/mgmt/dashboard` — stream health grid + freshness bars
-- [ ] `/mgmt/streams/{id}` — adapter priority drag-reorder + data sample viewer
-- [ ] `/mgmt/agent` — decision log + approval queue cards + chat console
+- [x] FastAPI app skeleton: `mgmt/main.py` — lifespan starts scheduler + ops agent
+- [x] `/mgmt/streams` endpoints (GET all, GET one, adapter list)
+- [x] `/mgmt/streams/{stream}/adapters/{adapter}/promote|demote|pause|resume` — persisted to `adapter_overrides` table (migration 010)
+- [x] `/mgmt/jobs` endpoints (list, single, stats) — `/mgmt/scheduler` for APScheduler trigger/pause/resume
+- [x] `/mgmt/quality/failures` + `/mgmt/quality/freshness`
+- [x] `/mgmt/health` endpoints + `/mgmt/health/structure-hashes`
+- [x] `/mgmt/alerts` endpoints (list, summary, acknowledge)
+- [x] AI Ops Agent: `mgmt/agent/ops_agent.py` — sweep + alert_hook + chat_stream; tools: get_pipeline_status, query_db_readonly, trigger_job, pause_adapter, promote_adapter, fire_alert; auto-execute low-risk, queue medium/high for approval
+- [x] `/mgmt/agent` endpoints (status, run, decisions, queue, approve/reject, chat SSE)
+- [x] Next.js management UI in `mgmt-ui/`: dashboard (stream health grid + freshness bars + source health)
+- [x] `/mgmt/streams/{id}` — adapter priority up/down arrows + pause/resume buttons
+- [x] `/mgmt/agent` — decision log + approval queue cards + SSE chat console
 
 ### Phase 1L — Testing + Hardening
 

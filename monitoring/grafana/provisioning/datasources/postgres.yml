@@ -1,0 +1,19 @@
+apiVersion: 1
+
+datasources:
+  - name: DSE_PostgreSQL
+    type: postgres
+    uid: dse_postgres
+    url: db:5432
+    user: ${POSTGRES_USER:-dse}
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      database: ${POSTGRES_DB:-dse_intelligence}
+      sslmode: disable
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+      postgresVersion: 1600
+      timescaledb: true
+    editable: false
