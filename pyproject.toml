@@ -40,8 +40,11 @@ dependencies = [
     "pydantic>=2.7.0",
     "pydantic-settings>=2.2.0",
 
-    # LLM (ops agent)
-    "anthropic>=0.28.0",
+    # LLM (ops agent) — LangChain, provider-switchable
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-ollama>=0.2.0",
+    "langchain-google-genai>=2.0.0",
 
     # Utilities
     "python-dotenv>=1.0.0",

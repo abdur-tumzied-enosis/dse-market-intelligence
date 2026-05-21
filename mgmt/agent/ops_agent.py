@@ -1,10 +1,9 @@
 """
-DSE Pipeline Ops Agent — powered by Claude.
+DSE Pipeline Ops Agent — LangChain, provider-switchable.
 
-Three run modes:
-- sweep():     periodic analysis, auto-executes low-risk actions
-- on_alert():  responds to CRITICAL pipeline alerts
-- chat_stream(): interactive SSE chat for human operators
+Set OPS_AGENT_PROVIDER=openrouter (default) or OPS_AGENT_PROVIDER=ollama.
+OpenRouter model example: "anthropic/claude-haiku-4-5"
+Ollama model example:     "llama3.1"
 """
 from __future__ import annotations
 
@@ -15,6 +14,16 @@ from typing import Any, AsyncGenerator
 
 import asyncpg
 import structlog
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
+
+from mgmt.agent.llm import make_llm
+from mgmt.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -129,7 +138,7 @@ _TOOL_RISK: dict[str, str] = {
     "trigger_job": "low",
     "promote_adapter": "low",
     "pause_adapter": "medium",
-    "fire_alert": "low",  # elevated to "high" when severity=CRITICAL inside _execute_tool
+    "fire_alert": "low",
 }
 
 _SAFE_SQL_RE = re.compile(
@@ -137,21 +146,54 @@ _SAFE_SQL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# LangChain / OpenAI function-calling format for bind_tools()
+_LC_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": t["input_schema"],
+        },
+    }
+    for t in TOOLS
+]
+
+
+def _to_lc(messages: list[dict]) -> list[BaseMessage]:
+    result: list[BaseMessage] = []
+    for m in messages:
+        content = m.get("content") or ""
+        if m["role"] == "user":
+            result.append(HumanMessage(content=content))
+        elif m["role"] == "assistant":
+            result.append(AIMessage(content=content))
+    return result
+
 
 class OpsAgent:
-    def __init__(self, api_key: str, model: str, auto_execute_risk: str) -> None:
-        self._api_key = api_key
+    def __init__(self, provider: str, model: str, auto_execute_risk: str) -> None:
+        self._provider = provider
         self._model = model
-        self._auto_execute_risk = auto_execute_risk  # "low" | "none"
-        self.scheduler = None  # injected by main.py after scheduler starts
+        self._auto_execute_risk = auto_execute_risk
+        self.scheduler = None
+
+    def _llm(self):
+        return make_llm(self._provider, self._model, get_settings()).bind_tools(_LC_TOOLS)
+
+    def _is_configured(self) -> bool:
+        if self._provider == "ollama":
+            return True
+        settings = get_settings()
+        if self._provider == "google":
+            return bool(settings.google_api_key)
+        return bool(settings.openrouter_api_key)
 
     # ── Public entry points ─────────────────────────────────────────────
 
     async def sweep(self, pool: asyncpg.Pool) -> dict:
-        """Periodic analysis sweep — auto-execute low-risk, queue the rest."""
-        if not self._api_key:
-            return {"skipped": "ANTHROPIC_API_KEY not configured"}
-
+        if not self._is_configured():
+            return {"skipped": f"OPENROUTER_API_KEY not configured"}
         status = await self._get_pipeline_status(pool, hours_back=24)
         messages = [
             {
@@ -166,10 +208,8 @@ class OpsAgent:
         return await self._run_loop(pool, messages, mode="scheduled")
 
     async def on_alert(self, pool: asyncpg.Pool, alert: dict) -> dict:
-        """Respond to a CRITICAL pipeline alert."""
-        if not self._api_key:
-            return {"skipped": "ANTHROPIC_API_KEY not configured"}
-
+        if not self._is_configured():
+            return {"skipped": "OPENROUTER_API_KEY not configured"}
         messages = [
             {
                 "role": "user",
@@ -184,55 +224,41 @@ class OpsAgent:
     async def chat_stream(
         self, pool: asyncpg.Pool, messages: list[dict]
     ) -> AsyncGenerator[dict, None]:
-        """Stream interactive chat. Yields dicts: {type: text|tool_call|tool_result|done}."""
-        if not self._api_key:
-            yield {"type": "text", "text": "Ops agent not configured (ANTHROPIC_API_KEY missing)."}
+        if not self._is_configured():
+            yield {"type": "text", "text": "Ops agent not configured (OPENROUTER_API_KEY missing)."}
             yield {"type": "done"}
             return
 
-        import anthropic
+        llm = self._llm()
+        lc_messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT)] + _to_lc(messages)
 
-        client = anthropic.AsyncAnthropic(api_key=self._api_key)
-        full_messages = list(messages)
+        for _ in range(10):
+            full = None
+            async for chunk in llm.astream(lc_messages):
+                if isinstance(chunk.content, str) and chunk.content:
+                    yield {"type": "text", "text": chunk.content}
+                full = chunk if full is None else full + chunk
 
-        for _ in range(10):  # max 10 tool-call iterations
-            async with client.messages.stream(
-                model=self._model,
-                max_tokens=2048,
-                system=SYSTEM_PROMPT,
-                messages=full_messages,
-                tools=TOOLS,  # type: ignore[arg-type]
-            ) as stream:
-                async for text in stream.text_stream:
-                    yield {"type": "text", "text": text}
-
-                final = await stream.get_final_message()
-
-            full_messages.append({"role": "assistant", "content": final.content})
-
-            if final.stop_reason != "tool_use":
+            if full is None:
                 break
 
-            tool_results = []
-            for block in final.content:
-                if not hasattr(block, "type") or block.type != "tool_use":  # type: ignore[union-attr]
-                    continue
-                inp = block.input  # type: ignore[union-attr]
-                name = block.name  # type: ignore[union-attr]
-                yield {"type": "tool_call", "name": name, "input": inp}
+            lc_messages.append(full)
 
+            if not full.tool_calls:
+                break
+
+            tool_msgs: list[BaseMessage] = []
+            for tc in full.tool_calls:
+                name, inp = tc["name"], tc["args"]
+                yield {"type": "tool_call", "name": name, "input": inp}
                 result, _ = await self._execute_tool(pool, name, inp, mode="chat")
                 yield {"type": "tool_result", "name": name, "result": result}
-
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,  # type: ignore[union-attr]
-                        "content": json.dumps(result, default=str),
-                    }
-                )
-
-            full_messages.append({"role": "user", "content": tool_results})
+                tool_msgs.append(ToolMessage(
+                    tool_call_id=tc["id"],
+                    content=json.dumps(result, default=str),
+                    name=name,
+                ))
+            lc_messages.extend(tool_msgs)
 
         yield {"type": "done"}
 
@@ -241,37 +267,24 @@ class OpsAgent:
     async def _run_loop(
         self, pool: asyncpg.Pool, messages: list[dict], mode: str
     ) -> dict:
-        import anthropic
-
-        client = anthropic.AsyncAnthropic(api_key=self._api_key)
-        full_messages = list(messages)
+        llm = self._llm()
+        lc_messages: list[BaseMessage] = [SystemMessage(content=SYSTEM_PROMPT)] + _to_lc(messages)
         decision_ids: list[int] = []
         final_text = ""
 
         for _ in range(8):
-            response = await client.messages.create(
-                model=self._model,
-                max_tokens=2048,
-                system=SYSTEM_PROMPT,
-                messages=full_messages,
-                tools=TOOLS,  # type: ignore[arg-type]
-            )
-            full_messages.append({"role": "assistant", "content": response.content})
+            response: AIMessage = await llm.ainvoke(lc_messages)
+            lc_messages.append(response)
 
-            reasoning = self._extract_text(response.content)
-            if reasoning:
-                final_text = reasoning
+            if isinstance(response.content, str) and response.content:
+                final_text = response.content
 
-            if response.stop_reason != "tool_use":
+            if not response.tool_calls:
                 break
 
-            tool_results = []
-            for block in response.content:
-                if not hasattr(block, "type") or block.type != "tool_use":  # type: ignore[union-attr]
-                    continue
-
-                name = block.name  # type: ignore[union-attr]
-                inp = block.input  # type: ignore[union-attr]
+            tool_msgs: list[BaseMessage] = []
+            for tc in response.tool_calls:
+                name, inp = tc["name"], tc["args"]
                 risk = _TOOL_RISK.get(name, "low")
                 if name == "fire_alert" and inp.get("severity") == "CRITICAL":
                     risk = "high"
@@ -288,22 +301,19 @@ class OpsAgent:
                         run_mode=mode,
                         action_type=name,
                         target=json.dumps(inp),
-                        reasoning=reasoning or "no reasoning text",
+                        reasoning=final_text or "no reasoning text",
                         risk_level=risk,
                         status=status_val,
                         tool_calls=[{"name": name, "input": inp, "result": result}],
                     )
                     decision_ids.append(did)
 
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,  # type: ignore[union-attr]
-                        "content": json.dumps(result, default=str),
-                    }
-                )
-
-            full_messages.append({"role": "user", "content": tool_results})
+                tool_msgs.append(ToolMessage(
+                    tool_call_id=tc["id"],
+                    content=json.dumps(result, default=str),
+                    name=name,
+                ))
+            lc_messages.extend(tool_msgs)
 
         return {"decisions": decision_ids, "summary": final_text}
 
@@ -338,7 +348,6 @@ class OpsAgent:
                 return {"status": "queued_for_approval", "job_id": inp.get("job_id")}, "low"
             if self.scheduler:
                 import pytz
-
                 try:
                     job_id = inp["job_id"]
                     self.scheduler.modify_job(job_id, next_run_time=datetime.now(pytz.utc))
@@ -351,7 +360,6 @@ class OpsAgent:
             if dry_run:
                 return {"status": "queued_for_approval"}, "medium"
             from mgmt.adapter_state import set_override
-
             await set_override(
                 pool,
                 inp["stream_name"],
@@ -365,7 +373,6 @@ class OpsAgent:
             if dry_run:
                 return {"status": "queued_for_approval"}, "low"
             from mgmt.adapter_state import get_override, set_override
-
             ov = get_override(inp["stream_name"], inp["adapter_name"])
             new_delta = ov.priority_delta - 1
             await set_override(
@@ -383,7 +390,6 @@ class OpsAgent:
             if dry_run:
                 return {"status": "queued_for_approval"}, risk
             from extraction.observability import fire_alert
-
             await fire_alert(
                 severity=sev,
                 message=inp["message"],
@@ -400,18 +406,10 @@ class OpsAgent:
         if risk == "none":
             return True
         if mode == "chat":
-            return True  # user is supervising
+            return True
         if risk == "low" and self._auto_execute_risk == "low":
             return True
         return False
-
-    @staticmethod
-    def _extract_text(content: list) -> str:
-        return " ".join(
-            block.text  # type: ignore[union-attr]
-            for block in content
-            if hasattr(block, "type") and block.type == "text"
-        ).strip()
 
     async def _get_pipeline_status(self, pool: asyncpg.Pool, hours_back: int = 24) -> dict:
         jobs = await pool.fetch(

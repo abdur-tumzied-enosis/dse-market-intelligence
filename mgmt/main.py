@@ -50,13 +50,13 @@ async def lifespan(app: FastAPI):
 
     # Ops agent
     ops_agent = OpsAgent(
-        api_key=settings.anthropic_api_key,
+        provider=settings.ops_agent_provider,
         model=settings.ops_agent_model,
         auto_execute_risk=settings.ops_agent_auto_execute_risk,
     )
     ops_agent.scheduler = sched
     app.state.ops_agent = ops_agent
-    logger.info("ops_agent_initialized", model=settings.ops_agent_model)
+    logger.info("ops_agent_initialized", provider=settings.ops_agent_provider, model=settings.ops_agent_model)
 
     yield
 
