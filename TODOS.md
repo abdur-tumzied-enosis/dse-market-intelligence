@@ -113,12 +113,12 @@
 - [ ] `extraction/adapters/news/ticker_extractor.py` — haiku NER: article text → list of DSE tickers
 - [ ] Test ticker extraction on 10 real articles — measure accuracy
 
-### Phase 1G — Macro Adapters
+### Phase 1G — Macro Adapters (COMPLETE 2026-05-21)
 
-- [ ] Test Bangladesh Bank HTML pages — confirm table structure for each indicator
-- [ ] `extraction/adapters/macro/bangladesh_bank.py` — policy rate + CPI + FX + remittance scrapers
-- [ ] `extraction/adapters/macro/world_bank.py` — `WorldBankAdapter(indicator=...)` — all 5 macro indicators
-- [ ] BSEC: `extraction/adapters/bsec/ipo_playwright.py` — IPO filings
+- [x] Test Bangladesh Bank HTML pages — confirm table structure for each indicator
+- [x] `extraction/adapters/macro/bangladesh_bank.py` — policy rate + CPI + FX + remittance scrapers
+- [x] `extraction/adapters/macro/worldbank.py` — `WorldBankAdapter(indicator=...)` — all 5 macro indicators
+- [x] BSEC: `extraction/adapters/bsec/ipo_scraper.py` — IPO filings (154 records: 137 fixed 2008-present, 17 bookbuilding 2022-present; httpx+BS4, no Playwright needed; `db/migrations/009_ipo_filings.sql` applied 2026-05-21)
 
 ### Phase 1H — DataStream Wiring + Failover
 
