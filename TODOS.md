@@ -61,14 +61,14 @@
   - [ ] `get_agm_news()` — confirm cash_div_pct + stock_div_pct + agm_date
   - [ ] `get_market_depth_data("GP")` — confirm 5-level buy/sell structure
   - [ ] Save fixture files: `tests/fixtures/bdshare_{method}_sample.pkl` for each
-- [ ] `extraction/adapters/bdshare/live_prices.py` — `BDShareLivePricesAdapter` + `normalize()`
-- [ ] `extraction/adapters/bdshare/historical.py` — `BDShareHistoricalAdapter` + `normalize()`
-- [ ] `extraction/adapters/bdshare/market_info.py` — `BDShareMarketInfoAdapter`
-- [ ] `extraction/adapters/bdshare/fundamentals.py` — `BDShareCompanyInfoAdapter` (parse list of DFs)
-- [ ] `extraction/adapters/bdshare/sector.py` — `BDShareSectorAdapter`
-- [ ] `extraction/adapters/bdshare/announcements.py` — `BDShareAnnouncementsAdapter` + PSN + AGM
-- [ ] `extraction/adapters/bdshare/depth.py` — `BDShareDepthAdapter`
-- [ ] Unit tests: `normalize()` for each bdshare adapter using fixtures
+- [x] `extraction/adapters/bdshare/live_prices.py` — `BDShareLivePricesAdapter` + `normalize()`
+- [x] `extraction/adapters/bdshare/historical.py` — `BDShareHistoricalAdapter` + `normalize()`
+- [x] `extraction/adapters/bdshare/market_info.py` — `BDShareMarketInfoAdapter`
+- [x] `extraction/adapters/bdshare/fundamentals.py` — `BDShareCompanyInfoAdapter` (parse list of DFs)
+- [x] `extraction/adapters/bdshare/sector.py` — `BDShareSectorAdapter`
+- [x] `extraction/adapters/bdshare/announcements.py` — `BDShareAnnouncementsAdapter` + PSN + AGM
+- [x] `extraction/adapters/bdshare/depth.py` — `BDShareDepthAdapter`
+- [ ] Unit tests: `normalize()` for each bdshare adapter using fixtures (blocked on smoke test)
 
 ### Phase 1D — AmarStock Adapters (BACKUP / fundamentals PRIMARY)
 

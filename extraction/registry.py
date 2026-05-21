@@ -4,15 +4,23 @@ Adapters are stubbed until implemented; replace stubs with real instances in eac
 """
 from __future__ import annotations
 
+from extraction.adapters.bdshare.announcements import (
+    BDShareAGMAdapter,
+    BDShareAnnouncementsAdapter,
+    BDSharePSNAdapter,
+)
+from extraction.adapters.bdshare.depth import BDShareDepthAdapter
+from extraction.adapters.bdshare.fundamentals import BDShareCompanyInfoAdapter
+from extraction.adapters.bdshare.historical import BDShareHistoricalAdapter
+from extraction.adapters.bdshare.live_prices import BDShareLivePricesAdapter
+from extraction.adapters.bdshare.market_info import BDShareMarketInfoAdapter
+from extraction.adapters.bdshare.sector import BDShareSectorAdapter
 from extraction.base import DataStream
 
-# Adapters are imported lazily to avoid circular imports and allow partial
-# builds (unstubbed adapters won't crash the whole registry on import).
-# Phase 1C — bdshare adapters
-# Phase 1D — amarstock adapters
-# Phase 1E — dse_direct + playwright adapters
-# Phase 1F — news adapters
-# Phase 1G — macro adapters
+# Phase 1D — amarstock adapters (TODO)
+# Phase 1E — dse_direct + playwright adapters (TODO)
+# Phase 1F — news adapters (TODO)
+# Phase 1G — macro adapters (TODO)
 
 
 def _build_registry() -> dict[str, DataStream]:
@@ -24,7 +32,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Fallback: amarstock API, dse_direct scrape
     # ------------------------------------------------------------------
     streams["live_prices"] = DataStream(name="live_prices", adapters=[
-        # BDShareLivePricesAdapter(priority=1),    # Phase 1C
+        BDShareLivePricesAdapter(),
         # AmarStockLivePricesAdapter(priority=2),  # Phase 1D
         # DSEDirectLivePricesAdapter(priority=3),  # Phase 1E
     ])
@@ -35,7 +43,7 @@ def _build_registry() -> dict[str, DataStream]:
     # ------------------------------------------------------------------
     streams["historical_ohlcv"] = DataStream(name="historical_ohlcv", adapters=[
         # AmarStockCSVAdapter(priority=1),         # Phase 1D
-        # BDShareHistoricalAdapter(priority=2),    # Phase 1C
+        BDShareHistoricalAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -43,8 +51,8 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: bdshare (get_market_info) — DSEX, DS30, DSES
     # ------------------------------------------------------------------
     streams["market_indices"] = DataStream(name="market_indices", adapters=[
-        # BDShareMarketInfoAdapter(priority=1),    # Phase 1C
-        # DSEDirectLivePricesAdapter(priority=2),  # Phase 1E (reused, returns index too)
+        BDShareMarketInfoAdapter(),
+        # DSEDirectLivePricesAdapter(priority=2),  # Phase 1E
     ])
 
     # ------------------------------------------------------------------
@@ -53,7 +61,7 @@ def _build_registry() -> dict[str, DataStream]:
     # ------------------------------------------------------------------
     streams["fundamentals"] = DataStream(name="fundamentals", adapters=[
         # AmarStockFundamentalsAdapter(priority=1),   # Phase 1D
-        # BDShareCompanyInfoAdapter(priority=2),      # Phase 1C
+        BDShareCompanyInfoAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -61,7 +69,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: bdshare (get_sector_performance)
     # ------------------------------------------------------------------
     streams["sector_performance"] = DataStream(name="sector_performance", adapters=[
-        # BDShareSectorAdapter(priority=1),        # Phase 1C
+        BDShareSectorAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -69,7 +77,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: bdshare (get_corporate_announcements), dse_direct scrape
     # ------------------------------------------------------------------
     streams["announcements"] = DataStream(name="announcements", adapters=[
-        # BDShareAnnouncementsAdapter(priority=1), # Phase 1C
+        BDShareAnnouncementsAdapter(),
         # DSEDirectAnnouncementsAdapter(priority=2), # Phase 1E
     ])
 
@@ -78,7 +86,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: bdshare (get_price_sensitive_news)
     # ------------------------------------------------------------------
     streams["psn"] = DataStream(name="psn", adapters=[
-        # BDSharePSNAdapter(priority=1),           # Phase 1C
+        BDSharePSNAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -86,7 +94,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: bdshare (get_agm_news) — cash_div_pct, stock_div_pct, agm_date
     # ------------------------------------------------------------------
     streams["agm_dividends"] = DataStream(name="agm_dividends", adapters=[
-        # BDShareAGMAdapter(priority=1),           # Phase 1C
+        BDShareAGMAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -95,7 +103,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Fallback: dse_direct Playwright
     # ------------------------------------------------------------------
     streams["market_depth"] = DataStream(name="market_depth", adapters=[
-        # BDShareDepthAdapter(priority=1),         # Phase 1C
+        BDShareDepthAdapter(),
         # DSEDirectDepthPlaywrightAdapter(priority=2), # Phase 1E
     ])
 

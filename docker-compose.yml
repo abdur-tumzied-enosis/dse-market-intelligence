@@ -4,7 +4,7 @@ services:
   # TimescaleDB with pgvector
   # ---------------------------------------------------------------------------
   db:
-    image: timescale/timescaledb-ha:pg16-latest
+    image: timescale/timescaledb-ha:pg16
     container_name: dse_db
     restart: unless-stopped
     environment:
