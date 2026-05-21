@@ -87,15 +87,21 @@
 - [x] Fixture files saved: `tests/fixtures/amarstock_*.pkl` — all endpoints
 - [x] Unit tests using saved fixtures (all 3 adapters) — 37 tests, all passing
 
-### Phase 1E — DSE Direct + Playwright Adapters (TERTIARY / PDF)
+### Phase 1E — DSE Direct + Playwright Adapters (complete 2026-05-21)
 
-- [ ] Test dsebd.org pages with requests — identify which need Playwright vs static HTML
-- [ ] `extraction/adapters/dse_direct/playwright_base.py` — `PlaywrightAdapter` base class
-- [ ] `extraction/adapters/dse_direct/live_prices.py` — `DSEDirectLivePricesAdapter`
-- [ ] `extraction/adapters/dse_direct/announcements.py` — `DSEDirectAnnouncementsAdapter`
-- [ ] `extraction/adapters/dse_direct/pdf_discovery.py` — `DSEDirectPDFAdapter` (find + download PDFs)
-- [ ] Test PDF discovery for 3 tickers — verify PDF links found correctly
-- [ ] Structure hash baseline run — record hashes for AmarStock + dsebd.org key pages
+- [x] Test dsebd.org pages with requests — all old PHP URLs 404; found correct URLs
+- [s] `extraction/adapters/dse_direct/playwright_base.py` — no base class needed; Playwright inline per adapter
+- [x] `extraction/adapters/dse_direct/live_prices.py` — `DSEDirectLivePricesAdapter` (httpx + BS4; 396 stocks; quality=partial)
+- [x] `extraction/adapters/dse_direct/announcements.py` — `DSEDirectAnnouncementsAdapter` + `DSEDirectPSNAdapter` (Playwright; key-value row parser; 106/548 rows; published_at correct)
+- [x] `extraction/adapters/dse_direct/depth.py` — `DSEDirectDepthPlaywrightAdapter` (price stats only; no auth → no bid/ask; quality=partial)
+- [x] `extraction/adapters/dse_direct/pdf_reports.py` — `DSEDirectPDFAdapter` STUB — DSE + BSEC don't host company annual report PDFs; per-company IR pages only; no viable generic scraper
+- [s] Test PDF discovery for 3 tickers — N/A; confirmed no centralized PDF source exists
+- [s] Structure hash baseline — deferred to Phase 1L
+- [x] `tests/smoke/test_dse_direct_smoke.py` — 9/9 pass
+
+### Phase 1E+ — BsecPDFAdapter
+
+- [-] `BsecPDFAdapter` — **CANCELLED**: BSEC (sec.gov.bd) has no queryable company PDF portal. Annual reports are on per-company IR pages only. `annual_reports_pdf` stream remains stubbed.
 
 ### Phase 1F — News Adapters
 
@@ -116,19 +122,25 @@
 
 ### Phase 1H — DataStream Wiring + Failover
 
-- [ ] Wire all 16 streams in `extraction/registry.py` with real adapter instances
-- [ ] Failover integration tests — patch primary adapter to fail, verify secondary takes over
-- [ ] Schema consistency test — all adapters per stream return identical columns
-- [ ] `extraction/scheduler.py` — all APScheduler jobs (matches ARCHITECTURE.md §17.2)
-- [ ] `extraction/tasks.py` — all Celery tasks (scrape_all_fundamentals, process_new_articles, etc.)
-- [ ] `job_run()` context manager wired into all jobs
+- [x] Wire all 16 streams in `extraction/registry.py` with real adapter instances
+- [x] Failover integration tests — patch primary adapter to fail, verify secondary takes over (4/4 tests passing)
+- [x] Schema consistency test — all adapters per stream return identical columns (5/5 streams compliant; baseline validation passed)
+- [x] `extraction/scheduler.py` — all 7 APScheduler jobs scaffolded (market hours, EOD, announcements, macro, weekly, monthly, quarterly)
+- [x] `extraction/tasks.py` — all 6 Celery task stubs (scraper/nlp/ml queues)
+- [x] `extraction/jobs.py` — `job_run()` context manager (logs to pipeline_jobs table)
 
 ### Phase 1I — Bulk Historical Load (one-time)
 
-- [ ] Bulk download AmarStock CSVs: all tickers, 2012–present
-- [ ] Batch insert into TimescaleDB: 10,000 rows/batch
-- [ ] Verify row counts per ticker, flag gaps
-- [ ] Seed `companies` table: 350+ tickers + sector + category from DSE company list
+- [x] `db/migrations/008_stock_prices_unique.sql` — unique index (time, ticker) for idempotent inserts
+- [x] `extraction/bulk_load/seed_companies.py` — seed companies table from AmarStock live prices (426+ tickers, single API call)
+- [x] `extraction/bulk_load/historical_loader.py` — async bulk loader: semaphore concurrency + 10k-row batch insert; close=mid(high,low) with quality_flag='no_ohlc' (AmarStock has no open/close); ON CONFLICT DO NOTHING
+- [x] `extraction/bulk_load/gap_report.py` — row counts per ticker vs expected DSE trading days (Sun–Thu); flags empty/major/minor gaps
+- [x] `extraction/bulk_load/run.py` — CLI: `python -m extraction.bulk_load.run [seed|load|report|all]`
+- [x] **RUN seed**: 426 companies upserted into companies table (2026-05-21)
+- [x] **RUN load**: 400/426 tickers loaded, 52,634 rows inserted (2026-05-21). 26 failed = bonds/delisted (empty AmarStock response: ABBLPBOND, ACHIASF, AMPL, AOPLC, APEXWEAV, BDPAINTS, BENGALBISC, CRAFTSMAN, DBLPBOND, HIMADRI, KBSEED, KFL, MAMUNAGRO, MASTERAGRO, MBPLCPBOND, MKFOOTWEAR, MOSTFAMETL, NIALCO, ORYZAAGRO, SADHESIVE, SEB1PBOND, UCB2PBOND, USMANIAGL, WEBCOATS, WONDERTOYS, YUSUFLOUR)
+- [x] **RUN report**: all 400 loaded tickers in major_gap (<50%) — expected: AmarStock /qoutes/ only stores trade-days (not every DSE day); illiquid stocks have 1–20 rows, liquid stocks ~700 rows. Quality known.
+- [x] `extraction/bulk_load/bdshare_fallback.py` — BDShare fallback for 6 bond tickers (ABBLPBOND, DBLPBOND, MBPLCPBOND, SEB1PBOND, UCB2PBOND, USMANIAGL): 475 rows each = 2,850 rows inserted, quality_flag='ok' (full OHLCV). 20 confirmed-dead tickers marked is_active=false.
+- [x] **Phase 1I COMPLETE**: 406 active companies, 20 inactive. Total stock_prices rows: ~55,484 (52,634 AmarStock no_ohlc + 2,850 BDShare ok). Remaining gap: AmarStock data is trade-day-sparse; BDShare full backfill (2012–present all tickers) deferred to pre-ML phase.
 
 ### Phase 1J — Observability
 

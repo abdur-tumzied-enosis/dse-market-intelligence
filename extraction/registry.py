@@ -21,10 +21,12 @@ from extraction.adapters.dse_direct.announcements import DSEDirectAnnouncementsA
 from extraction.adapters.dse_direct.depth import DSEDirectDepthPlaywrightAdapter
 from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
 from extraction.adapters.dse_direct.pdf_reports import DSEDirectPDFAdapter
+from extraction.adapters.bsec.ipo_scraper import BsecIPOAdapter
+from extraction.adapters.macro.bangladesh_bank import BangladeshBankAdapter
+from extraction.adapters.macro.worldbank import WorldBankAdapter
 from extraction.base import DataStream
 
 # Phase 1F — news adapters (TODO)
-# Phase 1G — macro adapters (TODO)
 
 
 def _build_registry() -> dict[str, DataStream]:
@@ -141,43 +143,59 @@ def _build_registry() -> dict[str, DataStream]:
 
     # ------------------------------------------------------------------
     # Stream: macro_policy_rate
-    # Primary: Bangladesh Bank HTML scrape
-    # Fallback: World Bank API (6-month lag)
+    # NOTE: bb.org.bd blocks scrapers with F5 BIG-IP CAPTCHA (confirmed 2026-05-21).
+    # WorldBank is priority 1 (reliable). BB is priority 2 (best-effort, usually blocked).
+    # BB URL confirmed from sitemap: /en/index.php/monetaryactivity/index
     # ------------------------------------------------------------------
     streams["macro_policy_rate"] = DataStream(name="macro_policy_rate", adapters=[
-        # BangladeshBankAdapter(indicator="policy_rate", priority=1),   # Phase 1G
-        # WorldBankAdapter(indicator="FR.INR.RINR", priority=2),        # Phase 1G
+        WorldBankAdapter(indicator="FR.INR.RINR", priority=1),
+        BangladeshBankAdapter(indicator="policy_rate", priority=2),
     ])
 
     # ------------------------------------------------------------------
     # Stream: macro_cpi
+    # BB URL confirmed from sitemap: /en/index.php/econdata/inflation
     # ------------------------------------------------------------------
     streams["macro_cpi"] = DataStream(name="macro_cpi", adapters=[
-        # BangladeshBankAdapter(indicator="cpi", priority=1),           # Phase 1G
-        # WorldBankAdapter(indicator="FP.CPI.TOTL.ZG", priority=2),     # Phase 1G
+        WorldBankAdapter(indicator="FP.CPI.TOTL.ZG", priority=1),
+        BangladeshBankAdapter(indicator="cpi", priority=2),
     ])
 
     # ------------------------------------------------------------------
     # Stream: macro_usd_bdt
+    # BB URL confirmed from sitemap: /en/index.php/econdata/exchangerate
+    # WB PA.NUS.FCRF = annual average — less precise than BB daily rate.
     # ------------------------------------------------------------------
     streams["macro_usd_bdt"] = DataStream(name="macro_usd_bdt", adapters=[
-        # BangladeshBankAdapter(indicator="usd_bdt", priority=1),       # Phase 1G
-        # WorldBankAdapter(indicator="PA.NUS.FCRF", priority=2),        # Phase 1G
+        WorldBankAdapter(indicator="PA.NUS.FCRF", priority=1),
+        BangladeshBankAdapter(indicator="usd_bdt", priority=2),
     ])
 
     # ------------------------------------------------------------------
     # Stream: macro_gdp
+    # BB URL confirmed from sitemap: /en/index.php/econdata/nationalincome
     # ------------------------------------------------------------------
     streams["macro_gdp"] = DataStream(name="macro_gdp", adapters=[
-        # WorldBankAdapter(indicator="NY.GDP.MKTP.CD", priority=1),     # Phase 1G
+        WorldBankAdapter(indicator="NY.GDP.MKTP.KD.ZG", priority=1),
+        BangladeshBankAdapter(indicator="gdp", priority=2),
     ])
 
     # ------------------------------------------------------------------
     # Stream: macro_remittance
+    # BB URL confirmed from sitemap: /en/index.php/econdata/wageremitance (note spelling)
     # ------------------------------------------------------------------
     streams["macro_remittance"] = DataStream(name="macro_remittance", adapters=[
-        # BangladeshBankAdapter(indicator="remittance", priority=1),    # Phase 1G
-        # WorldBankAdapter(indicator="BX.TRF.PWKR.CD.DT", priority=2), # Phase 1G
+        WorldBankAdapter(indicator="BX.TRF.PWKR.CD.DT", priority=1),
+        BangladeshBankAdapter(indicator="remittance", priority=2),
+    ])
+
+    # ------------------------------------------------------------------
+    # Stream: ipo_filings
+    # BSEC official site — fixed price + bookbuilding IPOs
+    # ~156 total records (137 fixed, 19 bookbuilding), 2008-present
+    # ------------------------------------------------------------------
+    streams["ipo_filings"] = DataStream(name="ipo_filings", adapters=[
+        BsecIPOAdapter(),
     ])
 
     return streams
