@@ -16,22 +16,21 @@ class BDShareLivePricesAdapter(BaseAdapter):
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:
         """
-        bdshare get_current_trade_data() columns (verified from smoke test):
-        TRADING CODE, LTP, HIGH, LOW, OPENP, CLOSEP, YCP, CHANGE, TRADE, VALUE, VOLUME
+        bdshare get_current_trade_data() actual columns (verified 2026-05-21):
+        symbol, ltp, high, low, close, ycp, change, trade, value, volume
 
-        Canonical output: ticker, open, high, low, close, prev_close, change_pct,
-                          volume, trades, value_bdt, fetched_at
+        No open price in live feed. ltp=last traded price, ycp=yesterday close.
         """
         df = raw.copy()
         df.columns = [c.strip().upper() for c in df.columns]
 
         out = pd.DataFrame()
-        out["ticker"]      = df["TRADING CODE"].apply(normalize_ticker)
-        out["open"]        = df["OPENP"].apply(to_decimal)
+        out["ticker"]      = df["SYMBOL"].apply(normalize_ticker)
+        out["open"]        = None                                # not in live feed
         out["high"]        = df["HIGH"].apply(to_decimal)
         out["low"]         = df["LOW"].apply(to_decimal)
-        out["close"]       = df["LTP"].apply(to_decimal)   # LTP = last traded price
-        out["prev_close"]  = df["YCP"].apply(to_decimal)   # YCP = yesterday close price
+        out["close"]       = df["LTP"].apply(to_decimal)         # last traded price
+        out["prev_close"]  = df["YCP"].apply(to_decimal)         # yesterday close
         out["change_pct"]  = df["CHANGE"].apply(to_decimal)
         out["volume"]      = pd.to_numeric(df["VOLUME"], errors="coerce")
         out["trades"]      = pd.to_numeric(df["TRADE"], errors="coerce")

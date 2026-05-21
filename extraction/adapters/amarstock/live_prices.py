@@ -9,53 +9,84 @@ import pandas as pd
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import normalize_ticker, to_decimal
 
-AMARSTOCK_API_URL = "https://api.amarstock.com/latest-share-price"
+# Static hash embedded in AmarStock SPA — does not require session/auth.
+LATEST_PRICE_URL = "https://www.amarstock.com/LatestPrice/dbfd2587c77f"
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DSEIntelBot/1.0)"}
 
 
 class AmarStockLivePricesAdapter(BaseAdapter):
     """
-    AmarStock unofficial REST API — live share prices.
-    Used as fallback when bdshare is unavailable.
+    AmarStock SPA internal API — all-stock live prices + fundamentals.
 
-    Endpoint: GET https://api.amarstock.com/latest-share-price
-    Returns JSON array of objects.
+    Endpoint: GET https://www.amarstock.com/LatestPrice/dbfd2587c77f
+    Returns JSON array (~430 items, one per DSE-listed instrument).
+
+    Response fields (confirmed 2026-05-21):
+        Scrip           ticker
+        LTP             last traded price (= Close during session)
+        Open, High, Low, Close, YCP
+        Change, ChangePer   price change + pct
+        Volume, Trade, Value
+        PE, UnAuditedPE, AuditedPE
+        Eps, Q1Eps-Q4Eps
+        NAV, NavPrice, FreeFloat, MarketCap
+        SponsorDirector, Govt, Institute, Foreign, Public  (shareholding %)
+        InstrumentType, BusinessSegment, FullName, MarketCategory
+        YearEnd1-8, YearEndPECont1-8  (historic PE by fiscal year)
     """
     name = "amarstock_live_prices"
     priority = 2
     timeout_seconds = 20
 
-    def __init__(self, base_url: str = AMARSTOCK_API_URL) -> None:
-        self._url = base_url
+    def __init__(self, url: str = LATEST_PRICE_URL) -> None:
+        self._url = url
 
     def normalize(self, raw: list[dict[str, Any]]) -> pd.DataFrame:
-        """
-        AmarStock JSON fields (confirmed from smoke test — update after running):
-        tradingCode, lastTradedPrice, openPrice, highPrice, lowPrice,
-        closingPrice, yesterdayClosingPrice, change, percentChange,
-        volume, value, trade
-        """
         rows = []
         fetched = datetime.now(timezone.utc)
         for item in raw:
             rows.append({
-                "ticker":     normalize_ticker(str(item.get("tradingCode", ""))),
-                "open":       to_decimal(item.get("openPrice")),
-                "high":       to_decimal(item.get("highPrice")),
-                "low":        to_decimal(item.get("lowPrice")),
-                "close":      to_decimal(item.get("lastTradedPrice") or item.get("closingPrice")),
-                "prev_close": to_decimal(item.get("yesterdayClosingPrice")),
-                "change_pct": to_decimal(item.get("percentChange")),
-                "volume":     item.get("volume"),
-                "trades":     item.get("trade"),
-                "value_bdt":  to_decimal(item.get("value")),
-                "fetched_at": fetched,
-                "source":     self.name,
+                "ticker":        normalize_ticker(str(item.get("Scrip", ""))),
+                "open":          to_decimal(item.get("Open")),
+                "high":          to_decimal(item.get("High")),
+                "low":           to_decimal(item.get("Low")),
+                "close":         to_decimal(item.get("Close")),
+                "ltp":           to_decimal(item.get("LTP")),
+                "prev_close":    to_decimal(item.get("YCP")),
+                "change":        to_decimal(item.get("Change")),
+                "change_pct":    to_decimal(item.get("ChangePer")),
+                "volume":        item.get("Volume"),
+                "trades":        item.get("Trade"),
+                "value_mn":      to_decimal(item.get("Value")),
+                "market_cap_mn": to_decimal(item.get("MarketCap")),
+                "pe":            to_decimal(item.get("PE")),
+                "pe_audited":    to_decimal(item.get("AuditedPE")),
+                "pe_unaudited":  to_decimal(item.get("UnAuditedPE")),
+                "eps":           to_decimal(item.get("Eps")),
+                "nav":           to_decimal(item.get("NAV")),
+                "free_float":    to_decimal(item.get("FreeFloat")),
+                "sponsor_pct":   to_decimal(item.get("SponsorDirector")),
+                "govt_pct":      to_decimal(item.get("Govt")),
+                "institution_pct": to_decimal(item.get("Institute")),
+                "foreign_pct":   to_decimal(item.get("Foreign")),
+                "public_pct":    to_decimal(item.get("Public")),
+                "instrument_type": item.get("InstrumentType"),
+                "sector":        item.get("BusinessSegment"),
+                "full_name":     item.get("FullName"),
+                "market_cat":    item.get("MarketCategory"),
+                "fetched_at":    fetched,
+                "source":        self.name,
             })
         return pd.DataFrame(rows)
 
     async def fetch(self, **kwargs: Any) -> AdapterResult:
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                headers=HEADERS,
+                follow_redirects=True,
+            ) as client:
                 resp = await client.get(self._url)
                 resp.raise_for_status()
                 raw: list[dict[str, Any]] = resp.json()
@@ -79,8 +110,8 @@ class AmarStockLivePricesAdapter(BaseAdapter):
 
     async def health_check(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
                 resp = await client.get(self._url)
-                return resp.status_code == 200
+                return resp.status_code == 200 and len(resp.content) > 1000
         except Exception:
             return False

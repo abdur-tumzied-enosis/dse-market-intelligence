@@ -1,0 +1,45 @@
+{
+  "columns": [
+    "company",
+    "yearEnd",
+    "dividend",
+    "agmDate",
+    "recordDate",
+    "venue",
+    "time"
+  ],
+  "shape": [
+    209,
+    7
+  ],
+  "sample": {
+    "company": {
+      "0": "aamra networks limited",
+      "1": "aamra\r\n  technologies limited"
+    },
+    "yearEnd": {
+      "0": "30.06.2020",
+      "1": "30.06.2020"
+    },
+    "dividend": {
+      "0": "10% C",
+      "1": "10% C"
+    },
+    "agmDate": {
+      "0": "December\r\n  29, 2020",
+      "1": "December\r\n  29, 2020"
+    },
+    "recordDate": {
+      "0": "22.11.2020",
+      "1": "22.11.2020"
+    },
+    "venue": {
+      "0": "Digital\r\n  Platform",
+      "1": "Digital\r\n  Platform"
+    },
+    "time": {
+      "0": "10:00 AM",
+      "1": "12:30 PM"
+    }
+  }
+}

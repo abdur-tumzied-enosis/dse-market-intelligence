@@ -1,0 +1,55 @@
+{
+  "columns": [
+    "Date",
+    "Total Trade",
+    "Total Volume",
+    "Total Value (mn)",
+    "Total Market Cap. (mn)",
+    "DSEX Index",
+    "DSES Index",
+    "DS30 Index",
+    "DGEN Index"
+  ],
+  "shape": [
+    30,
+    9
+  ],
+  "sample": {
+    "Date": {
+      "0": "21-05-2026",
+      "1": "20-05-2026"
+    },
+    "Total Trade": {
+      "0": 223270,
+      "1": 219127
+    },
+    "Total Volume": {
+      "0": 274564178,
+      "1": 302478211
+    },
+    "Total Value (mn)": {
+      "0": 8674.837,
+      "1": 8411.223
+    },
+    "Total Market Cap. (mn)": {
+      "0": 6798194.222,
+      "1": 6754248.988
+    },
+    "DSEX Index": {
+      "0": 5264.12281,
+      "1": 5222.38191
+    },
+    "DSES Index": {
+      "0": 1069.47411,
+      "1": 1061.76601
+    },
+    "DS30 Index": {
+      "0": 1995.35327,
+      "1": 1974.81439
+    },
+    "DGEN Index": {
+      "0": null,
+      "1": null
+    }
+  }
+}

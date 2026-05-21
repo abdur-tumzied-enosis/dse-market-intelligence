@@ -1,0 +1,24 @@
+{
+  "columns": [
+    "Date",
+    "Scrip",
+    "MaxPrice",
+    "MinPrice",
+    "Trades",
+    "Volume",
+    "Value"
+  ],
+  "shape": [
+    628,
+    7
+  ],
+  "dtypes": {
+    "Date": "str",
+    "Scrip": "str",
+    "MaxPrice": "float64",
+    "MinPrice": "float64",
+    "Trades": "int64",
+    "Volume": "int64",
+    "Value": "int64"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "columns": [
+    "Date",
+    "Scrip",
+    "Open",
+    "High",
+    "Low",
+    "Close",
+    "Volume"
+  ],
+  "shape": [
+    398,
+    7
+  ],
+  "dtypes": {
+    "Date": "int64",
+    "Scrip": "str",
+    "Open": "float64",
+    "High": "float64",
+    "Low": "float64",
+    "Close": "float64",
+    "Volume": "int64"
+  }
+}

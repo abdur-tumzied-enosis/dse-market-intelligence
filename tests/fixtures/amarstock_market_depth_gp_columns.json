@@ -1,0 +1,11 @@
+{
+  "type": "list",
+  "len": 10,
+  "first_keys": [
+    "Scrip",
+    "BuyPrice",
+    "BuyVolume",
+    "SellPrice",
+    "SellVolume"
+  ]
+}

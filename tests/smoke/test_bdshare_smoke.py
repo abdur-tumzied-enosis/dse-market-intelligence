@@ -55,8 +55,8 @@ def test_get_current_trade_data(bd):
 
 
 def test_get_hist_data(bd):
-    """Historical OHLCV for a single ticker."""
-    df = bd.get_hist_data("SQURPHARMA", "2024-01-01", "2024-12-31")
+    """Historical OHLCV. get_hist_data deprecated → use get_historical_data(start, end, code)."""
+    df = bd.get_historical_data("2024-01-01", "2024-12-31", "SQURPHARMA")
     assert df is not None
     assert len(df) > 50, f"too few rows: {len(df)}"
     print(f"\nget_hist_data: {df.shape} | columns: {list(df.columns)}")
@@ -65,10 +65,12 @@ def test_get_hist_data(bd):
 
 
 def test_get_basic_hist_data(bd):
-    """TA-friendly historical data."""
-    df = bd.get_basic_hist_data()
+    """TA-friendly historical data. get_basic_hist_data deprecated → use get_basic_historical_data."""
+    df = bd.get_basic_historical_data("2024-01-01", "2024-12-31", "SQURPHARMA")
     assert df is not None
-    print(f"\nget_basic_hist_data: {df.shape} | columns: {list(df.columns)}")
+    assert len(df) > 50, f"too few rows: {len(df)}"
+    print(f"\nget_basic_historical_data: {df.shape} | columns: {list(df.columns)}")
+    print(df.head(2).to_string())
     _save_fixture("basic_hist_data", df)
 
 

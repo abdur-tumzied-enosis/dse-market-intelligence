@@ -1,0 +1,24 @@
+{
+  "type": "dict",
+  "keys": [
+    "IndexValue",
+    "Change",
+    "ChangePct",
+    "DsIndex",
+    "DsChange",
+    "DsChangePct",
+    "D30Index",
+    "D30Change",
+    "D30ChangePct",
+    "TotalTrade",
+    "TotalVolume",
+    "TotalValue",
+    "Advance",
+    "Decline",
+    "Unchange",
+    "MarketStatus",
+    "DseTime",
+    "IsTradeDay",
+    "FundamentalUpdateDate"
+  ]
+}

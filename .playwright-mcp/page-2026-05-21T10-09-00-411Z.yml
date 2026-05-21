@@ -1,0 +1,484 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e6]:
+        - link "AmarStock logo" [ref=e8] [cursor=pointer]:
+          - /url: /
+          - img "AmarStock logo" [ref=e9]
+        - generic [ref=e13]:
+          - generic [ref=e14]:
+            - textbox "Trading Code" [ref=e15]
+            - textbox "Trading Code" [ref=e16]:
+              - /placeholder: Trading code
+          - button "Search" [ref=e18] [cursor=pointer]:
+            - img [ref=e19]
+      - generic:
+        - generic:
+          - generic:
+            - checkbox [ref=e21] [cursor=pointer]
+            - list:
+              - listitem [ref=e26]:
+                - link "Portfolio" [ref=e27] [cursor=pointer]:
+                  - /url: /portfolio
+              - listitem [ref=e28]:
+                - checkbox [ref=e29] [cursor=pointer]
+                - link "Chart" [ref=e30] [cursor=pointer]:
+                  - /url: /stock-chart
+                - list:
+                  - listitem [ref=e31]:
+                    - link "Stock Chart" [ref=e32] [cursor=pointer]:
+                      - /url: /stock-chart
+                  - listitem [ref=e33]:
+                    - link "Interactive Chart" [ref=e34] [cursor=pointer]:
+                      - /url: /interactive-chart
+                  - listitem [ref=e35]:
+                    - link "MTF Charts" [ref=e36] [cursor=pointer]:
+                      - /url: /mtf-interactive-charts
+                  - listitem [ref=e37]:
+                    - link "Multiple Charts" [ref=e38] [cursor=pointer]:
+                      - /url: /multiple-charts
+              - listitem [ref=e39]:
+                - checkbox [ref=e40] [cursor=pointer]
+                - link "Share Price" [ref=e41] [cursor=pointer]:
+                  - /url: /latest-share-price
+                - list:
+                  - listitem [ref=e42]:
+                    - link "Latest Share Price" [ref=e43] [cursor=pointer]:
+                      - /url: /latest-share-price
+                  - listitem [ref=e44]:
+                    - link "Sector Wise Share Price" [ref=e45] [cursor=pointer]:
+                      - /url: /sector-latest-share-price
+                  - listitem [ref=e46]:
+                    - link "Circuit Breaker" [ref=e47] [cursor=pointer]:
+                      - /url: /circuit-breaker
+              - listitem [ref=e48]:
+                - checkbox [ref=e49] [cursor=pointer]
+                - link "PE Ratio" [ref=e50] [cursor=pointer]:
+                  - /url: /market-pe-ratio
+                - list:
+                  - listitem [ref=e51]:
+                    - link "Market PE Ratio" [ref=e52] [cursor=pointer]:
+                      - /url: /market-pe-ratio
+                  - listitem [ref=e53]:
+                    - link "Sector PE Ratio" [ref=e54] [cursor=pointer]:
+                      - /url: /sector-pe-ratio
+                  - listitem [ref=e55]:
+                    - link "Category PE Ratio" [ref=e56] [cursor=pointer]:
+                      - /url: /category-pe-ratio
+                  - listitem [ref=e57]:
+                    - link "Compare PE Ratio" [ref=e58] [cursor=pointer]:
+                      - /url: /compare-pe-ratio
+                  - listitem [ref=e59]:
+                    - link "Compare Sector PE" [ref=e60] [cursor=pointer]:
+                      - /url: /compare-sector-pe
+                  - listitem [ref=e61]:
+                    - link "Weighted PE Chart" [ref=e62] [cursor=pointer]:
+                      - /url: /weighted-pe-chart
+              - listitem [ref=e63]:
+                - checkbox [ref=e64] [cursor=pointer]
+                - link "VPA" [ref=e65] [cursor=pointer]:
+                  - /url: /volume-price-analysis
+                - list:
+                  - listitem [ref=e66]:
+                    - link "Market Watch" [ref=e67] [cursor=pointer]:
+                      - /url: /market-watch
+                  - listitem [ref=e68]:
+                    - link "1 Minute VPA" [ref=e69] [cursor=pointer]:
+                      - /url: /volume-price-analysis
+                  - listitem [ref=e70]:
+                    - link "VPA Watch List" [ref=e71] [cursor=pointer]:
+                      - /url: /vpa-watch-list
+                  - listitem [ref=e72]:
+                    - link "VPA Archive" [ref=e73] [cursor=pointer]:
+                      - /url: /vpa-archive
+                  - listitem [ref=e74]:
+                    - link "Market Depth" [ref=e75] [cursor=pointer]:
+                      - /url: /dse-market-depth
+                  - listitem [ref=e76]:
+                    - link "Market Depth Monitor" [ref=e77] [cursor=pointer]:
+                      - /url: /market-depth-monitor
+                  - listitem [ref=e78]:
+                    - link "Minute Map" [ref=e79] [cursor=pointer]:
+                      - /url: /minute-market-map
+              - listitem [ref=e80]:
+                - checkbox [ref=e81] [cursor=pointer]
+                - link "Gallery" [ref=e82] [cursor=pointer]:
+                  - /url: /chart-gallery
+                - list:
+                  - listitem [ref=e83]:
+                    - link "Sector Chart Gallery" [ref=e84] [cursor=pointer]:
+                      - /url: /chart-gallery
+                  - listitem [ref=e85]:
+                    - link "Custom Chart Gallery" [ref=e86] [cursor=pointer]:
+                      - /url: /custom-chart-gallery
+                  - listitem [ref=e87]:
+                    - link "MTF Chart Gallery" [ref=e88] [cursor=pointer]:
+                      - /url: /mtf-chart-gallery
+              - listitem [ref=e89]:
+                - checkbox [ref=e90] [cursor=pointer]
+                - link "News" [ref=e91] [cursor=pointer]:
+                  - /url: /dse-news
+                - list:
+                  - listitem [ref=e92]:
+                    - link "Today’s News" [ref=e93] [cursor=pointer]:
+                      - /url: /dse-news
+                  - listitem [ref=e94]:
+                    - link "Last 7 Days News" [ref=e95] [cursor=pointer]:
+                      - /url: /dse-last-7-days-news
+                  - listitem [ref=e96]:
+                    - link "News Archive" [ref=e97] [cursor=pointer]:
+                      - /url: /dse-news-archive
+                  - listitem [ref=e98]:
+                    - link "News Effect Chart" [ref=e99] [cursor=pointer]:
+                      - /url: /dse-stock-news
+                  - listitem [ref=e100]:
+                    - link "Coming Events" [ref=e101] [cursor=pointer]:
+                      - /url: /upcoming-events
+              - listitem [ref=e102]:
+                - checkbox [ref=e103] [cursor=pointer]
+                - link "Scanner" [ref=e104] [cursor=pointer]:
+                  - /url: /stock-scanner
+                - list:
+                  - listitem [ref=e105]:
+                    - link "Stock Scanner" [ref=e106] [cursor=pointer]:
+                      - /url: /stock-scanner
+                  - listitem [ref=e107]:
+                    - link "Pre Scanner" [ref=e108] [cursor=pointer]:
+                      - /url: /pre-market-scanner
+                  - listitem [ref=e109]:
+                    - link "Custom Scanner" [ref=e110] [cursor=pointer]:
+                      - /url: /custom-stock-scanner
+              - listitem [ref=e111]:
+                - checkbox [ref=e112] [cursor=pointer]
+                - link "Alert" [ref=e113] [cursor=pointer]:
+                  - /url: /stock-alert
+              - listitem [ref=e114]:
+                - checkbox [ref=e115] [cursor=pointer]
+                - link "Training" [ref=e116] [cursor=pointer]:
+                  - /url: /training
+                - list:
+                  - listitem [ref=e117]:
+                    - link "Elliott Wave Online Course" [ref=e118] [cursor=pointer]:
+                      - /url: /elliott-wave-principle
+                  - listitem [ref=e119]:
+                    - link "ZERO2PRO" [ref=e120] [cursor=pointer]:
+                      - /url: /online-trainning
+                  - listitem [ref=e121]:
+                    - link "Fundamental Analysis" [ref=e122] [cursor=pointer]:
+                      - /url: /training/fundamental-analysis
+                  - listitem [ref=e123]:
+                    - link "Weekly videos by Engr. Rahmat Ullah" [ref=e124] [cursor=pointer]:
+                      - /url: /weekly-videos-by-engr-rahmatullah
+              - listitem [ref=e125]:
+                - checkbox [ref=e126] [cursor=pointer]
+                - link "Tools" [ref=e127] [cursor=pointer]:
+                  - /url: /correlation
+                - list:
+                  - listitem [ref=e128]:
+                    - link "Index Analysis" [ref=e129] [cursor=pointer]:
+                      - /url: /dse-index-analysis
+                  - listitem [ref=e130]:
+                    - link "Correlation" [ref=e131] [cursor=pointer]:
+                      - /url: /correlation
+                  - listitem [ref=e132]:
+                    - link "52 week range" [ref=e133] [cursor=pointer]:
+                      - /url: /52-week-price-range
+                  - listitem [ref=e134]:
+                    - link "Bar Chart" [ref=e135] [cursor=pointer]:
+                      - /url: /dse-5-days-turnover-compare
+                  - listitem [ref=e136]:
+                    - link "Pie Chart" [ref=e137] [cursor=pointer]:
+                      - /url: /pie-chart-comparison
+                  - listitem [ref=e138]:
+                    - checkbox [ref=e139] [cursor=pointer]
+                    - link "TA Value" [ref=e140] [cursor=pointer]:
+                      - /url: /technical-indicator-value
+                    - list:
+                      - listitem [ref=e141]:
+                        - link "Sector TA Value" [ref=e142] [cursor=pointer]:
+                          - /url: /sector-indicator-value
+                      - listitem [ref=e143]:
+                        - link "Custom TA Value" [ref=e144] [cursor=pointer]:
+                          - /url: /custom-technical-indicator-value
+                  - listitem [ref=e145]:
+                    - checkbox [ref=e146] [cursor=pointer]
+                    - link "Trend" [ref=e147] [cursor=pointer]:
+                      - /url: /trend-analysis
+                    - list:
+                      - listitem [ref=e148]:
+                        - link "Indicator Trend Analysis" [ref=e149] [cursor=pointer]:
+                          - /url: /trend-analysis
+                      - listitem [ref=e150]:
+                        - link "Stock Trend Analysis" [ref=e151] [cursor=pointer]:
+                          - /url: /stock-trend-analysis
+                  - listitem [ref=e152]:
+                    - link "Clear Cache" [ref=e153] [cursor=pointer]:
+                      - /url: /clear-cache
+              - listitem [ref=e154]:
+                - checkbox [ref=e155] [cursor=pointer]
+                - link "IPO" [ref=e156] [cursor=pointer]:
+                  - /url: /ipo
+                - list:
+                  - listitem [ref=e157]:
+                    - link "Overview" [ref=e158] [cursor=pointer]:
+                      - /url: /ipo
+                  - listitem [ref=e159]:
+                    - link "Upcoming IPOs" [ref=e160] [cursor=pointer]:
+                      - /url: /ipo/upcoming
+                  - listitem [ref=e161]:
+                    - link "Open IPOs" [ref=e162] [cursor=pointer]:
+                      - /url: /ipo/open
+                  - listitem [ref=e163]:
+                    - link "Past IPOs" [ref=e164] [cursor=pointer]:
+                      - /url: /ipo/past
+              - listitem [ref=e165]:
+                - checkbox [ref=e166] [cursor=pointer]
+                - link "Resources" [ref=e167] [cursor=pointer]:
+                  - /url: /membership
+                - list:
+                  - listitem [ref=e168]:
+                    - link "Membership" [ref=e169] [cursor=pointer]:
+                      - /url: /membership
+                  - listitem [ref=e170]:
+                    - link "Data Download" [ref=e171] [cursor=pointer]:
+                      - /url: /csv-data-download
+              - listitem [ref=e172]:
+                - link "Premium" [ref=e173] [cursor=pointer]:
+                  - /url: /membership
+              - listitem [ref=e174]:
+                - link "Login" [ref=e175] [cursor=pointer]:
+                  - /url: /Account/Login
+  - generic [ref=e179]:
+    - generic [ref=e180]:
+      - img "We are here to help" [ref=e182]
+      - generic [ref=e184]:
+        - heading "CSV Download:" [level=2] [ref=e185]
+        - generic [ref=e186]:
+          - generic [ref=e187]: "Select Data Type:"
+          - generic [ref=e188]:
+            - generic [ref=e189] [cursor=pointer]:
+              - radio "Adjusted" [checked] [ref=e190]
+              - text: Adjusted
+            - generic [ref=e191] [cursor=pointer]:
+              - radio "Unadjusted" [ref=e192]
+              - text: Unadjusted
+        - generic [ref=e193]:
+          - generic [ref=e194]: "Select Date:"
+          - generic [ref=e196]:
+            - textbox "Date" [ref=e197]: 2026-05-21
+            - button "Pick a date" [ref=e198] [cursor=pointer]
+        - button " Download CSV" [ref=e201] [cursor=pointer]:
+          - generic [ref=e202]: 
+          - text: Download CSV
+    - generic [ref=e205]:
+      - paragraph [ref=e206]: The sole purpose of this site is to provide the user with historical financial information related to stock market investing. All of the table data listed displays stock metrics derived from Dhaka Stock Exchange. Please take a moment to download and review the data posted in order to facilitate your stock portfolio analytics.
+      - paragraph [ref=e207]:
+        - text: Web Site Stock Quote Disclaimer
+        - text: The stock price provided on our website is for informational purposes only and should not be relied upon for trading. Historical and current stock price performance is not necessarily indicative of future performance. You should not rely on the stock price quotes or market data provided on our website for trading and investment purposes. Amarstock does not guarantee the accuracy or completeness of any stock information, nor shall we be liable to any person for delays, inaccuracies, omissions, or errors in such data, or for any actions taken in reliance of such data, or for any damages resulting therefrom.
+  - navigation "Page navigation" [ref=e210]:
+    - list [ref=e211]:
+      - listitem [ref=e212]:
+        - link "a" [ref=e213] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-A
+      - listitem [ref=e214]:
+        - link "b" [ref=e215] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-B
+      - listitem [ref=e216]:
+        - link "c" [ref=e217] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-C
+      - listitem [ref=e218]:
+        - link "d" [ref=e219] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-D
+      - listitem [ref=e220]:
+        - link "e" [ref=e221] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-E
+      - listitem [ref=e222]:
+        - link "f" [ref=e223] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-F
+      - listitem [ref=e224]:
+        - link "g" [ref=e225] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-G
+      - listitem [ref=e226]:
+        - link "h" [ref=e227] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-H
+      - listitem [ref=e228]:
+        - link "i" [ref=e229] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-I
+      - listitem [ref=e230]:
+        - link "j" [ref=e231] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-J
+      - listitem [ref=e232]:
+        - link "k" [ref=e233] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-K
+      - listitem [ref=e234]:
+        - link "l" [ref=e235] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-L
+      - listitem [ref=e236]:
+        - link "m" [ref=e237] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-M
+      - listitem [ref=e238]:
+        - link "n" [ref=e239] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-N
+      - listitem [ref=e240]:
+        - link "o" [ref=e241] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-O
+      - listitem [ref=e242]:
+        - link "p" [ref=e243] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-P
+      - listitem [ref=e244]:
+        - link "q" [ref=e245] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Q
+      - listitem [ref=e246]:
+        - link "r" [ref=e247] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-R
+      - listitem [ref=e248]:
+        - link "s" [ref=e249] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-S
+      - listitem [ref=e250]:
+        - link "t" [ref=e251] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-T
+      - listitem [ref=e252]:
+        - link "u" [ref=e253] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-U
+      - listitem [ref=e254]:
+        - link "v" [ref=e255] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-V
+      - listitem [ref=e256]:
+        - link "w" [ref=e257] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-W
+      - listitem [ref=e258]:
+        - link "x" [ref=e259] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-X
+      - listitem [ref=e260]:
+        - link "y" [ref=e261] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Y
+      - listitem [ref=e262]:
+        - link "z" [ref=e263] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Z
+      - listitem [ref=e264]:
+        - link "1...9" [ref=e265] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Num
+  - contentinfo [ref=e266]:
+    - generic [ref=e268]:
+      - generic [ref=e269]:
+        - img [ref=e271]
+        - generic [ref=e276]:
+          - text: AmarStock Hotline
+          - link "01894615170" [ref=e278] [cursor=pointer]:
+            - /url: tel:01894615170
+          - text: 10 AM - 5 PM Weekdays
+        - paragraph [ref=e279]:
+          - text: Attention Investor,
+          - text: Investment in securities market are subject to market risks, read all the related documents carefully before investing.
+        - list [ref=e282]:
+          - listitem [ref=e283]:
+            - link "Facebook" [ref=e284] [cursor=pointer]:
+              - /url: https://www.facebook.com/amarstockfb/
+              - generic [ref=e285]: 
+              - text: Facebook
+          - listitem [ref=e286]:
+            - link "YouTube" [ref=e287] [cursor=pointer]:
+              - /url: https://www.youtube.com/channel/UCtTM4DBfXhIWxujCqp-STgw
+              - generic [ref=e288]: 
+              - text: YouTube
+      - generic [ref=e290]:
+        - generic [ref=e291]:
+          - heading "Updates" [level=4] [ref=e292]
+          - list [ref=e293]:
+            - listitem [ref=e294]:
+              - link "Training" [ref=e295] [cursor=pointer]:
+                - /url: /elliott-wave-principle
+            - listitem [ref=e296]:
+              - link "Bug Report" [ref=e297] [cursor=pointer]:
+                - /url: /bug-report
+            - listitem [ref=e298]:
+              - link "Suggestions" [ref=e299] [cursor=pointer]:
+                - /url: /suggestions
+            - listitem [ref=e300]:
+              - link "Request New Feature" [ref=e301] [cursor=pointer]:
+                - /url: /feature-request
+        - generic [ref=e302]:
+          - heading "About AmarStock" [level=4] [ref=e303]
+          - list [ref=e304]:
+            - listitem [ref=e305]:
+              - link "About Us" [ref=e306] [cursor=pointer]:
+                - /url: /about-us
+            - listitem [ref=e307]:
+              - link "Partners" [ref=e308] [cursor=pointer]:
+                - /url: /Partnership
+            - listitem [ref=e309]:
+              - link "Terms of Use" [ref=e310] [cursor=pointer]:
+                - /url: /terms-of-use
+            - listitem [ref=e311]:
+              - link "Privacy Policy" [ref=e312] [cursor=pointer]:
+                - /url: /privacy-policy
+            - listitem [ref=e313]:
+              - link "Refund Policy" [ref=e314] [cursor=pointer]:
+                - /url: /payment/returns-and-refunds-policy
+            - listitem [ref=e315]:
+              - link "Blog" [ref=e316] [cursor=pointer]:
+                - /url: http://blog.amarstock.com/
+            - listitem [ref=e317]:
+              - link "Data FAQ" [ref=e318] [cursor=pointer]:
+                - /url: /data-faqs
+        - generic [ref=e319]:
+          - heading "Contact Us" [level=4] [ref=e320]
+          - list [ref=e321]:
+            - listitem [ref=e322]:
+              - 'link "Email : support@amarstock.com" [ref=e323] [cursor=pointer]':
+                - /url: mailto:support@amarstock.com
+            - listitem [ref=e324]:
+              - 'link "Messenger : @amarstockfb" [ref=e325] [cursor=pointer]':
+                - /url: https://m.me/amarstockfb
+            - listitem [ref=e326]:
+              - link "Our Address" [ref=e327] [cursor=pointer]:
+                - /url: /address
+    - generic [ref=e328]:
+      - generic [ref=e329]:
+        - paragraph [ref=e330]:
+          - text: Copyright 2017 - 2025 ©
+          - link "AmarStock" [ref=e331] [cursor=pointer]:
+            - /url: /
+        - paragraph [ref=e332]: "Version: 3.1.1.40430"
+      - generic [ref=e333]:
+        - paragraph [ref=e334]: Legal Services By
+        - paragraph [ref=e335]:
+          - link "Wasimul Haque & Associates" [ref=e336] [cursor=pointer]:
+            - /url: https://wasimul.com/
+      - generic [ref=e337]:
+        - paragraph [ref=e338]: Designed And Developed By
+        - paragraph [ref=e339]:
+          - link "AmarStock Limited" [ref=e340] [cursor=pointer]:
+            - /url: /
+      - generic [ref=e341]:
+        - paragraph [ref=e342]: Official Market Data Provided By
+        - paragraph [ref=e343]:
+          - link "Dhaka Stock Exchange" [ref=e344] [cursor=pointer]:
+            - /url: https://www.dse.com.bd/
+    - generic [ref=e345]:
+      - paragraph [ref=e346]: The information contained in this website is for general information purposes only. The information is provided by AmarStock Limited and while it endeavours to keep the information up to date and correct, it makes no representations or warranties of any kind, express or implied, about the completeness, accuracy, reliability, suitability or availability with respect to the website or the information, products, services or related graphics contained in the website for any purpose. Any opinions expressed in this website are only those of the source and neither AmarStock Limited nor Dhaka Stock Exchange Limited (or any other party) shall be responsible for any information or imputation contained therein. Any reliance you place on such information is therefore strictly at your own risk.
+      - paragraph [ref=e347]: In no event will Dhaka Stock Exchange Limited be liable for any loss or damage including without limitation, indirect or consequential loss or damage, or any loss or damage whatsoever (monetary or otherwise) arising from or in connection with this website.
+  - dialog [ref=e348]:
+    - generic [ref=e350]:
+      - heading [level=3] [ref=e352]: Login to your account
+      - generic [ref=e353]: OR
+      - form [ref=e354]:
+        - generic [ref=e355]:
+          - generic [ref=e357]: 
+          - textbox [ref=e359]:
+            - /placeholder: Your email
+        - generic [ref=e360]:
+          - generic [ref=e362]: 
+          - textbox [ref=e364]:
+            - /placeholder: Your password
+        - generic [ref=e365]:
+          - checkbox [ref=e366]
+          - generic [ref=e367] [cursor=pointer]: Remember me
+        - link [ref=e369] [cursor=pointer]:
+          - /url: /Account/ForgotPassword
+          - text: Forgot password?
+        - button [ref=e372] [cursor=pointer]: Login
+      - generic [ref=e373]: Don't have an account?
+      - link [ref=e374] [cursor=pointer]:
+        - /url: /Account/Register
+        - text: Register

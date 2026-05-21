@@ -1,100 +1,106 @@
 from __future__ import annotations
 
 import asyncio
-import io
-import time
+import re
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 import httpx
 import pandas as pd
 
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
-from extraction.normalizers import normalize_ticker, to_decimal, to_utc
+from extraction.normalizers import normalize_ticker, to_decimal
 
-AMARSTOCK_SCRAPE_BASE = "https://amarstock.com"
+# Static hash embedded in AmarStock SPA — no auth required.
+QUOTES_BASE = "https://www.amarstock.com/qoutes/3ace8d562de8"
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DSEIntelBot/1.0)"}
+
+_MS_RE = re.compile(r"(\d{10,13})")
+
+
+def _ms_to_utc(val: Any) -> datetime | None:
+    """Parse /Date(1778544000000)/ or bare int ms to UTC datetime."""
+    m = _MS_RE.search(str(val))
+    if not m:
+        return None
+    ts = int(m.group(1))
+    if ts > 1e12:
+        ts /= 1000
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc)
+    except (ValueError, OSError):
+        return None
 
 
 class AmarStockCSVAdapter(BaseAdapter):
     """
-    AmarStock CSV bulk download — historical OHLCV.
+    AmarStock historical quotes — per-ticker OHLV (no Open/Close).
 
-    URL pattern: https://amarstock.com/api/export/csv?tradingCode=SQURPHARMA
-    Returns CSV with columns: Date, Open, High, Low, Close, Volume, Value, Trade
+    Endpoint: GET https://www.amarstock.com/qoutes/3ace8d562de8/{ticker}
+    Returns JSON array (~688 records, approx 2018-present, no pagination).
+    No auth required.
 
-    PRIMARY source for historical data (bulk load + incremental).
-    Much faster than bdshare get_hist_data() for large date ranges.
+    NOTE: Response fields are MaxPrice (high) + MinPrice (low) only.
+    Open and Close are NOT provided. Use BDShareHistoricalAdapter for
+    full OHLCV. This adapter is useful as a volume/range cross-check
+    or fallback when bdshare is unavailable.
+
+    Fields: Date, Scrip, MaxPrice (high), MinPrice (low), Trades, Volume, Value
     """
-    name = "amarstock_csv"
-    priority = 1
-    timeout_seconds = 60  # CSVs can be large
+    name = "amarstock_historical"
+    priority = 2
+    timeout_seconds = 20
 
     def __init__(
         self,
-        base_url: str = AMARSTOCK_SCRAPE_BASE,
-        request_delay: float = 2.0,
+        base_url: str = QUOTES_BASE,
+        request_delay: float = 1.0,
     ) -> None:
         self._base_url = base_url
         self._delay = request_delay
 
-    def normalize(self, raw: pd.DataFrame, ticker: str = "") -> pd.DataFrame:
-        """
-        AmarStock CSV columns (confirmed from smoke test — update after running):
-        Date, Open, High, Low, Close, Volume, Value, Trade
-        """
-        df = raw.copy()
-        df.columns = [c.strip().upper() for c in df.columns]
-
-        def parse_date(val: Any) -> datetime | None:
-            for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%B %d, %Y"):
-                try:
-                    return to_utc(datetime.strptime(str(val).strip(), fmt), assume_dhaka=True)
-                except (ValueError, TypeError):
-                    continue
-            return None
-
-        out = pd.DataFrame()
-        out["ticker"]    = normalize_ticker(ticker)
-        out["date"]      = df["DATE"].apply(parse_date)
-        out["open"]      = df["OPEN"].apply(to_decimal)
-        out["high"]      = df["HIGH"].apply(to_decimal)
-        out["low"]       = df["LOW"].apply(to_decimal)
-        out["close"]     = df["CLOSE"].apply(to_decimal)
-        out["volume"]    = pd.to_numeric(df["VOLUME"], errors="coerce")
-        out["trades"]    = pd.to_numeric(df.get("TRADE", pd.Series()), errors="coerce")
-        out["value_bdt"] = df.get("VALUE", pd.Series(dtype=object)).apply(to_decimal)
-        out["source"]    = self.name
-        return out.dropna(subset=["date", "close"]).sort_values("date")
+    def normalize(self, raw: list[dict[str, Any]], ticker: str = "") -> pd.DataFrame:
+        rows = []
+        for item in raw:
+            rows.append({
+                "ticker":    normalize_ticker(ticker or str(item.get("Scrip", ""))),
+                "date":      _ms_to_utc(item.get("Date")),
+                "high":      to_decimal(item.get("MaxPrice")),
+                "low":       to_decimal(item.get("MinPrice")),
+                "volume":    item.get("Volume"),
+                "trades":    item.get("Trades"),
+                "value_bdt": to_decimal(item.get("Value")),
+                "source":    self.name,
+            })
+        df = pd.DataFrame(rows)
+        if "date" in df.columns:
+            df = df.dropna(subset=["date"]).sort_values("date")
+        return df
 
     async def fetch(self, ticker: str, **kwargs: Any) -> AdapterResult:
         ticker = normalize_ticker(ticker)
-        url = f"{self._base_url}/api/export/csv?tradingCode={ticker}"
+        url = f"{self._base_url}/{ticker}"
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds, follow_redirects=True) as client:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds,
+                follow_redirects=True,
+                headers=HEADERS,
+            ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
-                csv_bytes = resp.content
+                raw: list[dict[str, Any]] = resp.json()
         except httpx.HTTPStatusError as exc:
             raise AdapterError(self.name, f"HTTP {exc.response.status_code} for {ticker}", retryable=True) from exc
         except Exception as exc:
-            raise AdapterError(self.name, f"download failed for {ticker}: {exc}", retryable=True) from exc
+            raise AdapterError(self.name, f"request failed for {ticker}: {exc}", retryable=True) from exc
 
-        if not csv_bytes or len(csv_bytes) < 50:
-            raise AdapterError(self.name, f"empty CSV for {ticker}", retryable=False)
-
-        try:
-            raw = pd.read_csv(io.StringIO(csv_bytes.decode("utf-8", errors="replace")))
-        except Exception as exc:
-            raise AdapterError(self.name, f"CSV parse failed for {ticker}: {exc}", retryable=False) from exc
-
-        if len(raw) == 0:
-            raise AdapterError(self.name, f"CSV had 0 rows for {ticker}", retryable=False)
+        if not raw:
+            raise AdapterError(self.name, f"empty response for {ticker}", retryable=False)
 
         normalized = self.normalize(raw, ticker=ticker)
-
-        await asyncio.sleep(self._delay)  # rate limit
+        await asyncio.sleep(self._delay)
 
         return AdapterResult(
             data=normalized,
@@ -102,14 +108,13 @@ class AmarStockCSVAdapter(BaseAdapter):
             fetched_at=datetime.now(timezone.utc),
             quality="ok",
             records=len(normalized),
-            raw_sample=raw.iloc[0].to_dict() if len(raw) > 0 else {},
+            raw_sample=raw[0] if raw else {},
         )
 
     async def health_check(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                url = f"{self._base_url}/api/export/csv?tradingCode=GP"
-                resp = await client.get(url)
+            async with httpx.AsyncClient(timeout=10, headers=HEADERS) as client:
+                resp = await client.get(f"{self._base_url}/GP")
                 return resp.status_code == 200 and len(resp.content) > 100
         except Exception:
             return False

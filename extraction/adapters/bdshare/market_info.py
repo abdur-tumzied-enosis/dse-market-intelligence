@@ -13,8 +13,10 @@ class BDShareMarketInfoAdapter(BaseAdapter):
     """
     bdshare get_market_info() — DSEX, DS30, DSES index snapshot.
 
-    Typical columns: DSEX, DSEX_CHANGE, DS30, DS30_CHANGE, DSES, DSES_CHANGE
-    (exact names confirmed by smoke test — may differ)
+    Actual columns (verified 2026-05-21): Date, Total Trade, Total Volume,
+    Total Value (mn), Total Market Cap. (mn), DSEX Index, DSES Index, DS30 Index, DGEN Index
+    Returns 30-day history; we take row 0 (most recent trading day).
+    No change_pct column — not available from this endpoint.
     """
     name = "bdshare_market_info"
     priority = 1
@@ -24,20 +26,22 @@ class BDShareMarketInfoAdapter(BaseAdapter):
         df = raw.copy()
         df.columns = [c.strip().upper() for c in df.columns]
 
-        rows = []
-        index_map = {
-            "DSEX":  ("DSEX",  "DSEX_CHANGE"),
-            "DS30":  ("DS30",  "DS30_CHANGE"),
-            "DSES":  ("DSES",  "DSES_CHANGE"),
-        }
+        latest = df.iloc[0]
         fetched = datetime.now(timezone.utc)
-        for idx_name, (val_col, chg_col) in index_map.items():
-            if val_col not in df.columns:
+
+        index_col_map = {
+            "DSEX": "DSEX INDEX",
+            "DS30": "DS30 INDEX",
+            "DSES": "DSES INDEX",
+        }
+        rows = []
+        for idx_name, col in index_col_map.items():
+            if col not in df.columns:
                 continue
             rows.append({
                 "index_name": idx_name,
-                "value":      to_decimal(df[val_col].iloc[0]),
-                "change_pct": to_decimal(df[chg_col].iloc[0]) if chg_col in df.columns else None,
+                "value":      to_decimal(latest[col]),
+                "change_pct": None,
                 "fetched_at": fetched,
                 "source":     self.name,
             })

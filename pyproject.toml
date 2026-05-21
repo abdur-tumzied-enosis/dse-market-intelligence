@@ -91,6 +91,9 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "--cov=extraction --cov-report=term-missing"
+markers = [
+    "playwright: tests that require `playwright install chromium`",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["extraction", "db", "mgmt"]

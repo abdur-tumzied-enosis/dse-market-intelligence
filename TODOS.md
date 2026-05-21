@@ -45,22 +45,22 @@
 
 ### Phase 1C — bdshare Adapters (PRIMARY source for most streams)
 
-- [ ] `pip install bdshare==1.2.1` — pin version
-- [ ] **Smoke test all bdshare methods against real DSE** — run during market hours, record actual column names returned
-  - [ ] `get_current_trade_data()` — log actual columns, row count, sample row
-  - [ ] `get_hist_data("SQURPHARMA", "2024-01-01", "2024-12-31")` — verify OHLCV structure
-  - [ ] `get_basic_hist_data()` — confirm TA-compatible column order
-  - [ ] `get_market_info()` — confirm DSEX/DS30/DSES columns
-  - [ ] `get_latest_pe()` — confirm PE + EPS + sector columns
-  - [ ] `get_company_info("SQURPHARMA")` — map each DataFrame in returned list to fields
-  - [ ] `get_company_info("BRACBANK")` — test banking sector (structure may differ)
-  - [ ] `get_sector_performance()` — confirm sector + change_pct + pe columns
-  - [ ] `get_top_gainers_losers()` — confirm columns
-  - [ ] `get_corporate_announcements()` — confirm date + ticker + category + details columns
-  - [ ] `get_price_sensitive_news()` — confirm structure
-  - [ ] `get_agm_news()` — confirm cash_div_pct + stock_div_pct + agm_date
-  - [ ] `get_market_depth_data("GP")` — confirm 5-level buy/sell structure
-  - [ ] Save fixture files: `tests/fixtures/bdshare_{method}_sample.pkl` for each
+- [x] `pip install bdshare==1.2.1` — pin version (already in pyproject.toml, installed 2026-05-21)
+- [~] **Smoke test all bdshare methods against real DSE** — 7/13 passing, 6 blocked/failed
+  - [x] `get_current_trade_data()` — columns: symbol, ltp, high, low, close, ycp, change, trade, value, volume (396 rows). NOTE: no `open` in live feed
+  - [x] `get_historical_data(start, end, code)` — columns: date(idx), symbol, ltp, high, low, open, close, ycp, trade, value, volume. NOTE: was `get_hist_data` (deprecated)
+  - [x] `get_basic_historical_data(start, end, code)` — columns: date, open, high, low, close, volume. NOTE: was `get_basic_hist_data` (deprecated)
+  - [x] `get_market_info()` — columns: Date, Total Trade, Total Volume, Total Value (mn), Total Market Cap. (mn), DSEX Index, DSES Index, DS30 Index, DGEN Index (30-day history, take row 0)
+  - [x] `get_latest_pe()` — numeric columns 0-8 (no headers): [ticker, ltp, close, pe, ?, ?, ?, eps, ?] — 420 rows
+  - [-] `get_company_info("SQURPHARMA")` — **BLOCKED: bdshare bug** `pd.read_html(r.content)` fails with OSError in pandas+lxml; need to patch bdshare or implement direct scraper
+  - [-] `get_company_info("BRACBANK")` — same bdshare bug
+  - [-] `get_sector_performance()` — **BLOCKED: returns empty** — may work during market hours, needs re-test
+  - [-] `get_top_gainers_losers()` — **BLOCKED: returns empty** — may work during market hours, needs re-test
+  - [-] `get_corporate_announcements()` — empty post-market (columns expected: code, news, date); re-test during market hours
+  - [-] `get_price_sensitive_news()` — empty post-market (columns expected: code, news, date); re-test during market hours
+  - [x] `get_agm_news()` — columns: company, yearEnd, dividend, agmDate, recordDate, venue, time (209 rows). NOTE: `company` is full name not ticker; `dividend` is combined string "10% C"
+  - [x] `get_market_depth_data("GP")` — returns empty DataFrame post-market (expected); structure TBD from market-hours run
+  - [x] Save fixture files: `tests/fixtures/bdshare_{method}_sample.pkl` — saved for all 7 passing methods
 - [x] `extraction/adapters/bdshare/live_prices.py` — `BDShareLivePricesAdapter` + `normalize()`
 - [x] `extraction/adapters/bdshare/historical.py` — `BDShareHistoricalAdapter` + `normalize()`
 - [x] `extraction/adapters/bdshare/market_info.py` — `BDShareMarketInfoAdapter`
@@ -72,14 +72,20 @@
 
 ### Phase 1D — AmarStock Adapters (BACKUP / fundamentals PRIMARY)
 
-- [ ] Test `https://api.amarstock.com/latest-share-price` — verify JSON structure, field names
-- [ ] Test AmarStock CSV download — verify format, date range available
-- [x] `extraction/adapters/amarstock/live_prices.py` — `AmarStockLivePricesAdapter`
-- [x] `extraction/adapters/amarstock/csv_historical.py` — `AmarStockCSVAdapter` (bulk one-time + incremental)
-- [ ] Scrape `amarstock.com/stock-chart/SQURPHARMA` with BeautifulSoup — map all fields to canonical schema
-- [ ] Scrape 5 more tickers across sectors — verify field consistency
-- [x] `extraction/adapters/amarstock/fundamentals_scraper.py` — `AmarStockFundamentalsAdapter`
-- [ ] Unit tests with saved HTML fixtures
+- [x] Smoke-test all AmarStock endpoints — 14/14 passing (2026-05-21)
+  - API is SPA-internal JSON (not the assumed REST API). Actual endpoints discovered via Playwright network intercept.
+  - `GET /LatestPrice/dbfd2587c77f` — 426 stocks, 62 fields: full OHLCV + PE/EPS/NAV/shareholding/quarterly EPS (static hash, no auth)
+  - `GET /data/1981d726120d/{ticker}` — 93-field per-stock detail: fundamentals + 3 shareholding periods + 5 recent news + MA/EMA signals
+  - `GET /Info/DSE` — DSEX/DS30/DSES indices + market status + advance/decline
+  - `GET /info/Stocks` — 494 instruments (Code, Name, Group/sector)
+  - `GET /qoutes/3ace8d562de8/{ticker}` — ~700 records back to 2018, MaxPrice/MinPrice/Volume (no Open/Close)
+  - `GET /MarketPrice/328338530b39/{ticker}` — 5-level bid/ask depth
+  - `POST /data/download/CSV {QuotesType, date}` — full-market daily OHLCV snapshot (no auth needed)
+- [x] `extraction/adapters/amarstock/live_prices.py` — `AmarStockLivePricesAdapter` (rewritten to use `/LatestPrice/` endpoint)
+- [x] `extraction/adapters/amarstock/csv_historical.py` — `AmarStockCSVAdapter` (rewritten to use `/qoutes/` endpoint; MaxPrice=high, MinPrice=low; no Open/Close)
+- [x] `extraction/adapters/amarstock/fundamentals_scraper.py` — `AmarStockFundamentalsAdapter` (rewritten: JSON API replaces HTML scrape)
+- [x] Fixture files saved: `tests/fixtures/amarstock_*.pkl` — all endpoints
+- [x] Unit tests using saved fixtures (all 3 adapters) — 37 tests, all passing
 
 ### Phase 1E — DSE Direct + Playwright Adapters (TERTIARY / PDF)
 
@@ -279,7 +285,8 @@
 
 ## Known Blockers / Decisions Needed
 
-- [ ] Confirm: run bdshare smoke tests during DSE market hours (Sun–Thu 10am–2:30pm BD = 4am–8:30am UTC)
+- [~] Re-run partial bdshare smoke during market hours: sector_performance, top_gainers_losers, corporate_announcements, price_sensitive_news, market_depth
+- [-] **bdshare bug**: `get_company_info()` fails — `pd.read_html(r.content)` raises `OSError` with lxml. Need to patch bdshare or implement own scraper for DSE company info page
 - [ ] Confirm: AmarStock rate limit — need to test before committing to 2s delay
 - [ ] Decision: uv vs pip-tools vs poetry for dep management
 - [ ] Decision: asyncpg vs psycopg3 for async PostgreSQL

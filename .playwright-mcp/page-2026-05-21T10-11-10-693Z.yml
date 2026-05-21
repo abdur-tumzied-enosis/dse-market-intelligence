@@ -1,0 +1,663 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e6]:
+        - link "AmarStock logo" [ref=e8] [cursor=pointer]:
+          - /url: /
+          - img "AmarStock logo" [ref=e9]
+        - generic [ref=e13]:
+          - generic [ref=e14]:
+            - textbox "Trading Code" [ref=e15]
+            - textbox "Trading Code" [ref=e16]:
+              - /placeholder: Trading code
+          - button "Search" [ref=e18] [cursor=pointer]:
+            - img [ref=e19]
+      - generic:
+        - generic:
+          - generic:
+            - checkbox [ref=e21] [cursor=pointer]
+            - list:
+              - listitem [ref=e26]:
+                - link "Portfolio" [ref=e27] [cursor=pointer]:
+                  - /url: /portfolio
+              - listitem [ref=e28]:
+                - checkbox [ref=e29] [cursor=pointer]
+                - link "Chart" [ref=e30] [cursor=pointer]:
+                  - /url: /stock-chart
+                - list:
+                  - listitem [ref=e31]:
+                    - link "Stock Chart" [ref=e32] [cursor=pointer]:
+                      - /url: /stock-chart
+                  - listitem [ref=e33]:
+                    - link "Interactive Chart" [ref=e34] [cursor=pointer]:
+                      - /url: /interactive-chart
+                  - listitem [ref=e35]:
+                    - link "MTF Charts" [ref=e36] [cursor=pointer]:
+                      - /url: /mtf-interactive-charts
+                  - listitem [ref=e37]:
+                    - link "Multiple Charts" [ref=e38] [cursor=pointer]:
+                      - /url: /multiple-charts
+              - listitem [ref=e39]:
+                - checkbox [ref=e40] [cursor=pointer]
+                - link "Share Price" [ref=e41] [cursor=pointer]:
+                  - /url: /latest-share-price
+                - list:
+                  - listitem [ref=e42]:
+                    - link "Latest Share Price" [ref=e43] [cursor=pointer]:
+                      - /url: /latest-share-price
+                  - listitem [ref=e44]:
+                    - link "Sector Wise Share Price" [ref=e45] [cursor=pointer]:
+                      - /url: /sector-latest-share-price
+                  - listitem [ref=e46]:
+                    - link "Circuit Breaker" [ref=e47] [cursor=pointer]:
+                      - /url: /circuit-breaker
+              - listitem [ref=e48]:
+                - checkbox [ref=e49] [cursor=pointer]
+                - link "PE Ratio" [ref=e50] [cursor=pointer]:
+                  - /url: /market-pe-ratio
+                - list:
+                  - listitem [ref=e51]:
+                    - link "Market PE Ratio" [ref=e52] [cursor=pointer]:
+                      - /url: /market-pe-ratio
+                  - listitem [ref=e53]:
+                    - link "Sector PE Ratio" [ref=e54] [cursor=pointer]:
+                      - /url: /sector-pe-ratio
+                  - listitem [ref=e55]:
+                    - link "Category PE Ratio" [ref=e56] [cursor=pointer]:
+                      - /url: /category-pe-ratio
+                  - listitem [ref=e57]:
+                    - link "Compare PE Ratio" [ref=e58] [cursor=pointer]:
+                      - /url: /compare-pe-ratio
+                  - listitem [ref=e59]:
+                    - link "Compare Sector PE" [ref=e60] [cursor=pointer]:
+                      - /url: /compare-sector-pe
+                  - listitem [ref=e61]:
+                    - link "Weighted PE Chart" [ref=e62] [cursor=pointer]:
+                      - /url: /weighted-pe-chart
+              - listitem [ref=e63]:
+                - checkbox [ref=e64] [cursor=pointer]
+                - link "VPA" [ref=e65] [cursor=pointer]:
+                  - /url: /volume-price-analysis
+                - list:
+                  - listitem [ref=e66]:
+                    - link "Market Watch" [ref=e67] [cursor=pointer]:
+                      - /url: /market-watch
+                  - listitem [ref=e68]:
+                    - link "1 Minute VPA" [ref=e69] [cursor=pointer]:
+                      - /url: /volume-price-analysis
+                  - listitem [ref=e70]:
+                    - link "VPA Watch List" [ref=e71] [cursor=pointer]:
+                      - /url: /vpa-watch-list
+                  - listitem [ref=e72]:
+                    - link "VPA Archive" [ref=e73] [cursor=pointer]:
+                      - /url: /vpa-archive/SQURPHARMA
+                  - listitem [ref=e74]:
+                    - link "Market Depth" [ref=e75] [cursor=pointer]:
+                      - /url: /dse-market-depth
+                  - listitem [ref=e76]:
+                    - link "Market Depth Monitor" [ref=e77] [cursor=pointer]:
+                      - /url: /market-depth-monitor/SQURPHARMA
+                  - listitem [ref=e78]:
+                    - link "Minute Map" [ref=e79] [cursor=pointer]:
+                      - /url: /minute-market-map
+              - listitem [ref=e80]:
+                - checkbox [ref=e81] [cursor=pointer]
+                - link "Gallery" [ref=e82] [cursor=pointer]:
+                  - /url: /chart-gallery
+                - list:
+                  - listitem [ref=e83]:
+                    - link "Sector Chart Gallery" [ref=e84] [cursor=pointer]:
+                      - /url: /chart-gallery
+                  - listitem [ref=e85]:
+                    - link "Custom Chart Gallery" [ref=e86] [cursor=pointer]:
+                      - /url: /custom-chart-gallery
+                  - listitem [ref=e87]:
+                    - link "MTF Chart Gallery" [ref=e88] [cursor=pointer]:
+                      - /url: /mtf-chart-gallery
+              - listitem [ref=e89]:
+                - checkbox [ref=e90] [cursor=pointer]
+                - link "News" [ref=e91] [cursor=pointer]:
+                  - /url: /dse-news
+                - list:
+                  - listitem [ref=e92]:
+                    - link "Today’s News" [ref=e93] [cursor=pointer]:
+                      - /url: /dse-news
+                  - listitem [ref=e94]:
+                    - link "Last 7 Days News" [ref=e95] [cursor=pointer]:
+                      - /url: /dse-last-7-days-news
+                  - listitem [ref=e96]:
+                    - link "News Archive" [ref=e97] [cursor=pointer]:
+                      - /url: /dse-news-archive/SQURPHARMA
+                  - listitem [ref=e98]:
+                    - link "News Effect Chart" [ref=e99] [cursor=pointer]:
+                      - /url: /dse-stock-news/SQURPHARMA
+                  - listitem [ref=e100]:
+                    - link "Coming Events" [ref=e101] [cursor=pointer]:
+                      - /url: /upcoming-events
+              - listitem [ref=e102]:
+                - checkbox [ref=e103] [cursor=pointer]
+                - link "Scanner" [ref=e104] [cursor=pointer]:
+                  - /url: /stock-scanner
+                - list:
+                  - listitem [ref=e105]:
+                    - link "Stock Scanner" [ref=e106] [cursor=pointer]:
+                      - /url: /stock-scanner
+                  - listitem [ref=e107]:
+                    - link "Pre Scanner" [ref=e108] [cursor=pointer]:
+                      - /url: /pre-market-scanner
+                  - listitem [ref=e109]:
+                    - link "Custom Scanner" [ref=e110] [cursor=pointer]:
+                      - /url: /custom-stock-scanner
+              - listitem [ref=e111]:
+                - checkbox [ref=e112] [cursor=pointer]
+                - link "Alert" [ref=e113] [cursor=pointer]:
+                  - /url: /stock-alert/SQURPHARMA
+              - listitem [ref=e114]:
+                - checkbox [ref=e115] [cursor=pointer]
+                - link "Training" [ref=e116] [cursor=pointer]:
+                  - /url: /training
+                - list:
+                  - listitem [ref=e117]:
+                    - link "Elliott Wave Online Course" [ref=e118] [cursor=pointer]:
+                      - /url: /elliott-wave-principle
+                  - listitem [ref=e119]:
+                    - link "ZERO2PRO" [ref=e120] [cursor=pointer]:
+                      - /url: /online-trainning
+                  - listitem [ref=e121]:
+                    - link "Fundamental Analysis" [ref=e122] [cursor=pointer]:
+                      - /url: /training/fundamental-analysis
+                  - listitem [ref=e123]:
+                    - link "Weekly videos by Engr. Rahmat Ullah" [ref=e124] [cursor=pointer]:
+                      - /url: /weekly-videos-by-engr-rahmatullah
+              - listitem [ref=e125]:
+                - checkbox [ref=e126] [cursor=pointer]
+                - link "Tools" [ref=e127] [cursor=pointer]:
+                  - /url: /correlation
+                - list:
+                  - listitem [ref=e128]:
+                    - link "Index Analysis" [ref=e129] [cursor=pointer]:
+                      - /url: /dse-index-analysis
+                  - listitem [ref=e130]:
+                    - link "Correlation" [ref=e131] [cursor=pointer]:
+                      - /url: /correlation
+                  - listitem [ref=e132]:
+                    - link "52 week range" [ref=e133] [cursor=pointer]:
+                      - /url: /52-week-price-range
+                  - listitem [ref=e134]:
+                    - link "Bar Chart" [ref=e135] [cursor=pointer]:
+                      - /url: /dse-5-days-turnover-compare
+                  - listitem [ref=e136]:
+                    - link "Pie Chart" [ref=e137] [cursor=pointer]:
+                      - /url: /pie-chart-comparison
+                  - listitem [ref=e138]:
+                    - checkbox [ref=e139] [cursor=pointer]
+                    - link "TA Value" [ref=e140] [cursor=pointer]:
+                      - /url: /technical-indicator-value
+                    - list:
+                      - listitem [ref=e141]:
+                        - link "Sector TA Value" [ref=e142] [cursor=pointer]:
+                          - /url: /sector-indicator-value
+                      - listitem [ref=e143]:
+                        - link "Custom TA Value" [ref=e144] [cursor=pointer]:
+                          - /url: /custom-technical-indicator-value
+                  - listitem [ref=e145]:
+                    - checkbox [ref=e146] [cursor=pointer]
+                    - link "Trend" [ref=e147] [cursor=pointer]:
+                      - /url: /trend-analysis
+                    - list:
+                      - listitem [ref=e148]:
+                        - link "Indicator Trend Analysis" [ref=e149] [cursor=pointer]:
+                          - /url: /trend-analysis
+                      - listitem [ref=e150]:
+                        - link "Stock Trend Analysis" [ref=e151] [cursor=pointer]:
+                          - /url: /stock-trend-analysis
+                  - listitem [ref=e152]:
+                    - link "Clear Cache" [ref=e153] [cursor=pointer]:
+                      - /url: /clear-cache
+              - listitem [ref=e154]:
+                - checkbox [ref=e155] [cursor=pointer]
+                - link "IPO" [ref=e156] [cursor=pointer]:
+                  - /url: /ipo
+                - list:
+                  - listitem [ref=e157]:
+                    - link "Overview" [ref=e158] [cursor=pointer]:
+                      - /url: /ipo
+                  - listitem [ref=e159]:
+                    - link "Upcoming IPOs" [ref=e160] [cursor=pointer]:
+                      - /url: /ipo/upcoming
+                  - listitem [ref=e161]:
+                    - link "Open IPOs" [ref=e162] [cursor=pointer]:
+                      - /url: /ipo/open
+                  - listitem [ref=e163]:
+                    - link "Past IPOs" [ref=e164] [cursor=pointer]:
+                      - /url: /ipo/past
+              - listitem [ref=e165]:
+                - checkbox [ref=e166] [cursor=pointer]
+                - link "Resources" [ref=e167] [cursor=pointer]:
+                  - /url: /membership
+                - list:
+                  - listitem [ref=e168]:
+                    - link "Membership" [ref=e169] [cursor=pointer]:
+                      - /url: /membership
+                  - listitem [ref=e170]:
+                    - link "Data Download" [ref=e171] [cursor=pointer]:
+                      - /url: /csv-data-download
+              - listitem [ref=e172]:
+                - link "Premium" [ref=e173] [cursor=pointer]:
+                  - /url: /membership
+              - listitem [ref=e174]:
+                - link "Login" [ref=e175] [cursor=pointer]:
+                  - /url: /Account/Login
+  - dialog [ref=e583]:
+    - generic [ref=e585]:
+      - generic [ref=e586]:
+        - img [ref=e587]
+        - heading [level=3] [ref=e588]: Login to your account
+      - iframe [ref=e592]:
+        - button "Google-এর ব্যবহার চালিয়ে যান. নতুন ট্যাবে খোলে" [ref=f5e3] [cursor=pointer]:
+          - generic [ref=f5e5]:
+            - img [ref=f5e8]
+            - generic [ref=f5e15]: Google-এর ব্যবহার চালিয়ে যান
+      - generic [ref=e593]: OR
+      - form [ref=e594]:
+        - generic [ref=e595]:
+          - generic [ref=e597]: 
+          - textbox [ref=e599]:
+            - /placeholder: Your email
+        - generic [ref=e600]:
+          - generic [ref=e602]: 
+          - textbox [ref=e604]:
+            - /placeholder: Your password
+        - generic [ref=e605]:
+          - checkbox [ref=e606]
+          - generic [ref=e607] [cursor=pointer]: Remember me
+        - link [ref=e609] [cursor=pointer]:
+          - /url: /Account/ForgotPassword
+          - text: Forgot password?
+        - button [ref=e612] [cursor=pointer]: Login
+      - generic [ref=e613]: Don't have an account?
+      - link [ref=e614] [cursor=pointer]:
+        - /url: /Account/Register
+        - text: Register
+  - generic [ref=e226]:
+    - generic [ref=e227]:
+      - table [ref=e230]:
+        - rowgroup [ref=e231]:
+          - row "Market Information" [ref=e232]:
+            - columnheader "Market Information" [ref=e233]
+          - row "Last Trade Price 209.3" [ref=e234]:
+            - cell "Last Trade Price" [ref=e235]
+            - cell "209.3" [ref=e236]
+          - row "Last Update 21/05/2026 01:59" [ref=e237]:
+            - cell "Last Update" [ref=e238]
+            - cell "21/05/2026 01:59" [ref=e239]
+          - row "Change 2.00" [ref=e240]:
+            - cell "Change" [ref=e241]
+            - cell "2.00" [ref=e242]
+          - row "0.96 %" [ref=e243]:
+            - cell "0.96 %" [ref=e244]
+          - row "Opening Price 207.5" [ref=e245]:
+            - cell "Opening Price" [ref=e246]
+            - cell "207.5" [ref=e247]
+          - row "Yesterday's Closing Price 207.3" [ref=e248]:
+            - cell "Yesterday's Closing Price" [ref=e249]
+            - cell "207.3" [ref=e250]
+      - table [ref=e253]:
+        - rowgroup [ref=e254]:
+          - row "Market Information" [ref=e255]:
+            - columnheader "Market Information" [ref=e256]
+          - row "Closing Price 209.3" [ref=e257]:
+            - cell "Closing Price" [ref=e258]
+            - cell "209.3" [ref=e259]
+          - row "Day's Range 207.50 - 209.90" [ref=e260]:
+            - cell "Day's Range" [ref=e261]
+            - cell "207.50 - 209.90" [ref=e262]
+          - row "Day's Value (mn) 60.49" [ref=e263]:
+            - cell "Day's Value (mn)" [ref=e264]
+            - cell "60.49" [ref=e265]
+          - row "52 Weeks' Moving Range 198.00 - 236.00" [ref=e266]:
+            - cell "52 Weeks' Moving Range" [ref=e267]
+            - cell "198.00 - 236.00" [ref=e268]
+          - row "Volume 290608" [ref=e269]:
+            - cell "Volume" [ref=e270]
+            - cell "290608" [ref=e271]
+          - row "Total Trade 1736" [ref=e272]:
+            - cell "Total Trade" [ref=e273]
+            - cell "1736" [ref=e274]
+      - table [ref=e277]:
+        - rowgroup [ref=e278]:
+          - row "EPS/PE Information" [ref=e279]:
+            - columnheader "EPS/PE Information" [ref=e280]
+          - row "EPS 27.04" [ref=e281]:
+            - cell "EPS" [ref=e282]
+            - cell "27.04" [ref=e283]
+          - row "PE (AUDITED) 7.67" [ref=e284]:
+            - cell "PE (AUDITED)" [ref=e285]
+            - cell "7.67" [ref=e286]
+          - row "PE (UN AUDITED) 6.68" [ref=e287]:
+            - cell "PE (UN AUDITED)" [ref=e288]
+            - cell "6.68" [ref=e289]
+          - row "Q1 EPS (3 Months) 8.35" [ref=e290]:
+            - cell "Q1 EPS (3 Months)" [ref=e291]
+            - cell "8.35" [ref=e292]
+          - row "Q2 EPS (6 Months) 8.2" [ref=e293]:
+            - cell "Q2 EPS (6 Months)" [ref=e294]
+            - cell "8.2" [ref=e295]
+          - row "Q3 EPS (9 Months) 6.73" [ref=e296]:
+            - cell "Q3 EPS (9 Months)" [ref=e297]
+            - cell "6.73" [ref=e298]
+    - generic [ref=e299]:
+      - table [ref=e302]:
+        - rowgroup [ref=e303]:
+          - row "Basic Information" [ref=e304]:
+            - columnheader "Basic Information" [ref=e305]
+          - row "NAV 157.88" [ref=e306]:
+            - cell "NAV" [ref=e307]
+            - cell "157.88" [ref=e308]
+          - row "NAV/Price 0.75" [ref=e309]:
+            - cell "NAV/Price" [ref=e310]
+            - cell "0.75" [ref=e311]
+          - row "Market Category A" [ref=e312]:
+            - cell "Market Category" [ref=e313]
+            - cell "A" [ref=e314]
+          - row "Electronic Share Y" [ref=e315]:
+            - cell "Electronic Share" [ref=e316]
+            - cell "Y" [ref=e317]
+          - row "Listing Year 1995" [ref=e318]:
+            - cell "Listing Year" [ref=e319]
+            - cell "1995" [ref=e320]
+          - row "Latest Dividend Status (%)" [ref=e321]:
+            - cell "Latest Dividend Status (%)" [ref=e322]
+            - cell [ref=e323]
+      - table [ref=e326]:
+        - rowgroup [ref=e327]:
+          - row "Basic Information" [ref=e328]:
+            - columnheader "Basic Information" [ref=e329]
+          - row "Market Cap 102773.469 mn" [ref=e330]:
+            - cell "Market Cap" [ref=e331]
+            - cell "102773.469 mn" [ref=e332]
+          - row "Free Float 55.85%" [ref=e333]:
+            - cell "Free Float" [ref=e334]
+            - cell "55.85%" [ref=e335]
+          - row "Authorized Cap 10000 mn" [ref=e336]:
+            - cell "Authorized Cap" [ref=e337]
+            - cell "10000 mn" [ref=e338]
+          - row "Paid Up Cap 8864.51 mn" [ref=e339]:
+            - cell "Paid Up Cap" [ref=e340]
+            - cell "8864.51 mn" [ref=e341]
+          - row "Reserve Surplus 129050.4 mn" [ref=e342]:
+            - cell "Reserve Surplus" [ref=e343]
+            - cell "129050.4 mn" [ref=e344]
+          - row "Last AGM Held On 14/12/2025" [ref=e345]:
+            - cell "Last AGM Held On" [ref=e346]
+            - cell "14/12/2025" [ref=e347]
+      - table [ref=e350]:
+        - rowgroup [ref=e351]:
+          - row "Share Distribution" [ref=e352]:
+            - columnheader "Share Distribution" [ref=e353]
+          - row "Date Dir Gov Ins For Pub" [ref=e354]:
+            - cell "Date" [ref=e355]
+            - cell "Dir" [ref=e356]
+            - cell "Gov" [ref=e357]
+            - cell "Ins" [ref=e358]
+            - cell "For" [ref=e359]
+            - cell "Pub" [ref=e360]
+          - row "Jun 30, 2025 (year ended) 43.59 0 14.05 15.14 27.22" [ref=e361]:
+            - cell "Jun 30, 2025 (year ended)" [ref=e362]
+            - cell "43.59" [ref=e363]
+            - cell "0" [ref=e364]
+            - cell "14.05" [ref=e365]
+            - cell "15.14" [ref=e366]
+            - cell "27.22" [ref=e367]
+          - row "Mar 31, 2026 44.15 0 13.61 15.33 26.91" [ref=e368]:
+            - cell "Mar 31, 2026" [ref=e369]
+            - cell "44.15" [ref=e370]
+            - cell "0" [ref=e371]
+            - cell "13.61" [ref=e372]
+            - cell "15.33" [ref=e373]
+            - cell "26.91" [ref=e374]
+          - row "Apr 30, 2026 44.15 0 13.73 15.11 27.01" [ref=e375]:
+            - cell "Apr 30, 2026" [ref=e376]
+            - cell "44.15" [ref=e377]
+            - cell "0" [ref=e378]
+            - cell "13.73" [ref=e379]
+            - cell "15.11" [ref=e380]
+            - cell "27.01" [ref=e381]
+    - generic [ref=e382]:
+      - table [ref=e385]:
+        - rowgroup [ref=e386]:
+          - row "Basic Information" [ref=e387]:
+            - columnheader "Basic Information" [ref=e388]
+          - row "Year End 30 Jun" [ref=e389]:
+            - cell "Year End" [ref=e390]
+            - cell "30 Jun" [ref=e391]
+          - row "Beta 0.51" [ref=e392]:
+            - cell "Beta" [ref=e393]
+            - cell "0.51" [ref=e394]
+      - table [ref=e397]:
+        - rowgroup [ref=e398]:
+          - row "Moving Average Analysis" [ref=e399]:
+            - columnheader "Moving Average Analysis" [ref=e400]
+          - row "Moving Average (10) Bearish" [ref=e401]:
+            - cell "Moving Average (10)" [ref=e402]
+            - cell "Bearish" [ref=e403]
+          - row "Moving Average (20) Bearish" [ref=e404]:
+            - cell "Moving Average (20)" [ref=e405]
+            - cell "Bearish" [ref=e406]
+          - row "Moving Average (50) Bearish" [ref=e407]:
+            - cell "Moving Average (50)" [ref=e408]
+            - cell "Bearish" [ref=e409]
+          - row "Moving Average (100) Bearish" [ref=e410]:
+            - cell "Moving Average (100)" [ref=e411]
+            - cell "Bearish" [ref=e412]
+          - row "Moving Average (200) Bearish" [ref=e413]:
+            - cell "Moving Average (200)" [ref=e414]
+            - cell "Bearish" [ref=e415]
+          - row "Moving Average Summary Strong Bearish" [ref=e416]:
+            - cell "Moving Average Summary" [ref=e417]
+            - cell "Strong Bearish" [ref=e418]
+      - table [ref=e421]:
+        - rowgroup [ref=e422]:
+          - row "Exponential Moving Average Analysis" [ref=e423]:
+            - columnheader "Exponential Moving Average Analysis" [ref=e424]
+          - row "Exponential Moving Average (10) Bullish" [ref=e425]:
+            - cell "Exponential Moving Average (10)" [ref=e426]
+            - cell "Bullish" [ref=e427]
+          - row "Exponential Moving Average (20) Bearish" [ref=e428]:
+            - cell "Exponential Moving Average (20)" [ref=e429]
+            - cell "Bearish" [ref=e430]
+          - row "Exponential Moving Average (50) Bearish" [ref=e431]:
+            - cell "Exponential Moving Average (50)" [ref=e432]
+            - cell "Bearish" [ref=e433]
+          - row "Exponential Moving Average (100) Bearish" [ref=e434]:
+            - cell "Exponential Moving Average (100)" [ref=e435]
+            - cell "Bearish" [ref=e436]
+          - row "Exponential Moving Average (200) Bearish" [ref=e437]:
+            - cell "Exponential Moving Average (200)" [ref=e438]
+            - cell "Bearish" [ref=e439]
+          - row "Exponential Moving Average Summary Strong Bearish" [ref=e440]:
+            - cell "Exponential Moving Average Summary" [ref=e441]
+            - cell "Strong Bearish" [ref=e442]
+  - navigation "Page navigation" [ref=e445]:
+    - list [ref=e446]:
+      - listitem [ref=e447]:
+        - link "a" [ref=e448] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-A
+      - listitem [ref=e449]:
+        - link "b" [ref=e450] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-B
+      - listitem [ref=e451]:
+        - link "c" [ref=e452] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-C
+      - listitem [ref=e453]:
+        - link "d" [ref=e454] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-D
+      - listitem [ref=e455]:
+        - link "e" [ref=e456] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-E
+      - listitem [ref=e457]:
+        - link "f" [ref=e458] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-F
+      - listitem [ref=e459]:
+        - link "g" [ref=e460] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-G
+      - listitem [ref=e461]:
+        - link "h" [ref=e462] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-H
+      - listitem [ref=e463]:
+        - link "i" [ref=e464] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-I
+      - listitem [ref=e465]:
+        - link "j" [ref=e466] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-J
+      - listitem [ref=e467]:
+        - link "k" [ref=e468] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-K
+      - listitem [ref=e469]:
+        - link "l" [ref=e470] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-L
+      - listitem [ref=e471]:
+        - link "m" [ref=e472] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-M
+      - listitem [ref=e473]:
+        - link "n" [ref=e474] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-N
+      - listitem [ref=e475]:
+        - link "o" [ref=e476] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-O
+      - listitem [ref=e477]:
+        - link "p" [ref=e478] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-P
+      - listitem [ref=e479]:
+        - link "q" [ref=e480] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Q
+      - listitem [ref=e481]:
+        - link "r" [ref=e482] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-R
+      - listitem [ref=e483]:
+        - link "s" [ref=e484] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-S
+      - listitem [ref=e485]:
+        - link "t" [ref=e486] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-T
+      - listitem [ref=e487]:
+        - link "u" [ref=e488] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-U
+      - listitem [ref=e489]:
+        - link "v" [ref=e490] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-V
+      - listitem [ref=e491]:
+        - link "w" [ref=e492] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-W
+      - listitem [ref=e493]:
+        - link "x" [ref=e494] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-X
+      - listitem [ref=e495]:
+        - link "y" [ref=e496] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Y
+      - listitem [ref=e497]:
+        - link "z" [ref=e498] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Z
+      - listitem [ref=e499]:
+        - link "1...9" [ref=e500] [cursor=pointer]:
+          - /url: /stock/dictionary/Eq-Num
+  - contentinfo [ref=e501]:
+    - generic [ref=e503]:
+      - generic [ref=e504]:
+        - img [ref=e506]
+        - generic [ref=e511]:
+          - text: AmarStock Hotline
+          - link "01894615170" [ref=e513] [cursor=pointer]:
+            - /url: tel:01894615170
+          - text: 10 AM - 5 PM Weekdays
+        - paragraph [ref=e514]:
+          - text: Attention Investor,
+          - text: Investment in securities market are subject to market risks, read all the related documents carefully before investing.
+        - list [ref=e517]:
+          - listitem [ref=e518]:
+            - link "Facebook" [ref=e519] [cursor=pointer]:
+              - /url: https://www.facebook.com/amarstockfb/
+              - generic [ref=e520]: 
+              - text: Facebook
+          - listitem [ref=e521]:
+            - link "YouTube" [ref=e522] [cursor=pointer]:
+              - /url: https://www.youtube.com/channel/UCtTM4DBfXhIWxujCqp-STgw
+              - generic [ref=e523]: 
+              - text: YouTube
+      - generic [ref=e525]:
+        - generic [ref=e526]:
+          - heading "Updates" [level=4] [ref=e527]
+          - list [ref=e528]:
+            - listitem [ref=e529]:
+              - link "Training" [ref=e530] [cursor=pointer]:
+                - /url: /elliott-wave-principle
+            - listitem [ref=e531]:
+              - link "Bug Report" [ref=e532] [cursor=pointer]:
+                - /url: /bug-report
+            - listitem [ref=e533]:
+              - link "Suggestions" [ref=e534] [cursor=pointer]:
+                - /url: /suggestions
+            - listitem [ref=e535]:
+              - link "Request New Feature" [ref=e536] [cursor=pointer]:
+                - /url: /feature-request
+        - generic [ref=e537]:
+          - heading "About AmarStock" [level=4] [ref=e538]
+          - list [ref=e539]:
+            - listitem [ref=e540]:
+              - link "About Us" [ref=e541] [cursor=pointer]:
+                - /url: /about-us
+            - listitem [ref=e542]:
+              - link "Partners" [ref=e543] [cursor=pointer]:
+                - /url: /Partnership
+            - listitem [ref=e544]:
+              - link "Terms of Use" [ref=e545] [cursor=pointer]:
+                - /url: /terms-of-use
+            - listitem [ref=e546]:
+              - link "Privacy Policy" [ref=e547] [cursor=pointer]:
+                - /url: /privacy-policy
+            - listitem [ref=e548]:
+              - link "Refund Policy" [ref=e549] [cursor=pointer]:
+                - /url: /payment/returns-and-refunds-policy
+            - listitem [ref=e550]:
+              - link "Blog" [ref=e551] [cursor=pointer]:
+                - /url: http://blog.amarstock.com/
+            - listitem [ref=e552]:
+              - link "Data FAQ" [ref=e553] [cursor=pointer]:
+                - /url: /data-faqs
+        - generic [ref=e554]:
+          - heading "Contact Us" [level=4] [ref=e555]
+          - list [ref=e556]:
+            - listitem [ref=e557]:
+              - 'link "Email : support@amarstock.com" [ref=e558] [cursor=pointer]':
+                - /url: mailto:support@amarstock.com
+            - listitem [ref=e559]:
+              - 'link "Messenger : @amarstockfb" [ref=e560] [cursor=pointer]':
+                - /url: https://m.me/amarstockfb
+            - listitem [ref=e561]:
+              - link "Our Address" [ref=e562] [cursor=pointer]:
+                - /url: /address
+    - generic [ref=e563]:
+      - generic [ref=e564]:
+        - paragraph [ref=e565]:
+          - text: Copyright 2017 - 2025 ©
+          - link "AmarStock" [ref=e566] [cursor=pointer]:
+            - /url: /
+        - paragraph [ref=e567]: "Version: 3.1.1.40430"
+      - generic [ref=e568]:
+        - paragraph [ref=e569]: Legal Services By
+        - paragraph [ref=e570]:
+          - link "Wasimul Haque & Associates" [ref=e571] [cursor=pointer]:
+            - /url: https://wasimul.com/
+      - generic [ref=e572]:
+        - paragraph [ref=e573]: Designed And Developed By
+        - paragraph [ref=e574]:
+          - link "AmarStock Limited" [ref=e575] [cursor=pointer]:
+            - /url: /
+      - generic [ref=e576]:
+        - paragraph [ref=e577]: Official Market Data Provided By
+        - paragraph [ref=e578]:
+          - link "Dhaka Stock Exchange" [ref=e579] [cursor=pointer]:
+            - /url: https://www.dse.com.bd/
+    - generic [ref=e580]:
+      - paragraph [ref=e581]: The information contained in this website is for general information purposes only. The information is provided by AmarStock Limited and while it endeavours to keep the information up to date and correct, it makes no representations or warranties of any kind, express or implied, about the completeness, accuracy, reliability, suitability or availability with respect to the website or the information, products, services or related graphics contained in the website for any purpose. Any opinions expressed in this website are only those of the source and neither AmarStock Limited nor Dhaka Stock Exchange Limited (or any other party) shall be responsible for any information or imputation contained therein. Any reliance you place on such information is therefore strictly at your own risk.
+      - paragraph [ref=e582]: In no event will Dhaka Stock Exchange Limited be liable for any loss or damage including without limitation, indirect or consequential loss or damage, or any loss or damage whatsoever (monetary or otherwise) arising from or in connection with this website.

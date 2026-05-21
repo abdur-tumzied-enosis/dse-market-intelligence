@@ -1,6 +1,5 @@
 """
 Stream registry — all 16 DataStreams with priority-ordered adapter chains.
-Adapters are stubbed until implemented; replace stubs with real instances in each phase.
 """
 from __future__ import annotations
 
@@ -18,9 +17,12 @@ from extraction.adapters.bdshare.historical import BDShareHistoricalAdapter
 from extraction.adapters.bdshare.live_prices import BDShareLivePricesAdapter
 from extraction.adapters.bdshare.market_info import BDShareMarketInfoAdapter
 from extraction.adapters.bdshare.sector import BDShareSectorAdapter
+from extraction.adapters.dse_direct.announcements import DSEDirectAnnouncementsAdapter, DSEDirectPSNAdapter
+from extraction.adapters.dse_direct.depth import DSEDirectDepthPlaywrightAdapter
+from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
+from extraction.adapters.dse_direct.pdf_reports import DSEDirectPDFAdapter
 from extraction.base import DataStream
 
-# Phase 1E — dse_direct + playwright adapters (TODO)
 # Phase 1F — news adapters (TODO)
 # Phase 1G — macro adapters (TODO)
 
@@ -36,7 +38,7 @@ def _build_registry() -> dict[str, DataStream]:
     streams["live_prices"] = DataStream(name="live_prices", adapters=[
         BDShareLivePricesAdapter(),
         AmarStockLivePricesAdapter(),
-        # DSEDirectLivePricesAdapter(priority=3),  # Phase 1E
+        DSEDirectLivePricesAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -80,7 +82,7 @@ def _build_registry() -> dict[str, DataStream]:
     # ------------------------------------------------------------------
     streams["announcements"] = DataStream(name="announcements", adapters=[
         BDShareAnnouncementsAdapter(),
-        # DSEDirectAnnouncementsAdapter(priority=2), # Phase 1E
+        DSEDirectAnnouncementsAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -89,6 +91,7 @@ def _build_registry() -> dict[str, DataStream]:
     # ------------------------------------------------------------------
     streams["psn"] = DataStream(name="psn", adapters=[
         BDSharePSNAdapter(),
+        DSEDirectPSNAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -106,7 +109,7 @@ def _build_registry() -> dict[str, DataStream]:
     # ------------------------------------------------------------------
     streams["market_depth"] = DataStream(name="market_depth", adapters=[
         BDShareDepthAdapter(),
-        # DSEDirectDepthPlaywrightAdapter(priority=2), # Phase 1E
+        DSEDirectDepthPlaywrightAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -114,7 +117,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: dse_direct Playwright (PDF link discovery + download)
     # ------------------------------------------------------------------
     streams["annual_reports_pdf"] = DataStream(name="annual_reports_pdf", adapters=[
-        # DSEDirectPDFAdapter(priority=1),         # Phase 1E
+        DSEDirectPDFAdapter(),
     ])
 
     # ------------------------------------------------------------------
