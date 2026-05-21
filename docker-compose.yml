@@ -1,0 +1,142 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # TimescaleDB with pgvector
+  # ---------------------------------------------------------------------------
+  db:
+    image: timescale/timescaledb-ha:pg16-latest
+    container_name: dse_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dse_intelligence}
+      POSTGRES_USER: ${POSTGRES_USER:-dse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - db_data:/home/postgres/pgdata/data
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dse} -d ${POSTGRES_DB:-dse_intelligence}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Redis — broker + result backend + cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: dse_redis
+    restart: unless-stopped
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Celery worker — heavy async tasks (PDF extraction, bulk fundamentals, ML)
+  # ---------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    container_name: dse_worker
+    restart: unless-stopped
+    command: celery -A extraction.tasks worker --loglevel=${LOG_LEVEL:-info} --concurrency=4
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      BDSHARE_CACHE_TTL: ${BDSHARE_CACHE_TTL:-60}
+      AMARSTOCK_REQUEST_DELAY: ${AMARSTOCK_REQUEST_DELAY:-2.0}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - playwright_browsers:/ms-playwright
+
+  # ---------------------------------------------------------------------------
+  # APScheduler — time-based job trigger (runs inside scheduler process)
+  # ---------------------------------------------------------------------------
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: scheduler
+    container_name: dse_scheduler
+    restart: unless-stopped
+    command: python -m extraction.scheduler
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Asia/Dhaka}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LIVE_PRICES_INTERVAL_MINUTES: ${LIVE_PRICES_INTERVAL_MINUTES:-5}
+      MARKET_INDICES_INTERVAL_MINUTES: ${MARKET_INDICES_INTERVAL_MINUTES:-5}
+      FUNDAMENTALS_INTERVAL_HOURS: ${FUNDAMENTALS_INTERVAL_HOURS:-6}
+      ANNOUNCEMENTS_INTERVAL_HOURS: ${ANNOUNCEMENTS_INTERVAL_HOURS:-1}
+      NEWS_INTERVAL_MINUTES: ${NEWS_INTERVAL_MINUTES:-30}
+      MACRO_INTERVAL_HOURS: ${MACRO_INTERVAL_HOURS:-24}
+      HEALTH_CHECK_INTERVAL_HOURS: ${HEALTH_CHECK_INTERVAL_HOURS:-6}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+
+  # ---------------------------------------------------------------------------
+  # Management API (FastAPI — extraction layer admin)
+  # ---------------------------------------------------------------------------
+  mgmt_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mgmt
+    container_name: dse_mgmt_api
+    restart: unless-stopped
+    command: uvicorn mgmt.main:app --host 0.0.0.0 --port 8001 --reload
+    ports:
+      - "${MGMT_API_PORT:-8001}:8001"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPS_AGENT_MODEL: ${OPS_AGENT_MODEL:-claude-sonnet-4-6}
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY required}
+      MGMT_API_CORS_ORIGINS: ${MGMT_API_CORS_ORIGINS:-http://localhost:3000}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+
+volumes:
+  db_data:
+  redis_data:
+  playwright_browsers:

@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+.eggs/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Models (large files — store in MinIO/S3)
+models/
+*.pkl
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# Test fixtures (checked in selectively)
+tests/fixtures/*.pkl
+!tests/fixtures/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# Docker volumes (local only)
+.docker-volumes/
+postgres_data/
+redis_data/
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (for mgmt UI)
+node_modules/
+.next/
+out/
+.turbo/
+
+# PDF downloads (large, transient)
+data/pdfs/
+
+# Playwright browsers (installed in Docker)
+playwright-browsers/
