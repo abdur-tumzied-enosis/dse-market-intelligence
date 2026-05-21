@@ -14,7 +14,7 @@
 - [x] `pyproject.toml` with Python 3.12 + uv or pip-tools
 - [x] `.env.example` with all required env vars
 - [x] `docker-compose.yml` — extraction-only services (db + redis + scheduler + worker)
-- [ ] Verify Docker Desktop running on Windows
+- [x] Verify Docker Desktop running on Windows
 - [x] `Makefile` or `scripts/` for common dev commands (up, down, migrate, test)
 
 ---
@@ -40,8 +40,8 @@
 - [x] `db/migrations/006_macro.sql` — macro_indicators
 - [x] `db/migrations/007_pipeline.sql` — pipeline_jobs + source_health + agent_decisions + pipeline_alerts
 - [x] `db/migrate.py` — run migrations in order, idempotent
-- [ ] Verify TimescaleDB hypertable creation works locally
-- [ ] Verify pgvector extension loads
+- [x] Verify TimescaleDB hypertable creation works locally
+- [x] Verify pgvector extension loads
 
 ### Phase 1C — bdshare Adapters (PRIMARY source for most streams)
 
@@ -74,11 +74,11 @@
 
 - [ ] Test `https://api.amarstock.com/latest-share-price` — verify JSON structure, field names
 - [ ] Test AmarStock CSV download — verify format, date range available
-- [ ] `extraction/adapters/amarstock/live_prices.py` — `AmarStockLivePricesAdapter`
-- [ ] `extraction/adapters/amarstock/csv_historical.py` — `AmarStockCSVAdapter` (bulk one-time + incremental)
+- [x] `extraction/adapters/amarstock/live_prices.py` — `AmarStockLivePricesAdapter`
+- [x] `extraction/adapters/amarstock/csv_historical.py` — `AmarStockCSVAdapter` (bulk one-time + incremental)
 - [ ] Scrape `amarstock.com/stock-chart/SQURPHARMA` with BeautifulSoup — map all fields to canonical schema
 - [ ] Scrape 5 more tickers across sectors — verify field consistency
-- [ ] `extraction/adapters/amarstock/fundamentals_scraper.py` — `AmarStockFundamentalsAdapter`
+- [x] `extraction/adapters/amarstock/fundamentals_scraper.py` — `AmarStockFundamentalsAdapter`
 - [ ] Unit tests with saved HTML fixtures
 
 ### Phase 1E — DSE Direct + Playwright Adapters (TERTIARY / PDF)

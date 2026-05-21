@@ -4,6 +4,9 @@ Adapters are stubbed until implemented; replace stubs with real instances in eac
 """
 from __future__ import annotations
 
+from extraction.adapters.amarstock.csv_historical import AmarStockCSVAdapter
+from extraction.adapters.amarstock.fundamentals_scraper import AmarStockFundamentalsAdapter
+from extraction.adapters.amarstock.live_prices import AmarStockLivePricesAdapter
 from extraction.adapters.bdshare.announcements import (
     BDShareAGMAdapter,
     BDShareAnnouncementsAdapter,
@@ -17,7 +20,6 @@ from extraction.adapters.bdshare.market_info import BDShareMarketInfoAdapter
 from extraction.adapters.bdshare.sector import BDShareSectorAdapter
 from extraction.base import DataStream
 
-# Phase 1D — amarstock adapters (TODO)
 # Phase 1E — dse_direct + playwright adapters (TODO)
 # Phase 1F — news adapters (TODO)
 # Phase 1G — macro adapters (TODO)
@@ -33,7 +35,7 @@ def _build_registry() -> dict[str, DataStream]:
     # ------------------------------------------------------------------
     streams["live_prices"] = DataStream(name="live_prices", adapters=[
         BDShareLivePricesAdapter(),
-        # AmarStockLivePricesAdapter(priority=2),  # Phase 1D
+        AmarStockLivePricesAdapter(),
         # DSEDirectLivePricesAdapter(priority=3),  # Phase 1E
     ])
 
@@ -42,7 +44,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: amarstock CSV (bulk), bdshare hist API (incremental)
     # ------------------------------------------------------------------
     streams["historical_ohlcv"] = DataStream(name="historical_ohlcv", adapters=[
-        # AmarStockCSVAdapter(priority=1),         # Phase 1D
+        AmarStockCSVAdapter(),
         BDShareHistoricalAdapter(),
     ])
 
@@ -60,7 +62,7 @@ def _build_registry() -> dict[str, DataStream]:
     # Primary: amarstock scrape (richest data), bdshare get_company_info
     # ------------------------------------------------------------------
     streams["fundamentals"] = DataStream(name="fundamentals", adapters=[
-        # AmarStockFundamentalsAdapter(priority=1),   # Phase 1D
+        AmarStockFundamentalsAdapter(),
         BDShareCompanyInfoAdapter(),
     ])
 
