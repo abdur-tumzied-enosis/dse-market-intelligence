@@ -46,9 +46,11 @@ def normalize_ticker(ticker: str) -> str:
 
 
 def bd_date_str_to_utc(date_str: str, fmt: str = "%d-%b-%Y") -> datetime | None:
-    """Parse BD date string (e.g. '21-May-2026') to UTC midnight."""
-    try:
-        naive = datetime.strptime(date_str.strip(), fmt)
-        return to_utc(naive, assume_dhaka=True)
-    except (ValueError, AttributeError):
-        return None
+    """Parse BD date string to UTC midnight. Tries fmt then ISO 8601 (YYYY-MM-DD)."""
+    s = date_str.strip() if date_str else ""
+    for f in (fmt, "%Y-%m-%d"):
+        try:
+            return to_utc(datetime.strptime(s, f), assume_dhaka=True)
+        except (ValueError, AttributeError):
+            continue
+    return None

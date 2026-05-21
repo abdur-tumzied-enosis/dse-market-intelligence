@@ -200,8 +200,8 @@ def test_pdf_adapter_raises_clear_error():
 
     err = exc_info.value
     assert not err.retryable
-    assert "BSEC" in str(err) or "sec.gov.bd" in str(err), (
-        f"Error message should mention BSEC: {err}"
+    assert "investor" in str(err).lower() or "centralized" in str(err).lower(), (
+        f"Error message should explain no centralized source: {err}"
     )
 
 

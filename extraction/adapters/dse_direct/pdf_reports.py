@@ -10,17 +10,19 @@ import pandas as pd
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import normalize_ticker
 
-# Confirmed 2026-05-21:
+# Confirmed 2026-05-21 (reconfirmed 2026-05-21 via full site exploration):
 # - companyinfo.php?reqType=financials&cname={ticker} returns 404
-# - displayCompany.php?name={ticker} (full JS render via Playwright) returns only
-#   DSE's own regulatory PDFs (demutualization acts, index methodology etc.)
-#   NO company-specific annual reports found.
+# - displayCompany.php?name={ticker} (full JS render via Playwright) contains only
+#   inline financial data (EPS/NAV/dividends) and DSE regulatory PDFs.
+#   NO company-specific annual report PDFs hosted on dsebd.org.
+# - BSEC (sec.gov.bd) is a regulatory body website — no queryable company
+#   annual report portal exists there either.
+# - DSE announcements (display_news.php) contain no PDF attachments.
 #
-# DSE does NOT host company annual report PDFs on dsebd.org.
-# Company filings are submitted via BSEC / CDBL portals.
-# The correct data source for company annual reports is:
-#   BSEC (Bangladesh Securities and Exchange Commission): sec.gov.bd
-#   → a BsecPDFAdapter should be built in Phase 1E+ to replace this stub.
+# Annual report PDFs are hosted on individual company investor relations pages
+# (e.g. bracbank.com/en/investor-relations). There is no centralized source.
+# Building a generic annual_reports_pdf adapter requires per-company IR page
+# scrapers — out of scope for Phase 1E+.
 #
 # This adapter is kept as a documented stub so the annual_reports_pdf stream
 # has a registered adapter (required for registry integrity) and will produce
@@ -102,9 +104,10 @@ class DSEDirectPDFAdapter(BaseAdapter):
         raise AdapterError(
             self.name,
             (
-                f"DSE (dsebd.org) does not host company annual report PDFs "
-                f"(confirmed 2026-05-21). Company filings are on BSEC (sec.gov.bd). "
-                f"Implement BsecPDFAdapter to resolve annual_reports_pdf stream for {ticker}."
+                f"No centralized annual report PDF source exists for DSE companies "
+                f"(confirmed 2026-05-21). DSE and BSEC do not host company PDFs. "
+                f"Annual reports for {ticker} are on the company's own investor "
+                f"relations page. Per-company IR scrapers needed to resolve this stream."
             ),
             retryable=False,
         )

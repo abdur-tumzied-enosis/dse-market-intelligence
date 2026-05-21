@@ -18,6 +18,7 @@ lib/
 lib64/
 .eggs/
 *.so
+.playwright-mcp/
 
 # Virtual environments
 .venv/
