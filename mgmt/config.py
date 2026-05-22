@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # Ops agent
     ops_agent_provider: str = "openrouter"
-    ops_agent_model: str = "anthropic/claude-haiku-4-5"
+    ops_agent_model: str = "deepseek/deepseek-v4-flash:free"
     ops_agent_auto_execute_risk: str = "low"
 
     # Anthropic
