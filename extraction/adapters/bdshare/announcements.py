@@ -146,9 +146,16 @@ class BDShareAGMAdapter(BaseAdapter):
         out["ticker"] = df[ticker_col].apply(normalize_ticker)
 
         agm_col = next((c for c in df.columns if "AGM" in c and "DATE" in c), None)
-        out["agm_date"] = df[agm_col].apply(
-            lambda v: bd_date_str_to_utc(str(v)) if v else None
-        ) if agm_col else None
+
+        def _parse_agm_date(v: object) -> object:
+            if not v:
+                return None
+            # bdshare agmDate contains embedded "\r\n  " whitespace, e.g.
+            # "December\r\n  29, 2020" — normalize to "December 29, 2020"
+            cleaned = " ".join(str(v).split())
+            return bd_date_str_to_utc(cleaned, fmt="%B %d, %Y")
+
+        out["agm_date"] = df[agm_col].apply(_parse_agm_date) if agm_col else None
 
         cash_col = next((c for c in df.columns if "CASH" in c), None)
         out["cash_div_pct"] = df[cash_col].apply(to_decimal) if cash_col else None
