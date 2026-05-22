@@ -51,7 +51,7 @@ services:
       target: worker
     container_name: dse_worker
     restart: unless-stopped
-    command: celery -A extraction.tasks worker --loglevel=${LOG_LEVEL:-info} --concurrency=4
+    command: celery -A extraction.celery_app worker --loglevel=${LOG_LEVEL:-info} --concurrency=4 -Q scraper,nlp,ml,celery
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
       REDIS_URL: redis://redis:6379/0
@@ -165,7 +165,9 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_INSTALL_PLUGINS: "grafana-postgresql-datasource"
+      POSTGRES_USER: ${POSTGRES_USER:-dse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_strong_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dse_intelligence}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
