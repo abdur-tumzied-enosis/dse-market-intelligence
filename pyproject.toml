@@ -46,6 +46,9 @@ dependencies = [
     "langchain-ollama>=0.2.0",
     "langchain-google-genai>=2.0.0",
 
+    # Observability
+    "prometheus-client>=0.20.0",
+
     # Utilities
     "python-dotenv>=1.0.0",
     "structlog>=24.1.0",

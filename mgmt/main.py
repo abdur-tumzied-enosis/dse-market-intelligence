@@ -17,7 +17,7 @@ from extraction.scheduler import configure_scheduler, get_scheduler
 from mgmt.adapter_state import load_overrides
 from mgmt.agent.agent import Agent
 from mgmt.config import get_settings
-from mgmt.routers import agent, alerts, health, jobs, quality, scheduler, streams, tasks
+from mgmt.routers import agent, alerts, health, jobs, metrics, quality, scheduler, streams, tasks
 
 logger = structlog.get_logger(__name__)
 
@@ -87,6 +87,7 @@ app.include_router(health.router)
 app.include_router(alerts.router)
 app.include_router(agent.router)
 app.include_router(tasks.router)
+app.include_router(metrics.router)
 
 
 @app.get("/mgmt/ping")

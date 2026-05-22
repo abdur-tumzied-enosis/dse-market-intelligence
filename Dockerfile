@@ -22,7 +22,20 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM base AS worker
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system playwright
-RUN playwright install chromium --with-deps
+
+# 1. Define the permanent location for browsers in the image
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+
+# 2. Mount apt caches for system dependencies
+# 3. Mount a temporary custom cache directory for the browser binaries
+# 4. Download into the cache, install deps, then copy to the permanent location
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=cache,target=/tmp/pw-cache \
+    PLAYWRIGHT_BROWSERS_PATH=/tmp/pw-cache playwright install chromium --with-deps && \
+    mkdir -p /opt/playwright && \
+    cp -a /tmp/pw-cache/. /opt/playwright/
+
 COPY . .
 
 # ---------------------------------------------------------------------------

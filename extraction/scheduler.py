@@ -218,3 +218,36 @@ async def stop_scheduler(scheduler: AsyncIOScheduler) -> None:
     """Stop the scheduler gracefully."""
     scheduler.shutdown(wait=True)
     logger.info("scheduler: stopped")
+
+
+if __name__ == "__main__":
+    import asyncio
+    import signal
+
+    from mgmt.config import get_settings
+
+    settings = get_settings()
+    sync_url = (
+        settings.database_url
+        .replace("postgresql+asyncpg://", "postgresql+psycopg://")
+        .replace("postgresql://", "postgresql+psycopg://")
+    )
+
+    sched = get_scheduler(sync_url)
+
+    async def _run() -> None:
+        configure_scheduler(sched)
+        sched.start()
+        logger.info("scheduler: running — press Ctrl+C to stop")
+        stop_event = asyncio.Event()
+
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, stop_event.set)
+
+        await stop_event.wait()
+        sched.shutdown(wait=True)
+        logger.info("scheduler: shutdown complete")
+
+    logging.basicConfig(level=settings.log_level.upper())
+    asyncio.run(_run())

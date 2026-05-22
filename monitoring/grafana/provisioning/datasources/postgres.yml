@@ -5,11 +5,11 @@ datasources:
     type: postgres
     uid: dse_postgres
     url: db:5432
-    user: ${POSTGRES_USER:-dse}
+    user: ${POSTGRES_USER}
     secureJsonData:
       password: ${POSTGRES_PASSWORD}
     jsonData:
-      database: ${POSTGRES_DB:-dse_intelligence}
+      database: ${POSTGRES_DB}
       sslmode: disable
       maxOpenConns: 5
       maxIdleConns: 2
