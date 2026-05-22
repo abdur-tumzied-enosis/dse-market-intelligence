@@ -26,9 +26,9 @@ class Settings(BaseSettings):
     mgmt_api_port: int = 8001
     mgmt_api_cors_origins: str = "http://localhost:3000"
 
-    # Ops agent
-    ops_agent_provider: str = "openrouter"
-    ops_agent_model: str = "deepseek/deepseek-v4-flash:free"
+    # agent
+    agent_provider: str = "openrouter"
+    agent_model: str = "deepseek/deepseek-v4-flash:free"
     ops_agent_auto_execute_risk: str = "low"
 
     # Anthropic

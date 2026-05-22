@@ -85,7 +85,7 @@ FastAPI app at port 8001. `mgmt/main.py` lifespan initializes DB pool, APSchedul
 
 ### OpsAgent (`mgmt/agent/`)
 
-LangChain-based agent in `ops_agent.py`. Provider-switchable at runtime via `OPS_AGENT_PROVIDER` env var — supports OpenRouter (default), Anthropic, Ollama, Google. LLM init is in `llm.py`. Tools include pipeline status, read-only DB query, trigger job, pause/promote adapter, fire alert. Most tool implementations are stubs with TODOs.
+LangChain-based agent in `ops_agent.py`. Provider-switchable at runtime via `agent_provider` env var — supports OpenRouter (default), Anthropic, Ollama, Google. LLM init is in `llm.py`. Tools include pipeline status, read-only DB query, trigger job, pause/promote adapter, fire alert. Most tool implementations are stubs with TODOs.
 
 ### Database (`db/`)
 
@@ -112,8 +112,8 @@ Next.js 16 App Router. Four pages: dashboard, streams, alerts, agent. Calls back
 | `DATABASE_URL` | asyncpg URL (app) |
 | `DATABASE_SYNC_URL` | psycopg URL (migrations) |
 | `CELERY_BROKER_URL` | Redis DB 1 |
-| `OPS_AGENT_PROVIDER` | `openrouter` \| `anthropic` \| `ollama` \| `google` |
-| `OPS_AGENT_MODEL` | LLM model ID for ops agent |
+| `agent_provider` | `openrouter` \| `anthropic` \| `ollama` \| `google` |
+| `agent_model` | LLM model ID for ops agent |
 | `SCHEDULER_TIMEZONE` | `Asia/Dhaka` |
 | `DSE_PLAYWRIGHT_HEADLESS` | `true` in Docker, `false` for local debugging |
 

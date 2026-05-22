@@ -17,7 +17,7 @@ from extraction.scheduler import configure_scheduler, get_scheduler
 from mgmt.adapter_state import load_overrides
 from mgmt.agent.agent import Agent
 from mgmt.config import get_settings
-from mgmt.routers import agent, alerts, health, jobs, quality, scheduler, streams
+from mgmt.routers import agent, alerts, health, jobs, quality, scheduler, streams, tasks
 
 logger = structlog.get_logger(__name__)
 
@@ -50,13 +50,13 @@ async def lifespan(app: FastAPI):
 
     # Ops agent
     ops_agent = Agent(
-        provider=settings.ops_agent_provider,
-        model=settings.ops_agent_model,
+        provider=settings.agent_provider,
+        model=settings.agent_model,
         auto_execute_risk=settings.ops_agent_auto_execute_risk,
     )
     ops_agent.scheduler = sched
     app.state.ops_agent = ops_agent
-    logger.info("ops_agent_initialized", provider=settings.ops_agent_provider, model=settings.ops_agent_model)
+    logger.info("ops_agent_initialized", provider=settings.agent_provider, model=settings.agent_model)
 
     yield
 
@@ -86,6 +86,7 @@ app.include_router(quality.router)
 app.include_router(health.router)
 app.include_router(alerts.router)
 app.include_router(agent.router)
+app.include_router(tasks.router)
 
 
 @app.get("/mgmt/ping")

@@ -1,6 +1,6 @@
 # bdshare 1.2.1 — Known Issues
 
-## 1. `get_company_info()` — HTML parsing bug (permanent failure)
+## 1. `get_company_info()` — HTML parsing bug ✅ PATCHED
 
 **Affected adapters:** `BDShareCompanyInfoAdapter`
 
@@ -17,23 +17,9 @@ OSError: Error reading file '<!DOCTYPE html>
 **Root cause:**
 bdshare passes `r.content` (bytes) to `pd.read_html()`, which under pandas 3.x + lxml 6.x routes the content to lxml's `parse()` function. lxml's `parse()` treats a byte string as a **file path** rather than raw HTML content, so it tries to `open("<!DOCTYPE html>...")` as a file and throws `OSError`.
 
-This is a version-compatibility regression: older pandas passed HTML bytes differently to lxml.
-
-**Reproduction:**
-```python
-import bdshare as bd
-bd.get_company_info("SQURPHARMA")  # raises OSError regardless of time of day
-```
+**Fix applied:** `extraction/adapters/bdshare/__init__.py` monkey-patches `bdshare.stock.market.pd` with a thin proxy that wraps `bytes` arguments in `io.BytesIO` before delegating to `pd.read_html`. Applied once at package import. `tests/conftest.py` applies the same patch before any pytest run (including smoke tests).
 
 **Affected versions:** bdshare 1.2.1 + pandas >=3.0 + lxml >=6.0
-
-**Workaround options:**
-1. Monkey-patch bdshare: wrap `pd.read_html(r.content)` → `pd.read_html(io.BytesIO(r.content))`
-2. Downgrade pandas to 2.x (breaks other things)
-3. Implement own DSE company info scraper (`dsebd.org/displayCompany.php?name=TICKER`)
-4. Pin lxml to 5.x and test
-
-**Impact:** Low — AmarStock is primary for fundamentals. bdshare company info was always priority-2 fallback.
 
 ---
 

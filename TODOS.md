@@ -168,9 +168,9 @@
 
 ### Phase 1L — Testing + Hardening
 
-- [ ] Per-adapter unit tests (normalize() on fixture data) — all adapters
-- [ ] Failover integration tests — all 16 streams
-- [ ] Quality check unit tests — all rule sets
+- [~] Per-adapter unit tests (normalize() on fixture data) — amarstock/bdshare/dse_direct done (194 tests); macro + bsec missing
+- [~] Failover integration tests — 2/16 streams done (live_prices + historical_ohlcv); remaining 14 streams not covered
+- [x] Quality check unit tests — all rule sets covered (empty, missing_cols, price_spike, negative_price)
 - [ ] Health check tests — mock source down, verify alert fires
 - [ ] Load test: 350 tickers × bdshare fundamentals — measure rate limiting behavior
 - [ ] Run full pipeline for 1 week — verify no silent failures

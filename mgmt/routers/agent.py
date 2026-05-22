@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+import structlog
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+
+logger = structlog.get_logger(__name__)
 from pydantic import BaseModel
 
 from mgmt.deps import get_db, get_ops_agent
@@ -27,11 +30,22 @@ async def agent_status(pool=Depends(get_db)):
 
 
 @router.post("/run")
-async def trigger_sweep(request: Request, pool=Depends(get_db)):
-    """Trigger an immediate ops agent sweep."""
+async def trigger_sweep(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    pool=Depends(get_db),
+):
+    """Trigger an immediate ops agent sweep (runs in background)."""
     agent = await get_ops_agent(request)
-    result = await agent.sweep(pool)
-    return result
+
+    async def _run():
+        try:
+            await agent.sweep(pool)
+        except Exception as exc:
+            logger.error("background_sweep_failed", error=str(exc))
+
+    background_tasks.add_task(_run)
+    return {"status": "started"}
 
 
 @router.get("/decisions")

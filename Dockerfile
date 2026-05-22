@@ -1,8 +1,11 @@
+# syntax=docker/dockerfile:1
 FROM python:3.12-slim AS base
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
@@ -12,11 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml .
-RUN uv pip install --system --no-cache .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system .
 
 # ---------------------------------------------------------------------------
 FROM base AS worker
-RUN uv pip install --system --no-cache playwright
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --system playwright
 RUN playwright install chromium --with-deps
 COPY . .
 
