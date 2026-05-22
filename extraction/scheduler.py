@@ -118,88 +118,82 @@ async def job_health_checks() -> None:
 
 
 def configure_scheduler(scheduler: AsyncIOScheduler) -> None:
-    """Register all scheduled jobs."""
+    """Register all scheduled jobs. Timings come from mgmt.config.Settings."""
+    from mgmt.config import get_settings
+    cfg = get_settings()
 
-    # Every 15 min during market hours (Sun–Thu 10:00–14:30)
     scheduler.add_job(
         job_live_prices,
         trigger="cron",
-        day_of_week="mon,tue,wed,thu,sun",
-        hour="10-14",
-        minute="0,15,30,45",
+        day_of_week=cfg.live_prices_market_days,
+        hour=f"{cfg.live_prices_market_open_hour}-{cfg.live_prices_market_close_hour}",
+        minute=cfg.live_prices_minutes,
         id="live_price_pull",
         replace_existing=True,
     )
 
-    # End of day (14:35 Sun–Thu)
     scheduler.add_job(
         job_eod_snapshot,
         trigger="cron",
-        day_of_week="mon,tue,wed,thu,sun",
-        hour=14,
-        minute=35,
+        day_of_week=cfg.live_prices_market_days,
+        hour=cfg.eod_snapshot_hour,
+        minute=cfg.eod_snapshot_minute,
         id="eod_snapshot",
         replace_existing=True,
     )
 
-    # Every 2 hours
     scheduler.add_job(
         job_announcements,
         trigger="interval",
-        hours=2,
+        hours=cfg.announcements_interval_hours,
         id="dse_announcements",
         replace_existing=True,
     )
 
-    # Daily 02:00
     scheduler.add_job(
         job_daily_macro,
         trigger="cron",
-        hour=2,
-        minute=0,
+        hour=cfg.daily_macro_hour,
+        minute=cfg.daily_macro_minute,
         id="daily_macro",
         replace_existing=True,
     )
 
-    # Weekly Sunday 23:00
     scheduler.add_job(
         job_weekly_fundamentals,
         trigger="cron",
-        day_of_week="sun",
-        hour=23,
-        minute=0,
+        day_of_week=cfg.weekly_fundamentals_day,
+        hour=cfg.weekly_fundamentals_hour,
+        minute=cfg.weekly_fundamentals_minute,
         id="weekly_fundamentals",
         replace_existing=True,
     )
 
-    # Monthly 1st day 01:00
     scheduler.add_job(
         job_monthly,
         trigger="cron",
-        day=1,
-        hour=1,
-        minute=0,
+        day=cfg.monthly_day,
+        hour=cfg.monthly_hour,
+        minute=cfg.monthly_minute,
         id="monthly",
         replace_existing=True,
     )
 
-    # Quarterly Jan/Apr/Jul/Oct 1st 03:00
     scheduler.add_job(
         job_quarterly,
         trigger="cron",
-        month="1,4,7,10",
-        day=1,
-        hour=3,
-        minute=0,
+        month=cfg.quarterly_months,
+        day=cfg.quarterly_day,
+        hour=cfg.quarterly_hour,
+        minute=cfg.quarterly_minute,
         id="quarterly_retrain",
         replace_existing=True,
     )
 
-    # Every 6 hours — source health checks
     scheduler.add_job(
         job_health_checks,
         trigger="interval",
-        hours=6,
+        hours=cfg.health_check_interval_hours,
         id="health_checks",
         replace_existing=True,
     )

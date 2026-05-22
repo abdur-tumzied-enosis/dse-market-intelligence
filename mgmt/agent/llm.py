@@ -17,6 +17,8 @@ def make_llm(provider: str, model: str, settings) -> BaseChatModel:
         return ChatGoogleGenerativeAI(
             model=model or "gemini-2.5-flash",
             api_key=settings.google_api_key,
+            request_timeout=60,
+            max_retries=3,
         )
 
     # default: openrouter

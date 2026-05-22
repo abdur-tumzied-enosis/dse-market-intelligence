@@ -159,7 +159,12 @@ async def agent_chat(body: ChatRequest, request: Request, pool=Depends(get_db)):
     agent = await get_ops_agent(request)
 
     async def event_stream():
-        async for chunk in agent.chat_stream(pool, body.messages):
-            yield f"data: {json.dumps(chunk)}\n\n"
+        try:
+            async for chunk in agent.chat_stream(pool, body.messages):
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as exc:
+            import structlog
+            structlog.get_logger(__name__).error("agent_chat.stream_error", error=str(exc))
+            yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")

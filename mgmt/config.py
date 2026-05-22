@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # agent
     agent_provider: str = "openrouter"
-    agent_model: str = "deepseek/deepseek-v4-flash:free"
+    agent_model: str = "gemini-2.5-flash"
     ops_agent_auto_execute_risk: str = "low"
 
     # Anthropic
@@ -44,14 +44,43 @@ class Settings(BaseSettings):
     # Google Generative AI (Gemini)
     google_api_key: str = ""
 
-    # Scheduler
+    # ── Scheduler ────────────────────────────────────────────────────────
     scheduler_timezone: str = "Asia/Dhaka"
-    live_prices_interval_minutes: int = 5
-    market_indices_interval_minutes: int = 5
-    fundamentals_interval_hours: int = 6
-    announcements_interval_hours: int = 1
-    news_interval_minutes: int = 30
-    macro_interval_hours: int = 24
+
+    # live_prices: cron every N minutes during market hours (Sun–Thu 10:00–14:30)
+    live_prices_market_days: str = "mon,tue,wed,thu,sun"
+    live_prices_market_open_hour: int = 10
+    live_prices_market_close_hour: int = 14
+    live_prices_minutes: str = "0,15,30,45"
+
+    # eod_snapshot: cron at HH:MM on market days
+    eod_snapshot_hour: int = 14
+    eod_snapshot_minute: int = 35
+
+    # announcements: interval every N hours
+    announcements_interval_hours: int = 2
+
+    # daily_macro: cron at HH:MM every day
+    daily_macro_hour: int = 2
+    daily_macro_minute: int = 0
+
+    # weekly_fundamentals: cron on day_of_week at HH:MM
+    weekly_fundamentals_day: str = "sun"
+    weekly_fundamentals_hour: int = 23
+    weekly_fundamentals_minute: int = 0
+
+    # monthly: cron on day N of month at HH:MM
+    monthly_day: int = 1
+    monthly_hour: int = 1
+    monthly_minute: int = 0
+
+    # quarterly_retrain: cron on months/day at HH:MM
+    quarterly_months: str = "1,4,7,10"
+    quarterly_day: int = 1
+    quarterly_hour: int = 3
+    quarterly_minute: int = 0
+
+    # health_checks: interval every N hours
     health_check_interval_hours: int = 6
 
     # Alerts — email

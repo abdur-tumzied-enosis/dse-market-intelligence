@@ -75,11 +75,11 @@ class PipelineStatusInput(BaseModel):
 
 class QueryDbInput(BaseModel):
     sql: str = Field(description="Read-only SELECT statement")
-    params: list[Any] = Field(default_factory=list, description="Positional query parameters")
+    params: list[str] = Field(default_factory=list, description="Positional query parameters as strings")
 
 
 class TriggerJobInput(BaseModel):
-    job_id: str = Field(description="Scheduler job ID, e.g. live_price_pull, eod_snapshot, health_checks")
+    job_id: str = Field(description="Scheduler job ID. Valid IDs: live_price_pull, eod_snapshot, dse_announcements, daily_macro, weekly_fundamentals, monthly, quarterly_retrain, health_checks")
     reason: str = Field(default="")
 
 
@@ -99,7 +99,7 @@ class FireAlertInput(BaseModel):
     severity: Literal["INFO", "WARNING", "CRITICAL"]
     message: str
     stream_name: str = Field(default="")
-    details: dict[str, Any] = Field(default_factory=dict)
+    details: dict[str, str] = Field(default_factory=dict)
 
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -207,10 +207,12 @@ class Agent:
         self._auto_execute_risk = auto_execute_risk
         self.scheduler = None
         self._llm_base = None  # cached base LLM (without tools binding)
+        logger.info("agent.init", provider=provider, model=model, auto_execute_risk=auto_execute_risk)
 
     @property
     def _base_llm(self):
         if self._llm_base is None:
+            logger.debug("agent.llm_init", provider=self._provider, model=self._model)
             self._llm_base = make_llm(self._provider, self._model, get_settings())
         return self._llm_base
 
@@ -218,7 +220,10 @@ class Agent:
         if self._provider == "ollama":
             return True
         s = get_settings()
-        return bool(s.google_api_key if self._provider == "google" else s.openrouter_api_key)
+        ok = bool(s.google_api_key if self._provider == "google" else s.openrouter_api_key)
+        if not ok:
+            logger.warning("agent.not_configured", provider=self._provider)
+        return ok
 
     def _system(self, scratchpad: list[str] | None = None) -> SystemMessage:
         return _build_system(self._auto_execute_risk, scratchpad)
@@ -236,6 +241,7 @@ class Agent:
             n = note.strip()
             if n:
                 state.scratchpad.append(n)
+            logger.debug("tool.scratchpad", total_notes=len(state.scratchpad))
             return {"saved": True, "total_notes": len(state.scratchpad)}
 
         @tool("get_pipeline_status", args_schema=PipelineStatusInput)
@@ -248,38 +254,50 @@ class Agent:
             """Run a read-only SELECT against the pipeline database (max 50 rows returned)."""
             sql = sql.strip()
             if not sql.upper().startswith("SELECT") or _SAFE_SQL_RE.search(sql):
+                logger.warning("tool.query_db_readonly.blocked", sql=sql[:120])
                 return {"error": "Only plain SELECT statements allowed"}
+            logger.debug("tool.query_db_readonly", sql=sql[:120], params=params)
             try:
                 rows = await pool.fetch(sql, *(params or []))
-                return [dict(r) for r in rows[:_MAX_ROWS]]
+                result = [dict(r) for r in rows[:_MAX_ROWS]]
+                logger.info("tool.query_db_readonly.ok", rows_returned=len(result))
+                return result
             except Exception as exc:
+                logger.error("tool.query_db_readonly.error", error=str(exc), sql=sql[:120])
                 return {"error": str(exc)}
 
         @tool("trigger_job", args_schema=TriggerJobInput)
         async def trigger_job(job_id: str, reason: str = "") -> dict:
             """Trigger a scheduler job to run immediately by job ID."""
+            logger.info("tool.trigger_job", job_id=job_id, reason=reason)
             if agent.scheduler:
                 import pytz
                 try:
                     agent.scheduler.modify_job(job_id, next_run_time=datetime.now(pytz.utc))
+                    logger.info("tool.trigger_job.ok", job_id=job_id)
                     return {"status": "triggered", "job_id": job_id}
                 except Exception as exc:
+                    logger.error("tool.trigger_job.error", job_id=job_id, error=str(exc))
                     return {"error": str(exc)}
+            logger.error("tool.trigger_job.no_scheduler")
             return {"error": "scheduler not attached"}
 
         @tool("pause_adapter", args_schema=PauseAdapterInput)
         async def pause_adapter(stream_name: str, adapter_name: str, reason: str = "") -> dict:
             """Pause a failing adapter within a named stream."""
+            logger.info("tool.pause_adapter", stream=stream_name, adapter=adapter_name, reason=reason)
             from mgmt.adapter_state import set_override
             await set_override(
                 pool, stream_name, adapter_name,
                 paused=True, reason=reason or "agent pause",
             )
+            logger.info("tool.pause_adapter.ok", stream=stream_name, adapter=adapter_name)
             return {"status": "paused", "stream": stream_name, "adapter": adapter_name}
 
         @tool("promote_adapter", args_schema=PromoteAdapterInput)
         async def promote_adapter(stream_name: str, adapter_name: str, reason: str = "") -> dict:
             """Increase an adapter's priority so it is tried before lower-priority adapters."""
+            logger.info("tool.promote_adapter", stream=stream_name, adapter=adapter_name, reason=reason)
             from mgmt.adapter_state import get_override, set_override
             ov = get_override(stream_name, adapter_name)
             new_delta = ov.priority_delta - 1
@@ -287,6 +305,7 @@ class Agent:
                 pool, stream_name, adapter_name,
                 priority_delta=new_delta, reason=reason or "agent promote",
             )
+            logger.info("tool.promote_adapter.ok", stream=stream_name, adapter=adapter_name, priority_delta=new_delta)
             return {"status": "promoted", "priority_delta": new_delta}
 
         @tool("fire_alert", args_schema=FireAlertInput)
@@ -297,6 +316,7 @@ class Agent:
             details: dict[str, Any] | None = None,
         ) -> dict:
             """Create a pipeline alert for human attention."""
+            logger.info("tool.fire_alert", severity=severity, stream=stream_name, message=message[:120])
             from extraction.observability import fire_alert as _fire
             await _fire(
                 severity=severity,
@@ -314,7 +334,9 @@ class Agent:
     # ── Public API ─────────────────────────────────────────────────────────────
 
     async def sweep(self, pool: asyncpg.Pool) -> dict:
+        logger.info("sweep.start", provider=self._provider, model=self._model)
         if not self._is_configured():
+            logger.warning("sweep.skipped", reason="not_configured")
             return {"skipped": "OPS_AGENT provider not configured"}
         state = _RunState(messages=[
             self._system(),
@@ -324,10 +346,14 @@ class Agent:
                 "needed corrective actions."
             )),
         ])
-        return await self._run_loop(pool, state, mode="scheduled")
+        result = await self._run_loop(pool, state, mode="scheduled")
+        logger.info("sweep.done", decisions=len(result.get("decisions", [])))
+        return result
 
     async def on_alert(self, pool: asyncpg.Pool, alert: dict) -> dict:
+        logger.info("on_alert.start", severity=alert.get("severity"), stream=alert.get("stream_name"))
         if not self._is_configured():
+            logger.warning("on_alert.skipped", reason="not_configured")
             return {"skipped": "OPS_AGENT provider not configured"}
         state = _RunState(messages=[
             self._system(),
@@ -337,11 +363,16 @@ class Agent:
                 "analysis in the scratchpad, then take appropriate actions."
             )),
         ])
-        return await self._run_loop(pool, state, mode="alert_hook")
+        result = await self._run_loop(pool, state, mode="alert_hook")
+        logger.info("on_alert.done", decisions=len(result.get("decisions", [])))
+        return result
 
     async def chat_stream(
         self, pool: asyncpg.Pool, messages: list[dict]
     ) -> AsyncGenerator[dict, None]:
+        n_user_msgs = sum(1 for m in messages if m.get("role") == "user")
+        logger.info("chat_stream.start", history_len=n_user_msgs)
+
         if not self._is_configured():
             yield {"type": "text", "text": "Ops agent not configured (provider API key missing)."}
             yield {"type": "done"}
@@ -352,29 +383,43 @@ class Agent:
         tool_map = {t.name: t for t in tools}
         llm = self._base_llm.bind_tools(tools)
 
-        for _ in range(_MAX_LOOP):
+        for loop_idx in range(_MAX_LOOP):
+            logger.debug("chat_stream.loop", iteration=loop_idx + 1, max=_MAX_LOOP)
             # SELECT: refresh system message (time + market + notes) each turn
             state.messages[0] = self._system(state.scratchpad)
             # COMPRESS: trim if history has grown large
             state.messages = _trim(state.messages)
 
             full: AIMessage | None = None
+            text_chars = 0
             async for chunk in llm.astream(state.messages):
                 if isinstance(chunk.content, str) and chunk.content:
+                    text_chars += len(chunk.content)
                     yield {"type": "text", "text": chunk.content}
                 full = chunk if full is None else full + chunk  # type: ignore[operator]
 
+            logger.debug("chat_stream.streamed", iteration=loop_idx + 1, chars=text_chars)
+
             if full is None:
+                logger.warning("chat_stream.empty_response", iteration=loop_idx + 1)
                 break
             state.messages.append(full)
 
             if not full.tool_calls:
+                logger.info("chat_stream.done", iterations=loop_idx + 1, chars=text_chars)
                 break
 
+            tool_names = [tc["name"] for tc in full.tool_calls]
+            logger.info("chat_stream.tool_calls", iteration=loop_idx + 1, tools=tool_names)
             tool_msgs: list[BaseMessage] = []
             for tc in full.tool_calls:
                 name, inp = tc["name"], tc["args"]
-                result = await tool_map[name].ainvoke(inp) if name in tool_map else {"error": f"Unknown tool: {name}"}
+                if name not in tool_map:
+                    logger.error("chat_stream.unknown_tool", tool=name)
+                    result: Any = {"error": f"Unknown tool: {name}"}
+                else:
+                    logger.debug("chat_stream.invoke_tool", tool=name)
+                    result = await tool_map[name].ainvoke(inp)
                 compressed = _compress_result(result)
                 yield {"type": "tool_call", "name": name, "input": inp}
                 yield {"type": "tool_result", "name": name, "result": compressed}
@@ -384,17 +429,21 @@ class Agent:
                     name=name,
                 ))
             state.messages.extend(tool_msgs)
+        else:
+            logger.warning("chat_stream.max_loop_reached", max=_MAX_LOOP)
 
         yield {"type": "done"}
 
     # ── Internal loop ──────────────────────────────────────────────────────────
 
     async def _run_loop(self, pool: asyncpg.Pool, state: _RunState, mode: str) -> dict:
+        logger.info("run_loop.start", mode=mode, max_loop=_MAX_LOOP)
         tools = self._make_tools(pool, state)
         tool_map = {t.name: t for t in tools}
         llm = self._base_llm.bind_tools(tools)
 
-        for _ in range(_MAX_LOOP):
+        for loop_idx in range(_MAX_LOOP):
+            logger.debug("run_loop.iteration", mode=mode, iteration=loop_idx + 1)
             # SELECT: inject live context + current scratchpad each turn
             state.messages[0] = self._system(state.scratchpad)
             # COMPRESS: trim before sending to the LLM
@@ -407,7 +456,11 @@ class Agent:
                 state.final_text = response.content
 
             if not response.tool_calls:
+                logger.info("run_loop.done", mode=mode, iterations=loop_idx + 1, decisions=len(state.decisions))
                 break
+
+            tool_names = [tc["name"] for tc in response.tool_calls]
+            logger.info("run_loop.tool_calls", mode=mode, iteration=loop_idx + 1, tools=tool_names)
 
             tool_msgs: list[BaseMessage] = []
             for tc in response.tool_calls:
@@ -417,10 +470,12 @@ class Agent:
                     risk = "high"
 
                 auto = self._should_auto(risk, mode)
+                logger.debug("run_loop.tool_dispatch", tool=name, risk=risk, auto=auto, mode=mode)
 
                 if auto and name in tool_map:
                     result = await tool_map[name].ainvoke(inp)
                 else:
+                    logger.info("run_loop.tool_queued", tool=name, risk=risk, mode=mode)
                     result = {"status": "queued_for_approval", "action": name, "input": inp}
 
                 compressed = _compress_result(result)
@@ -444,6 +499,8 @@ class Agent:
                     name=name,
                 ))
             state.messages.extend(tool_msgs)
+        else:
+            logger.warning("run_loop.max_loop_reached", mode=mode, max=_MAX_LOOP)
 
         return {"decisions": state.decisions, "summary": state.final_text}
 
@@ -511,6 +568,16 @@ class Agent:
                 if age > 30:
                     stale_streams.append({"stream": row["stream_name"], "age_minutes": round(age)})
 
+        logger.info(
+            "get_pipeline_status.summary",
+            hours_back=hours_back,
+            jobs_total=len(job_rows),
+            jobs_failed=len(failed),
+            sources_unreachable=len(unreachable),
+            unacked_alerts=len(alerts),
+            stale_streams=len(stale_streams),
+            market_open=_is_market_open(),
+        )
         return {
             "as_of": now.isoformat(),
             "market_open": _is_market_open(),
@@ -555,4 +622,13 @@ class Agent:
             status,
             json.dumps(tool_calls),
         )
-        return row["id"]  # type: ignore[index]
+        decision_id: int = row["id"]  # type: ignore[index]
+        logger.info(
+            "decision.recorded",
+            decision_id=decision_id,
+            action=action_type,
+            risk=risk_level,
+            status=status,
+            mode=run_mode,
+        )
+        return decision_id
