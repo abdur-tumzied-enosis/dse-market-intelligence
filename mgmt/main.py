@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from db.pool import close_pool, get_pool
 from extraction.scheduler import configure_scheduler, get_scheduler
 from mgmt.adapter_state import load_overrides
-from mgmt.agent.ops_agent import OpsAgent
+from mgmt.agent.agent import Agent
 from mgmt.config import get_settings
 from mgmt.routers import agent, alerts, health, jobs, quality, scheduler, streams
 
@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     logger.info("scheduler_started")
 
     # Ops agent
-    ops_agent = OpsAgent(
+    ops_agent = Agent(
         provider=settings.ops_agent_provider,
         model=settings.ops_agent_model,
         auto_execute_risk=settings.ops_agent_auto_execute_risk,

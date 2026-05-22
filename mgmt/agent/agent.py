@@ -171,7 +171,7 @@ def _to_lc(messages: list[dict]) -> list[BaseMessage]:
     return result
 
 
-class OpsAgent:
+class Agent:
     def __init__(self, provider: str, model: str, auto_execute_risk: str) -> None:
         self._provider = provider
         self._model = model
