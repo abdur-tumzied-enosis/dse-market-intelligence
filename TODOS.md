@@ -95,6 +95,9 @@
 - [x] `extraction/adapters/dse_direct/announcements.py` — `DSEDirectAnnouncementsAdapter` + `DSEDirectPSNAdapter` (Playwright; key-value row parser; 106/548 rows; published_at correct)
 - [x] `extraction/adapters/dse_direct/depth.py` — `DSEDirectDepthPlaywrightAdapter` (price stats only; no auth → no bid/ask; quality=partial)
 - [x] `extraction/adapters/dse_direct/pdf_reports.py` — `DSEDirectPDFAdapter` STUB — DSE + BSEC don't host company annual report PDFs; per-company IR pages only; no viable generic scraper
+- [~] `extraction/adapters/dse_direct/company_info.py` — `DSEDirectCompanyInfoAdapter` (in progress)
+- [~] `extraction/adapters/dse_direct/gainers_losers.py` — `DSEDirectGainersLosersAdapter` (in progress)
+- [~] `extraction/adapters/dse_direct/sector_pe.py` — `DSEDirectSectorPEAdapter` (in progress)
 - [s] Test PDF discovery for 3 tickers — N/A; confirmed no centralized PDF source exists
 - [s] Structure hash baseline — deferred to Phase 1L
 - [x] `tests/smoke/test_dse_direct_smoke.py` — 9/9 pass
@@ -171,7 +174,7 @@
 - [~] Per-adapter unit tests (normalize() on fixture data) — amarstock/bdshare/dse_direct done (194 tests); macro + bsec missing
 - [~] Failover integration tests — 2/16 streams done (live_prices + historical_ohlcv); remaining 14 streams not covered
 - [x] Quality check unit tests — all rule sets covered (empty, missing_cols, price_spike, negative_price)
-- [ ] Health check tests — mock source down, verify alert fires
+- [x] Health check tests — mock source down, verify alert fires
 - [ ] Load test: 350 tickers × bdshare fundamentals — measure rate limiting behavior
 - [ ] Run full pipeline for 1 week — verify no silent failures
 
@@ -187,6 +190,8 @@
 - [ ] MinIO / S3 setup for PDF storage
 - [ ] DB backup strategy (pg_dump schedule)
 - [ ] Connection pooling (pgBouncer or asyncpg pool tuning)
+- [ ] `db/migrations/011_llm_usage_log.sql` — `llm_usage_log` table (user, tier, model, tokens, cache_hit, cost_usd)
+- [ ] Neo4j service in docker-compose — for Graphiti knowledge graph (planned after extraction layer stable)
 
 ---
 
@@ -211,16 +216,26 @@
 ## Layer 4 — LLM Agent Layer (FUTURE)
 
 > Not started. Requires storage + ML layers.
+> **Framework:** LangChain (`langchain-core`, `langchain-google-genai`). Default model: Gemini 2.5 Flash. Provider switchable via `agent_provider` env var (google|anthropic|openai|openrouter|ollama) — zero code change.
 
-- [ ] Claude client setup with prompt caching
+- [ ] LangChain setup: install `langchain-google-genai`, `langchain-anthropic`, `langchain-openai`, `langchain-community`
+- [ ] `chat/agent.py` — `AgentExecutor` with `create_tool_calling_agent`; reuse `get_llm()` from `mgmt/agent/llm.py`
 - [ ] System prompt finalized (English + Bengali)
-- [ ] All 8 tool functions implemented + `execute_tool()` router
-- [ ] RAG pipeline: embed query → pgvector search → inject context
-- [ ] SSE streaming chat endpoint (`POST /api/chat`)
-- [ ] Multi-turn conversation support
+- [ ] All 8 `@tool` decorated functions implemented: `get_stock_price`, `get_fundamentals`, `get_sector_comparison`, `search_news`, `get_ml_prediction`, `screen_stocks`, `get_portfolio_analysis`, `get_macro_data`
+- [ ] RAG pipeline: embed query (voyage-finance-2) → pgvector search → inject top-k chunks into context
+- [ ] SSE streaming chat endpoint (`POST /api/chat`) via `AgentExecutor.astream()`
+- [ ] Multi-turn conversation support (`chat_history` via `MessagesPlaceholder`)
+- [ ] Context caching: Gemini `CachedContent` API — cache system prompt + stock context per session (30-min TTL, 75% token discount)
+- [ ] Model routing: thinking mode for complex analysis; non-thinking for simple lookups
+- [ ] Token budget by tier: free=4k, pro=12k, pro_plus=24k, institution=60k context tokens
+- [ ] Query quota middleware (Redis counter per user per day): free=3, pro=30, pro_plus=100, institution=unlimited
+- [ ] LLM usage logging: write to `llm_usage_log` table after every call; Grafana cost panels
 - [ ] Bengali language test suite
-- [ ] Annual report PDF extraction via Claude Files API
-- [ ] Haiku sentiment scoring pipeline for news articles
+- [ ] Annual report PDF extraction via Gemini Files API (`google.generativeai.upload_file`; not LangChain — file upload has no LC abstraction)
+- [ ] Gemini Flash sentiment scoring pipeline for news articles (daily, per `process_new_articles` Celery task)
+- [ ] Graphiti + Neo4j knowledge graph (planned — defer until extraction layer + pgvector RAG proven in prod)
+  - Entities: Company, Director, Event, Metric; edges: FILED, ANNOUNCED, DIVESTED, LEADS, OWNS
+  - New tool: `search_knowledge_graph()` for ownership chains, insider signals, entity timelines
 
 ---
 
@@ -236,7 +251,10 @@
 - [ ] `/api/chat` SSE + `/api/analyze` + `/api/compare`
 - [ ] Portfolio CRUD + analysis
 - [ ] PDF report generation (WeasyPrint)
-- [ ] Rate limiting per subscription tier (free / pro / institution)
+- [ ] Rate limiting per subscription tier: free=50 calls/day, pro=1000/day, institution=unlimited
+- [ ] Chat quota enforcement: free=3 queries/day, pro=30, pro_plus=100 (Redis counter, resets midnight BD)
+- [ ] LLM cost monitoring dashboard: daily spend, top users, cache hit rate (from `llm_usage_log`)
+- [ ] Budget hard cap: throttle all non-institution users when daily LLM spend > $100
 - [ ] Redis caching per endpoint (TTLs per data type)
 - [ ] API integration tests
 

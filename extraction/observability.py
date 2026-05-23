@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from typing import Any
 
+import httpx
 import structlog
 
 from extraction.health import check_source_health
@@ -143,6 +144,10 @@ async def fire_alert(
         if sent:
             notified_via.append("email")
 
+        sent = await _send_telegram_alert(severity, message, details)
+        if sent:
+            notified_via.append("telegram")
+
     if severity == "CRITICAL":
         sent = await _send_whatsapp_alert(message, details)
         if sent:
@@ -193,6 +198,37 @@ async def _send_email_alert(severity: str, message: str, details: dict[str, Any]
         return True
     except Exception as exc:
         logger.warning("email_alert_failed", error=str(exc))
+        return False
+
+
+async def _send_telegram_alert(severity: str, message: str, details: dict[str, Any]) -> bool:
+    """Send alert via Telegram Bot API. Returns True if sent successfully."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+
+    if not token or not chat_id:
+        logger.debug("telegram_alert_skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set")
+        return False
+
+    icon = "🚨" if severity == "CRITICAL" else "⚠️"
+    text = f"{icon} <b>[DSE Pipeline {severity}]</b> {message}"
+    if details:
+        lines = "\n".join(f"  <code>{k}</code>: {v}" for k, v in list(details.items())[:5])
+        text += f"\n\n{lines}"
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+            )
+        if resp.status_code == 200:
+            logger.info("telegram_alert_sent", chat_id=chat_id, severity=severity)
+            return True
+        logger.warning("telegram_alert_failed", status=resp.status_code, body=resp.text[:200])
+        return False
+    except Exception as exc:
+        logger.warning("telegram_alert_failed", error=str(exc))
         return False
 
 

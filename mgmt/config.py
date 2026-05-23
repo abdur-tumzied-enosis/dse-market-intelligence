@@ -83,6 +83,20 @@ class Settings(BaseSettings):
     # health_checks: interval every N hours
     health_check_interval_hours: int = 6
 
+    # ── Pipeline test mode ────────────────────────────────────────────────
+    # Set PIPELINE_TEST_MODE=true to compress all intervals to minutes.
+    # Lets you verify the full pipeline runs without silent failures in ~1h.
+    pipeline_test_mode: bool = False
+    # Compressed intervals (minutes) used when pipeline_test_mode=true
+    test_live_prices_minutes: int = 2
+    test_eod_snapshot_minutes: int = 5
+    test_announcements_minutes: int = 5
+    test_daily_macro_minutes: int = 7
+    test_weekly_fundamentals_minutes: int = 10
+    test_monthly_minutes: int = 15
+    test_quarterly_minutes: int = 20
+    test_health_check_minutes: int = 5
+
     # Alerts — email
     smtp_host: str = "smtp.gmail.com"
     smtp_port: int = 587
@@ -95,6 +109,10 @@ class Settings(BaseSettings):
     twilio_auth_token: str = ""
     twilio_whatsapp_from: str = "whatsapp:+14155238886"
     twilio_whatsapp_to: str = ""
+
+    # Alerts — Telegram
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
     # Observability
     grafana_port: int = 3001

@@ -18,9 +18,12 @@ from extraction.adapters.bdshare.live_prices import BDShareLivePricesAdapter
 from extraction.adapters.bdshare.market_info import BDShareMarketInfoAdapter
 from extraction.adapters.bdshare.sector import BDShareSectorAdapter
 from extraction.adapters.dse_direct.announcements import DSEDirectAnnouncementsAdapter, DSEDirectPSNAdapter
+from extraction.adapters.dse_direct.company_info import DSEDirectCompanyInfoAdapter
 from extraction.adapters.dse_direct.depth import DSEDirectDepthPlaywrightAdapter
+from extraction.adapters.dse_direct.gainers_losers import DSEDirectGainersAdapter, DSEDirectLosersAdapter
 from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
 from extraction.adapters.dse_direct.pdf_reports import DSEDirectPDFAdapter
+from extraction.adapters.dse_direct.sector_pe import DSEDirectSectorPEAdapter
 from extraction.adapters.bsec.ipo_scraper import BsecIPOAdapter
 from extraction.adapters.macro.bangladesh_bank import BangladeshBankAdapter
 from extraction.adapters.macro.worldbank import WorldBankAdapter
@@ -63,37 +66,54 @@ def _build_registry() -> dict[str, DataStream]:
 
     # ------------------------------------------------------------------
     # Stream: fundamentals
-    # Primary: amarstock scrape (richest data), bdshare get_company_info
+    # Primary: amarstock (richest — 93 fields incl. quarterly EPS + MA signals)
+    # Fallback 2: bdshare get_company_info (BLOCKED by lxml OSError — kept for retry)
+    # Fallback 3: dse_direct /displayCompany.php (partial — no quarterly EPS/MA)
     # ------------------------------------------------------------------
     streams["fundamentals"] = DataStream(name="fundamentals", adapters=[
         AmarStockFundamentalsAdapter(),
         BDShareCompanyInfoAdapter(),
+        DSEDirectCompanyInfoAdapter(),
     ])
 
     # ------------------------------------------------------------------
     # Stream: sector_performance
-    # Primary: bdshare (get_sector_performance)
+    # Primary: dse_direct sectoral PE page (confirmed 2026-05-23)
+    # bdshare get_sector_performance() is dead — hits 404 PHP URLs
     # ------------------------------------------------------------------
     streams["sector_performance"] = DataStream(name="sector_performance", adapters=[
-        BDShareSectorAdapter(),
+        DSEDirectSectorPEAdapter(),
     ])
 
     # ------------------------------------------------------------------
     # Stream: announcements
-    # Primary: bdshare (get_corporate_announcements), dse_direct scrape
+    # Primary: dse_direct Playwright (confirmed working 2026-05-21)
+    # bdshare get_corporate_announcements() returns empty even during market hours
     # ------------------------------------------------------------------
     streams["announcements"] = DataStream(name="announcements", adapters=[
-        BDShareAnnouncementsAdapter(),
         DSEDirectAnnouncementsAdapter(),
+        BDShareAnnouncementsAdapter(),
     ])
 
     # ------------------------------------------------------------------
     # Stream: psn (price sensitive news)
-    # Primary: bdshare (get_price_sensitive_news)
+    # Primary: dse_direct Playwright (confirmed working 2026-05-21)
+    # bdshare get_price_sensitive_news() returns empty even during market hours
     # ------------------------------------------------------------------
     streams["psn"] = DataStream(name="psn", adapters=[
-        BDSharePSNAdapter(),
         DSEDirectPSNAdapter(),
+        BDSharePSNAdapter(),
+    ])
+
+    # ------------------------------------------------------------------
+    # Stream: top_gainers_losers
+    # Primary: dse_direct (top_ten_gainer.php + top_ten_loser.php)
+    # bdshare get_top_gainers_losers() is dead — hits 404 PHP URLs
+    # Returns combined df with direction='gainer'|'loser'
+    # ------------------------------------------------------------------
+    streams["top_gainers_losers"] = DataStream(name="top_gainers_losers", adapters=[
+        DSEDirectGainersAdapter(),
+        DSEDirectLosersAdapter(),
     ])
 
     # ------------------------------------------------------------------

@@ -110,14 +110,14 @@ class DSEDirectAnnouncementsAdapter(BaseAdapter):
     DSE official site — today's corporate announcements via Playwright.
 
     URL: https://www.dsebd.org/display_news.php
-    Priority 2 — activates when bdshare_announcements fails.
+    Priority 1 — primary source; bdshare_announcements is dead (returns empty).
 
     Note: news_archive.php (old URL) returns 404. display_news.php loads
     content via JavaScript — Playwright required.
     Run `playwright install chromium` once before using.
     """
     name = "dse_direct_announcements"
-    priority = 2
+    priority = 1
     timeout_seconds = 45
 
     def __init__(self, url: str = NEWS_URL) -> None:
@@ -159,14 +159,14 @@ class DSEDirectPSNAdapter(BaseAdapter):
     DSE official site — price-sensitive news (last 7 days) via Playwright.
 
     URL: https://www.dsebd.org/news_archive_7days.php
-    Priority 2 — activates when bdshare_psn fails.
+    Priority 1 — primary source; bdshare_psn is dead (returns empty).
 
     Note: price_sensitive_news.php (old URL) returns 404. The 7-day archive
     contains PSN entries alongside general announcements; no dedicated PSN
     endpoint found on the current DSE site (confirmed 2026-05-21).
     """
     name = "dse_direct_psn"
-    priority = 2
+    priority = 1
     timeout_seconds = 45
 
     def __init__(self, url: str = NEWS_7D_URL) -> None:

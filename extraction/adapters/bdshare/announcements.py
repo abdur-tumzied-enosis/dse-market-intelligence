@@ -12,7 +12,7 @@ from extraction.normalizers import bd_date_str_to_utc, normalize_ticker, to_deci
 class BDShareAnnouncementsAdapter(BaseAdapter):
     """bdshare get_corporate_announcements() — general corporate announcements."""
     name = "bdshare_announcements"
-    priority = 1
+    priority = 2
     timeout_seconds = 20
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -76,7 +76,7 @@ class BDShareAnnouncementsAdapter(BaseAdapter):
 class BDSharePSNAdapter(BaseAdapter):
     """bdshare get_price_sensitive_news() — price-sensitive announcements."""
     name = "bdshare_psn"
-    priority = 1
+    priority = 2
     timeout_seconds = 20
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:

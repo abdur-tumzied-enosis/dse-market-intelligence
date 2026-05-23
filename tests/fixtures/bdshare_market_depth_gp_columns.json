@@ -1,8 +1,30 @@
 {
-  "columns": [],
-  "shape": [
-    0,
-    0
+  "columns": [
+    "buy_price",
+    "buy_volume",
+    "sell_price",
+    "sell_volume"
   ],
-  "sample": {}
+  "shape": [
+    20,
+    4
+  ],
+  "sample": {
+    "buy_price": {
+      "0": 240.4,
+      "1": 240.3
+    },
+    "buy_volume": {
+      "0": 492.0,
+      "1": 410.0
+    },
+    "sell_price": {
+      "0": NaN,
+      "1": NaN
+    },
+    "sell_volume": {
+      "0": NaN,
+      "1": NaN
+    }
+  }
 }

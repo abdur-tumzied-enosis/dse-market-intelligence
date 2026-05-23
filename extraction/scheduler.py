@@ -122,6 +122,14 @@ def configure_scheduler(scheduler: AsyncIOScheduler) -> None:
     from mgmt.config import get_settings
     cfg = get_settings()
 
+    if cfg.pipeline_test_mode:
+        _configure_test_mode(scheduler, cfg)
+    else:
+        _configure_production_mode(scheduler, cfg)
+
+
+def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
+    """Production schedule: real cron/interval timings."""
     scheduler.add_job(
         job_live_prices,
         trigger="cron",
@@ -198,7 +206,45 @@ def configure_scheduler(scheduler: AsyncIOScheduler) -> None:
         replace_existing=True,
     )
 
-    logger.info("scheduler: all 8 jobs registered")
+    logger.info("scheduler: all 8 jobs registered (production mode)")
+
+
+def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
+    """
+    Test mode: compress all intervals to minutes so a week of runs completes in ~1h.
+    Simulated cadence per 60 min:
+      live_prices       every 2min  → ~30 runs  (prod: ~19/market-day)
+      eod_snapshot      every 5min  → ~12 runs  (prod: 1/day)
+      announcements     every 5min  → ~12 runs  (prod: 12/day)
+      daily_macro       every 7min  → ~8 runs   (prod: 1/day)
+      weekly_fundam.    every 10min → ~6 runs   (prod: 1/week)
+      monthly           every 15min → ~4 runs   (prod: 1/month)
+      quarterly_retrain every 20min → ~3 runs   (prod: 1/quarter)
+      health_checks     every 5min  → ~12 runs  (prod: 4/day)
+    """
+    job_map = [
+        (job_live_prices,         "live_price_pull",     cfg.test_live_prices_minutes),
+        (job_eod_snapshot,        "eod_snapshot",        cfg.test_eod_snapshot_minutes),
+        (job_announcements,       "dse_announcements",   cfg.test_announcements_minutes),
+        (job_daily_macro,         "daily_macro",         cfg.test_daily_macro_minutes),
+        (job_weekly_fundamentals, "weekly_fundamentals", cfg.test_weekly_fundamentals_minutes),
+        (job_monthly,             "monthly",             cfg.test_monthly_minutes),
+        (job_quarterly,           "quarterly_retrain",   cfg.test_quarterly_minutes),
+        (job_health_checks,       "health_checks",       cfg.test_health_check_minutes),
+    ]
+    for func, job_id, interval_minutes in job_map:
+        scheduler.add_job(
+            func,
+            trigger="interval",
+            minutes=interval_minutes,
+            id=job_id,
+            replace_existing=True,
+        )
+
+    logger.warning(
+        "scheduler: TEST MODE — all intervals compressed to minutes. "
+        "Do NOT use in production."
+    )
 
 
 async def start_scheduler(scheduler: AsyncIOScheduler) -> None:

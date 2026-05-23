@@ -270,6 +270,216 @@ class TestDSEDirectDepthNormalize:
 
 
 # ---------------------------------------------------------------------------
+# DSEDirectGainersAdapter — synthetic normalize() tests
+# ---------------------------------------------------------------------------
+
+class TestDSEDirectGainersNormalize:
+    @pytest.fixture(scope="class")
+    def df(self):
+        from extraction.adapters.dse_direct.gainers_losers import DSEDirectGainersAdapter
+        raw = pd.DataFrame([
+            {"#": "1", "TRADING CODE": "naheeacp", "CLOSEP*": "29.4",
+             "HIGH": "29.5", "LOW": "27.0", "YCP*": "26.9", "% CHANGE": "9.2937"},
+            {"#": "2", "TRADING CODE": "BPPL", "CLOSEP*": "18.0",
+             "HIGH": "18.1", "LOW": "16.5", "YCP*": "16.5", "% CHANGE": "9.0909"},
+        ])
+        return DSEDirectGainersAdapter().normalize(raw)
+
+    def test_two_rows(self, df: pd.DataFrame):
+        assert len(df) == 2
+
+    def test_ticker_uppercase(self, df: pd.DataFrame):
+        assert df.iloc[0]["ticker"] == "NAHEEACP"
+        assert df.iloc[1]["ticker"] == "BPPL"
+
+    def test_direction_gainer(self, df: pd.DataFrame):
+        assert (df["direction"] == "gainer").all()
+
+    def test_rank_int(self, df: pd.DataFrame):
+        assert df.iloc[0]["rank"] == 1
+        assert df.iloc[1]["rank"] == 2
+
+    def test_close_decimal(self, df: pd.DataFrame):
+        assert isinstance(df.iloc[0]["close"], Decimal)
+        assert df.iloc[0]["close"] == Decimal("29.4")
+
+    def test_change_pct_decimal(self, df: pd.DataFrame):
+        assert isinstance(df.iloc[0]["change_pct"], Decimal)
+        assert df.iloc[0]["change_pct"] == Decimal("9.2937")
+
+    def test_high_gte_low(self, df: pd.DataFrame):
+        assert df.iloc[0]["high"] >= df.iloc[0]["low"]
+
+    def test_prev_close_decimal(self, df: pd.DataFrame):
+        assert isinstance(df.iloc[0]["prev_close"], Decimal)
+
+    def test_required_columns(self, df: pd.DataFrame):
+        required = {"rank", "ticker", "close", "high", "low", "prev_close", "change_pct", "direction", "fetched_at", "source"}
+        assert required <= set(df.columns)
+
+    def test_source(self, df: pd.DataFrame):
+        assert (df["source"] == "dse_direct_gainers").all()
+
+    def test_fetched_at_utc_gainers(self, df: pd.DataFrame):
+        assert df.iloc[0]["fetched_at"].tzinfo is not None
+
+
+# ---------------------------------------------------------------------------
+# DSEDirectGainersAdapter — fixture-based tests (pre-normalized)
+# ---------------------------------------------------------------------------
+
+class TestDSEDirectGainersFixture:
+    @pytest.fixture(scope="class")
+    def df(self):
+        return _load_fixture("gainers_sample")
+
+    def test_row_count(self, df: pd.DataFrame):
+        assert len(df) == 10
+
+    def test_direction_all_gainer(self, df: pd.DataFrame):
+        assert (df["direction"] == "gainer").all()
+
+    def test_change_pct_positive(self, df: pd.DataFrame):
+        assert (df["change_pct"] > 0).all()
+
+    def test_tickers_uppercase(self, df: pd.DataFrame):
+        assert (df["ticker"] == df["ticker"].str.upper()).all()
+
+    def test_source(self, df: pd.DataFrame):
+        assert (df["source"] == "dse_direct_gainers").all()
+
+    def test_ranks_sequential(self, df: pd.DataFrame):
+        assert list(df["rank"]) == list(range(1, 11))
+
+
+# ---------------------------------------------------------------------------
+# DSEDirectLosersAdapter — synthetic normalize() tests
+# ---------------------------------------------------------------------------
+
+class TestDSEDirectLosersNormalize:
+    @pytest.fixture(scope="class")
+    def df(self):
+        from extraction.adapters.dse_direct.gainers_losers import DSEDirectLosersAdapter
+        raw = pd.DataFrame([
+            {"#": "1", "TRADING CODE": "APEXSPINN", "CLOSEP*": "339.6",
+             "HIGH": "375.9", "LOW": "338.7", "YCP*": "371.1", "% CHANGE": "-8.4883"},
+            {"#": "2", "TRADING CODE": "phoenixfin", "CLOSEP*": "3.3",
+             "HIGH": "3.8", "LOW": "3.3", "YCP*": "3.6", "% CHANGE": "-8.3333"},
+        ])
+        return DSEDirectLosersAdapter().normalize(raw)
+
+    def test_two_rows(self, df: pd.DataFrame):
+        assert len(df) == 2
+
+    def test_direction_loser(self, df: pd.DataFrame):
+        assert (df["direction"] == "loser").all()
+
+    def test_ticker_uppercase(self, df: pd.DataFrame):
+        assert df.iloc[1]["ticker"] == "PHOENIXFIN"
+
+    def test_change_pct_negative(self, df: pd.DataFrame):
+        assert df.iloc[0]["change_pct"] == Decimal("-8.4883")
+
+    def test_source(self, df: pd.DataFrame):
+        assert (df["source"] == "dse_direct_losers").all()
+
+
+# ---------------------------------------------------------------------------
+# DSEDirectLosersAdapter — fixture-based tests (pre-normalized)
+# ---------------------------------------------------------------------------
+
+class TestDSEDirectLosersFixture:
+    @pytest.fixture(scope="class")
+    def df(self):
+        return _load_fixture("losers_sample")
+
+    def test_row_count(self, df: pd.DataFrame):
+        assert len(df) == 10
+
+    def test_direction_all_loser(self, df: pd.DataFrame):
+        assert (df["direction"] == "loser").all()
+
+    def test_change_pct_negative(self, df: pd.DataFrame):
+        assert (df["change_pct"] < 0).all()
+
+    def test_tickers_uppercase(self, df: pd.DataFrame):
+        assert (df["ticker"] == df["ticker"].str.upper()).all()
+
+    def test_source(self, df: pd.DataFrame):
+        assert (df["source"] == "dse_direct_losers").all()
+
+
+# ---------------------------------------------------------------------------
+# DSEDirectSectorPEAdapter — synthetic normalize() tests
+# ---------------------------------------------------------------------------
+
+class TestDSEDirectSectorPENormalize:
+    @pytest.fixture(scope="class")
+    def df(self):
+        from extraction.adapters.dse_direct.sector_pe import DSEDirectSectorPEAdapter
+        raw = pd.DataFrame([
+            ["1", "Bank", "4.645"],
+            ["2", "Cement", "13.625"],
+            ["3", "Engineering", "33.77"],
+        ])
+        return DSEDirectSectorPEAdapter().normalize(raw)
+
+    def test_three_rows(self, df: pd.DataFrame):
+        assert len(df) == 3
+
+    def test_sector_names(self, df: pd.DataFrame):
+        assert list(df["sector_name"]) == ["Bank", "Cement", "Engineering"]
+
+    def test_median_pe_decimal(self, df: pd.DataFrame):
+        assert isinstance(df.iloc[0]["median_pe"], Decimal)
+        assert df.iloc[0]["median_pe"] == Decimal("4.645")
+
+    def test_rank_int(self, df: pd.DataFrame):
+        assert df.iloc[0]["rank"] == 1
+        assert df.iloc[2]["rank"] == 3
+
+    def test_required_columns(self, df: pd.DataFrame):
+        assert {"rank", "sector_name", "median_pe", "fetched_at", "source"} <= set(df.columns)
+
+    def test_source(self, df: pd.DataFrame):
+        assert (df["source"] == "dse_direct_sector_pe").all()
+
+    def test_fetched_at_utc_sector(self, df: pd.DataFrame):
+        assert df.iloc[0]["fetched_at"].tzinfo is not None
+
+
+# ---------------------------------------------------------------------------
+# DSEDirectSectorPEAdapter — fixture-based tests (pre-normalized)
+# ---------------------------------------------------------------------------
+
+class TestDSEDirectSectorPEFixture:
+    @pytest.fixture(scope="class")
+    def df(self):
+        return _load_fixture("sector_pe_sample")
+
+    def test_row_count(self, df: pd.DataFrame):
+        assert len(df) == 18  # DSE has 18 sectors
+
+    def test_median_pe_positive(self, df: pd.DataFrame):
+        assert (df["median_pe"] > 0).all()
+
+    def test_sector_names_not_empty(self, df: pd.DataFrame):
+        assert (df["sector_name"].str.len() > 0).all()
+
+    def test_bank_sector_present(self, df: pd.DataFrame):
+        assert df["sector_name"].str.contains("Bank", case=False).any()
+
+    def test_median_pe_decimal(self, df: pd.DataFrame):
+        assert isinstance(df["median_pe"].iloc[0], Decimal)
+
+    def test_source(self, df: pd.DataFrame):
+        assert (df["source"] == "dse_direct_sector_pe").all()
+
+    def test_fetched_at_utc_sector_fixture(self, df: pd.DataFrame):
+        assert df["fetched_at"].iloc[0].tzinfo is not None
+
+
+# ---------------------------------------------------------------------------
 # DSEDirectDepthPlaywrightAdapter — fixture-based tests (pre-normalized)
 # ---------------------------------------------------------------------------
 

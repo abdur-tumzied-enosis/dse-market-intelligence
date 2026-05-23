@@ -16,6 +16,7 @@
 6. [Layer 4 — LLM Agent Layer](#6-layer-4--llm-agent-layer)
 7. [Layer 5 — Backend API](#7-layer-5--backend-api)
 8. [Layer 6 — Frontend](#8-layer-6--frontend)
+19. [AI Framework & Model Decisions](#19-ai-framework--model-decisions)
 9. [Database Schema](#9-database-schema)
 10. [LLM Tool Definitions](#10-llm-tool-definitions)
 11. [ML Model Design](#11-ml-model-design)
@@ -624,10 +625,47 @@ Thresholds:
 
 ### 6.1 Agent Architecture
 
-```python
-import anthropic
+All LLM workflows use **LangChain** as the orchestration framework. Provider and model are runtime-configurable via env vars — the application code never imports a provider SDK directly. Current default: **Gemini 2.5 Flash** via `langchain-google-genai`.
 
-client = anthropic.Anthropic()
+```python
+# mgmt/agent/llm.py — single source of truth for LLM instantiation
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
+from langchain_community.chat_models import ChatOllama
+
+def get_llm(streaming: bool = False):
+    """Returns LangChain chat model. Swap provider via env vars, zero code change."""
+    provider = os.getenv("agent_provider", "google")
+    model    = os.getenv("agent_model", "gemini-2.5-flash")
+
+    match provider:
+        case "google":
+            return ChatGoogleGenerativeAI(
+                model=model,
+                temperature=0,
+                streaming=streaming,
+                google_api_key=os.getenv("GOOGLE_API_KEY")
+            )
+        case "anthropic":
+            return ChatAnthropic(model=model, temperature=0, streaming=streaming)
+        case "openai" | "openrouter":
+            return ChatOpenAI(
+                model=model, temperature=0, streaming=streaming,
+                base_url="https://openrouter.ai/api/v1" if provider == "openrouter" else None
+            )
+        case "ollama":
+            return ChatOllama(model=model)
+        case _:
+            raise ValueError(f"Unknown provider: {provider}")
+```
+
+```python
+# chat/agent.py — main analyst agent
+from langchain_core.tools import tool
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import AgentExecutor, create_tool_calling_agent
+from mgmt.agent.llm import get_llm
 
 SYSTEM_PROMPT = """
 You are a senior equity analyst specializing in the Dhaka Stock Exchange (DSE), Bangladesh.
@@ -648,134 +686,65 @@ Communication:
 Never: guarantee returns, give financial advice without data, invent numbers.
 """
 
+# Tools as @tool decorated functions — LangChain-native format
+@tool
+def get_stock_price(ticker: str, from_date: str = None, to_date: str = None, interval: str = "daily") -> dict:
+    """Retrieve historical or current stock price data for a DSE ticker (e.g. SQURPHARMA)."""
+    ...
+
+@tool
+def get_fundamentals(ticker: str, years: int = 10, include_annual_reports: bool = True) -> dict:
+    """Get company fundamentals: EPS, PE, NAV, market cap, dividends, shareholding."""
+    ...
+
+@tool
+def get_sector_comparison(ticker: str, metrics: list[str] = None) -> dict:
+    """Compare a stock against its sector peers on key metrics (pe, eps_growth, nav_price, dividend_yield)."""
+    ...
+
+@tool
+def search_news(ticker: str, query: str, days_back: int = 365, top_k: int = 10) -> dict:
+    """Semantic search over news, announcements, and report text for a company."""
+    ...
+
+@tool
+def get_ml_prediction(ticker: str, horizon_years: int) -> dict:
+    """Get ML model price predictions and health score. horizon_years: 1, 3, 5, or 10."""
+    ...
+
+@tool
+def screen_stocks(sector: str = None, min_health_score: int = None, max_pe: float = None,
+                  min_eps_growth: float = None, min_market_cap: float = None,
+                  rating: str = None, limit: int = 20) -> dict:
+    """Screen all DSE stocks using fundamental and technical filters."""
+    ...
+
+@tool
+def get_portfolio_analysis(holdings: list[dict]) -> dict:
+    """Analyze a portfolio of DSE stocks for risk, diversification, and returns.
+    holdings: list of {ticker, quantity, avg_cost}"""
+    ...
+
+@tool
+def get_macro_data(indicator: str, from_date: str = None, to_date: str = None) -> dict:
+    """Get Bangladesh macroeconomic indicators: GDP_GROWTH, CPI, POLICY_RATE, USD_BDT, REMITTANCE, FDI."""
+    ...
+
 tools = [
-    {
-        "name": "get_stock_price",
-        "description": "Retrieve historical or current stock price data for a DSE ticker",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker":     {"type": "string", "description": "DSE ticker e.g. SQURPHARMA"},
-                "from_date":  {"type": "string", "description": "ISO date YYYY-MM-DD"},
-                "to_date":    {"type": "string", "description": "ISO date YYYY-MM-DD"},
-                "interval":   {"type": "string", "enum": ["daily","weekly","monthly"]}
-            },
-            "required": ["ticker"]
-        }
-    },
-    {
-        "name": "get_fundamentals",
-        "description": "Get company fundamentals: EPS, PE, NAV, market cap, dividends, shareholding",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker":       {"type": "string"},
-                "years":        {"type": "integer", "default": 10},
-                "include_annual_reports": {"type": "boolean", "default": True}
-            },
-            "required": ["ticker"]
-        }
-    },
-    {
-        "name": "get_sector_comparison",
-        "description": "Compare a stock against its sector peers on key metrics",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker":  {"type": "string"},
-                "metrics": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "e.g. ['pe','eps_growth','nav_price','dividend_yield']"
-                }
-            },
-            "required": ["ticker"]
-        }
-    },
-    {
-        "name": "search_news",
-        "description": "Semantic search over news, announcements, and report text for a company",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker":    {"type": "string"},
-                "query":     {"type": "string"},
-                "days_back": {"type": "integer", "default": 365},
-                "top_k":     {"type": "integer", "default": 10}
-            },
-            "required": ["ticker", "query"]
-        }
-    },
-    {
-        "name": "get_ml_prediction",
-        "description": "Get ML model price predictions and health score for a stock",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "ticker":        {"type": "string"},
-                "horizon_years": {
-                    "type": "integer",
-                    "enum": [1, 3, 5, 10],
-                    "description": "Prediction horizon in years"
-                }
-            },
-            "required": ["ticker", "horizon_years"]
-        }
-    },
-    {
-        "name": "screen_stocks",
-        "description": "Screen all DSE stocks using fundamental and technical filters",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "sector":          {"type": "string"},
-                "min_health_score":{"type": "integer"},
-                "max_pe":          {"type": "number"},
-                "min_eps_growth":  {"type": "number", "description": "3yr CAGR %"},
-                "min_market_cap":  {"type": "number", "description": "BDT millions"},
-                "rating":          {"type": "string", "enum": ["STRONG_BUY","BUY","HOLD","SELL","STRONG_SELL"]},
-                "limit":           {"type": "integer", "default": 20}
-            }
-        }
-    },
-    {
-        "name": "get_portfolio_analysis",
-        "description": "Analyze a portfolio of DSE stocks for risk, diversification, and returns",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "holdings": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "ticker":   {"type": "string"},
-                            "quantity": {"type": "integer"},
-                            "avg_cost": {"type": "number"}
-                        }
-                    }
-                }
-            },
-            "required": ["holdings"]
-        }
-    },
-    {
-        "name": "get_macro_data",
-        "description": "Get Bangladesh macroeconomic indicators",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "indicator": {
-                    "type": "string",
-                    "enum": ["GDP_GROWTH","CPI","POLICY_RATE","USD_BDT","REMITTANCE","FDI"]
-                },
-                "from_date": {"type": "string"},
-                "to_date":   {"type": "string"}
-            },
-            "required": ["indicator"]
-        }
-    }
+    get_stock_price, get_fundamentals, get_sector_comparison, search_news,
+    get_ml_prediction, screen_stocks, get_portfolio_analysis, get_macro_data
 ]
+
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder("chat_history"),
+    ("human", "{input}"),
+    MessagesPlaceholder("agent_scratchpad"),
+])
+
+llm           = get_llm(streaming=True)
+agent         = create_tool_calling_agent(llm, tools, prompt)
+agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=False)
 ```
 
 ### 6.2 RAG Pipeline
@@ -811,39 +780,64 @@ async def rag_search(query: str, ticker: str = None, top_k: int = 10):
 ### 6.3 Streaming Chat Endpoint
 
 ```python
-# FastAPI SSE endpoint — streams LLM response token by token to frontend
+# FastAPI SSE endpoint — streams LangChain agent response token by token
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest):
     async def generate():
-        messages = request.messages
-        
-        # Inject RAG context if ticker mentioned
+        user_message = request.messages[-1]["content"]
+        chat_history = request.messages[:-1]
+
+        # Inject RAG context if ticker active
         if request.active_ticker:
-            context = await rag_search(
-                request.messages[-1]["content"], 
-                ticker=request.active_ticker
-            )
-            # Prepend context to user message
-            messages[-1]["content"] = format_with_context(
-                messages[-1]["content"], context
-            )
-        
-        with client.messages.stream(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            system=SYSTEM_PROMPT,
-            tools=tools,
-            messages=messages
-        ) as stream:
-            for event in stream:
-                if hasattr(event, "delta") and hasattr(event.delta, "text"):
-                    yield f"data: {json.dumps({'text': event.delta.text})}\n\n"
-                elif event.type == "tool_use":
-                    result = await execute_tool(event.name, event.input)
-                    yield f"data: {json.dumps({'tool': event.name, 'result': result})}\n\n"
-    
+            context = await rag_search(user_message, ticker=request.active_ticker)
+            user_message = format_with_context(user_message, context)
+
+        async for chunk in agent_executor.astream({
+            "input":        user_message,
+            "chat_history": chat_history,
+        }):
+            if "output" in chunk:
+                # Final text response
+                yield f"data: {json.dumps({'text': chunk['output']})}\n\n"
+            elif "actions" in chunk:
+                # Tool call in progress — show spinner in frontend
+                for action in chunk["actions"]:
+                    yield f"data: {json.dumps({'tool': action.tool, 'tool_input': action.tool_input})}\n\n"
+            elif "steps" in chunk:
+                # Tool result returned
+                for step in chunk["steps"]:
+                    yield f"data: {json.dumps({'tool_result': str(step.observation)[:500]})}\n\n"
+
     return EventSourceResponse(generate())
+```
+
+### 6.4 PDF Extraction (Gemini File Upload)
+
+PDF annual report extraction cannot go through LangChain's standard message API — it requires direct file upload to the Gemini Files API. This is the one place where a provider SDK is used directly, isolated to the Celery task.
+
+```python
+# extraction/tasks.py — PDF extraction task
+import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage
+
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+@app.task(bind=True, max_retries=3)
+def extract_annual_report(self, pdf_path: str, ticker: str, fiscal_year: int):
+    # Upload PDF to Gemini Files API
+    uploaded = genai.upload_file(pdf_path, mime_type="application/pdf")
+
+    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
+    msg = HumanMessage(content=[
+        {"type": "text", "text": PDF_EXTRACTION_PROMPT},
+        {"type": "file_uri", "file_uri": uploaded.uri, "mime_type": "application/pdf"}
+    ])
+    result = llm.invoke([msg])
+    data = json.loads(result.content)   # structured JSON per schema in §3.3
+    db.upsert_annual_report(ticker, fiscal_year, data)
+    genai.delete_file(uploaded.name)    # clean up — files expire after 48h anyway
 ```
 
 ---
@@ -1217,11 +1211,13 @@ async def execute_tool(name: str, inputs: dict) -> dict:
 | Time-series DB | TimescaleDB (PostgreSQL ext) | OHLCV storage |
 | Relational DB | PostgreSQL 16 | Companies, fundamentals, reports |
 | Vector DB | pgvector (same PostgreSQL) | Semantic search / RAG |
+| Knowledge Graph | Graphiti + Neo4j (planned) | Entity/temporal graph over news + filings |
 | Cache | Redis 7 | Live prices, sessions |
 | Object storage | MinIO (self-hosted) or AWS S3 | PDF storage |
-| LLM | Claude claude-sonnet-4-6 | Analyst + PDF extractor |
-| LLM (fast) | Claude claude-haiku-4-5 | Sentiment scoring, simple queries |
-| Embeddings | voyage-finance-2 | Finance-domain embeddings |
+| AI framework | LangChain (`langchain-core`, `langchain-google-genai`) | Model-agnostic LLM orchestration |
+| LLM (default) | Gemini 2.5 Flash (`gemini-2.5-flash`) | Analyst, PDF extractor, sentiment |
+| LLM (fallback) | Configurable via `agent_provider` env var | Anthropic / OpenAI / Ollama / OpenRouter |
+| Embeddings | voyage-finance-2 or `text-embedding-004` (Google) | Finance-domain semantic search |
 | ML | PyTorch (LSTM) + XGBoost | Price + fundamental models |
 | ML utilities | pandas, scikit-learn, numpy | Feature engineering |
 | Task scheduling | APScheduler | Data ingestion jobs |
@@ -1963,90 +1959,88 @@ These costs apply regardless of user count. Self-host everything on VPS to keep 
 
 LLM is the dominant variable cost. Every design decision must account for it.
 
-**Claude API pricing:**
+> **Current model: Gemini 2.5 Flash** (default). Switched from Claude Sonnet/Haiku via LangChain framework. ~15–22× cheaper on compute-heavy operations. See Section 19 for full model decision rationale.
+
+**Gemini 2.5 Flash pricing:**
 
 ```
-claude-sonnet-4-6:   $3.00 / 1M input tokens    $15.00 / 1M output tokens
-claude-haiku-4-5:    $0.25 / 1M input tokens     $1.25 / 1M output tokens
-Prompt cache read:   80% discount vs full input price
+gemini-2.5-flash (non-thinking):  $0.15 / 1M input tokens    $0.60 / 1M output tokens
+gemini-2.5-flash (thinking mode): $0.15 / 1M input tokens    $3.50 / 1M output tokens
+Context cache read:                $0.0375 / 1M tokens (75% discount)
 ```
 
-**Cost per operation:**
+**Cost per operation — Gemini 2.5 Flash:**
 
-| Operation | Model | Approx tokens | Cost per call |
+| Operation | Approx tokens | Cost per call | vs Old (Claude Sonnet) |
 |---|---|---|---|
-| Chat query (1 turn + 2 tool calls) | Sonnet | 6,000 in + 600 out | $0.027 |
-| Chat query (cached system prompt) | Sonnet | 1,500 new + 4,500 cached + 600 out | $0.010 |
-| Sentiment score — 1 article | Haiku | 600 in + 50 out | $0.00016 |
-| PDF annual report extraction | Sonnet | 40,000 in + 2,000 out | $0.150 |
-| Stock deep-dive report | Sonnet | 12,000 in + 3,000 out | $0.081 |
-| Portfolio analysis | Sonnet | 8,000 in + 1,500 out | $0.047 |
-| Simple factual lookup (price, PE) | Haiku | 800 in + 100 out | $0.00033 |
+| Chat query (1 turn + 2 tool calls) | 6,000 in + 600 out | $0.00126 | **21× cheaper** |
+| Chat query (with context cache) | 1,500 new + 4,500 cached + 600 out | $0.00075 | **13× cheaper** |
+| Sentiment score — 1 article | 600 in + 50 out | $0.00012 | 1.3× cheaper |
+| PDF annual report extraction | 40,000 in + 2,000 out | $0.0072 | **21× cheaper** |
+| Stock deep-dive report | 12,000 in + 3,000 out | $0.0036 | **22× cheaper** |
+| Portfolio analysis | 8,000 in + 1,500 out | $0.0021 | **22× cheaper** |
+| Simple factual lookup | 800 in + 100 out | $0.00018 | 1.8× cheaper |
 
 **Platform-level background LLM costs (not user-driven):**
 
 ```
-Daily news sentiment:  100 articles × $0.00016      =  $0.016/day
-Nightly pre-generation top 50 stocks × $0.081        =  $4.05/day → $122/month
-Monthly PDF extraction: ~30 new reports × $0.150     =  $4.50/month
-Total background LLM cost                            ≈  $130/month
+Daily news sentiment:  100 articles × $0.00012      =  $0.012/day
+Nightly pre-generation top 50 stocks × $0.0036       =  $0.18/day  →  $5.40/month
+Monthly PDF extraction: ~30 new reports × $0.0072    =  $0.22/month
+Total background LLM cost                            ≈  $6/month   (was $130)
 ```
 
-**Per-user chat LLM cost (with caching):**
+**Per-user chat LLM cost (with context caching):**
 
 ```
-Light user  (3  queries/day): 3  × $0.010 × 30 days = $0.90/month
-Active user (10 queries/day): 10 × $0.010 × 30 days = $3.00/month
-Heavy user  (30 queries/day): 30 × $0.010 × 30 days = $9.00/month
+Light user  (3  queries/day): 3  × $0.00075 × 30 days = $0.068/month
+Active user (10 queries/day): 10 × $0.00075 × 30 days = $0.225/month
+Heavy user  (30 queries/day): 30 × $0.00075 × 30 days = $0.675/month
 ```
 
-**Total platform cost at different scales:**
+**Total platform cost at different scales (Gemini 2.5 Flash):**
 
 | Active users | Infra | Background LLM | User chat LLM (avg 8 q/day) | **Total/month** |
 |---|---|---|---|---|
-| 50 | $60 | $130 | $36 | **$226** |
-| 200 | $60 | $130 | $144 | **$334** |
-| 500 | $80 | $130 | $360 | **$570** |
-| 1,000 | $120 | $130 | $720 | **$970** |
-| 5,000 | $200 | $130 | $3,600 | **$3,930** |
+| 50 | $60 | $6 | $2.70 | **$69** |
+| 200 | $60 | $6 | $10.80 | **$77** |
+| 500 | $80 | $6 | $27 | **$113** |
+| 1,000 | $120 | $6 | $54 | **$180** |
+| 5,000 | $200 | $6 | $270 | **$476** |
+
+*Previous cost at 1,000 users with Claude: ~$970/month. Gemini: ~$180/month.*
 
 ---
 
-### 18.3 Prompt Caching — Primary Cost Lever
+### 18.3 Context Caching — Primary Cost Lever
 
-Cache the system prompt and frequently accessed stock context. Every repeated query on the same stock hits the cache.
+Gemini 2.5 Flash supports context caching (75% discount on cached tokens). Cache the system prompt and frequently accessed stock context. Every repeated query on the same stock hits the cache.
 
 ```python
-import anthropic
+# LangChain handles context caching transparently when using ChatGoogleGenerativeAI
+# For explicit control over what gets cached, use the Gemini CachedContent API directly
 
-client = anthropic.Anthropic()
+import google.generativeai as genai
 
-async def run_llm_query(user_message: str, stock_context: dict) -> str:
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        system=[
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT,                    # ~1,500 tokens
-                "cache_control": {"type": "ephemeral"}    # cached — 80% cheaper on repeat
-            },
-            {
-                "type": "text",
-                "text": format_stock_context(stock_context),  # ~3,000 tokens of DB data
-                "cache_control": {"type": "ephemeral"}        # cached per stock per session
-            }
-        ],
-        messages=[{"role": "user", "content": user_message}]
+# Create a cached context for a specific stock — reused across all queries in a session
+def create_stock_cache(ticker: str, stock_context: str):
+    cached = genai.caching.CachedContent.create(
+        model="gemini-2.5-flash",
+        system_instruction=SYSTEM_PROMPT,
+        contents=[{"role": "user", "parts": [stock_context]}],
+        ttl=datetime.timedelta(minutes=30),   # 30-min TTL per stock session
     )
-    return response.content[0].text
+    return cached.name
 
-# Cache TTL = 5 minutes (Anthropic's prompt cache window)
+# Subsequent queries in same session reference the cache name
+# Gemini automatically applies the 75% cached-token discount
+
 # Same user asking 3 questions about BRACBANK in one session:
-#   Query 1: full price  → $0.027
-#   Query 2: cache hit   → $0.010  (63% saving)
-#   Query 3: cache hit   → $0.010
-#   Total 3 queries: $0.047 vs $0.081 without caching
+#   Query 1: full price  → $0.00126
+#   Query 2: cache hit   → $0.00075  (40% saving)
+#   Query 3: cache hit   → $0.00075
+#   Total 3 queries: $0.00276 vs $0.00378 without caching
+# vs old Claude:         $0.047 — 17× more expensive even with caching
 ```
 
 ---
@@ -2244,8 +2238,11 @@ SIMPLE_PATTERNS = [
 def select_model(query: str) -> str:
     q = query.lower()
     if any(p in q for p in SIMPLE_PATTERNS):
-        return "claude-haiku-4-5-20251001"   # 12× cheaper
-    return "claude-sonnet-4-6"
+        # Flash non-thinking — fastest, cheapest
+        return "gemini-2.5-flash"
+    # Flash thinking mode for complex multi-step analysis
+    # Output cost $3.50/1M (vs $0.60) — use only when reasoning depth matters
+    return "gemini-2.5-flash"   # thinking toggled via GenerationConfig, same model
 ```
 
 #### Cache LLM Responses (24-hour TTL for non-live queries)
@@ -2472,5 +2469,104 @@ Target cost structure at maturity:
 
 ---
 
-*Architecture Version 1.2 — DSE Stock Intelligence Platform*  
-*Last updated: 2026-05-20*
+---
+
+## 19. AI Framework & Model Decisions
+
+This section records why specific AI tooling choices were made, so future changes have context.
+
+---
+
+### 19.1 LangChain as Orchestration Framework
+
+**Decision:** All LLM workflows go through LangChain. No provider SDK imported directly in application code (exception: Gemini file upload in PDF extraction task, which has no LangChain abstraction).
+
+**Why:**
+- Provider lock-in avoided — swap Gemini → Anthropic → Ollama via one env var (`agent_provider`)
+- OpsAgent in `mgmt/agent/` already used LangChain; pattern extended to main chat agent
+- LangChain tool calling (`@tool` decorators) works identically across all providers
+- LangChain streaming (`astream`) abstracts SSE generation across providers
+- `get_llm()` in `mgmt/agent/llm.py` is the single instantiation point
+
+**Provider switching:**
+```bash
+# Gemini (default)
+agent_provider=google  agent_model=gemini-2.5-flash
+
+# Claude
+agent_provider=anthropic  agent_model=claude-sonnet-4-6
+
+# Local (zero cost, for dev)
+agent_provider=ollama  agent_model=qwen2.5:14b
+```
+
+**Known limitation:** PDF annual report extraction uses `google.generativeai` directly for file upload. If provider is switched away from Google, this task needs a provider-specific implementation.
+
+---
+
+### 19.2 Gemini 2.5 Flash as Default Model
+
+**Decision:** Default model is `gemini-2.5-flash`. Replaces Claude Sonnet (analyst) and Claude Haiku (sentiment/simple queries) from the original design.
+
+**Why:**
+- ~15–22× cheaper per operation vs Claude Sonnet (see §18.2 cost table)
+- Background LLM cost: $6/month vs $130/month (nightly pre-gen + sentiment)
+- Platform cost at 1,000 users: ~$180/month vs ~$970/month
+- Single model handles both complex analysis and simple lookups — no two-model routing needed
+- Thinking mode available on same model for complex reasoning (output tokens $3.50/1M)
+- Bengali language support verified
+
+**Trade-off accepted:** Gemini 2.5 Flash may produce lower-quality financial reasoning than Claude Sonnet on some complex multi-step queries. Mitigations:
+1. Thinking mode enabled for deep analysis queries (10yr scenarios, portfolio risk)
+2. Model router can be updated to use `anthropic/claude-sonnet-4-6` for Institution tier if quality delta is material in production
+3. All tool call results come from DB — model cannot hallucinate data points
+
+---
+
+### 19.3 Graphiti Knowledge Graph (Planned)
+
+**Decision:** Add Graphiti (`getzep/graphiti`) + Neo4j alongside pgvector as a second search layer. Not yet implemented — planned after core extraction layer stabilizes.
+
+**Why pgvector alone is insufficient:**
+- pgvector answers: "find text chunks similar to this query"
+- Graphiti answers: "how are these entities related, and how did that change over time"
+- DSE-specific value: conglomerate cross-ownership (Bashundhara, BEXIMCO group chains), director insider signals, entity timelines
+
+**Architecture addition:**
+
+```
+Ingestion pipeline → news / reports / announcements
+    │
+    ├── embed chunks → pgvector (document_chunks)     ← existing
+    │
+    └── extract entities → Graphiti → Neo4j (NEW)
+          entities: Company, Director, Event, Metric
+          edges:    FILED, ANNOUNCED, DIVESTED, LEADS, OWNS
+          temporal: each fact timestamped — "was true from X to Y"
+```
+
+New LLM tool added when implemented:
+```python
+@tool
+def search_knowledge_graph(query: str, entities: list[str] = None, center_node: str = None) -> dict:
+    """Entity-aware graph search: ownership chains, director actions, event sequences over time."""
+    ...
+```
+
+**Infrastructure:** Neo4j service added to Docker Compose (~1 GB RAM). Graphiti uses LLM (Gemini Flash — cheap) for entity extraction during ingestion.
+
+**Defer until:** extraction layer + scheduler stable, pgvector RAG tested in production.
+
+---
+
+### 19.4 Embeddings
+
+**Current:** `voyage-finance-2` (finance-domain optimized, external API).
+
+**Alternative:** Google `text-embedding-004` — free up to 1M tokens/day, integrated with `langchain-google-genai`. Switch if voyage cost becomes significant at scale. Finance-domain quality trade-off not yet benchmarked for BD financial text.
+
+---
+
+*Architecture Version 1.3 — DSE Stock Intelligence Platform*  
+*Last updated: 2026-05-23*  
+*Changes in 1.3: LangChain framework (§6.1, §6.4), Gemini 2.5 Flash model (§6.1, §13, §18.2, §18.3, §18.6), Graphiti knowledge graph plan (§13, §19.3), Section 19 added*

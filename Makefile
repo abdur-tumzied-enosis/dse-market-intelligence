@@ -109,3 +109,18 @@ seed-companies: ## Seed companies table from DSE company list
 
 bulk-historical: ## Bulk download AmarStock CSVs (2012-present). Slow — run once.
 	$(PYTHON) -m extraction.bulk_load.amarstock_historical
+
+# ---------------------------------------------------------------------------
+# Pipeline verification (test mode)
+# ---------------------------------------------------------------------------
+verify-pipeline: ## Run pipeline in test mode for 1h then report. Set PIPELINE_TEST_MODE=true in .env first.
+	@echo "Starting pipeline in test mode. Run 'make pipeline-report' after ~1h."
+	$(COMPOSE) up -d
+	@echo "Stack is up. Scheduler running with compressed intervals."
+	@echo "Monitor with: make logs s=scheduler"
+
+pipeline-report: ## Print pass/fail report for the last hour of pipeline runs.
+	$(PYTHON) pipeline_report.py --hours 1
+
+pipeline-report-week: ## Print pass/fail report for the last 7 days.
+	$(PYTHON) pipeline_report.py --hours 168
