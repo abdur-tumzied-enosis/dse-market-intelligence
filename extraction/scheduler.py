@@ -69,6 +69,109 @@ async def job_announcements() -> None:
     logger.info("job_announcements: complete")
 
 
+async def job_news_scrape() -> None:
+    """
+    Fetch BD financial news via Google News RSS + extract DSE ticker mentions.
+
+    Strategy:
+      1. Fetch articles from GoogleNewsRSSAdapter
+      2. Insert new articles (ON CONFLICT url DO NOTHING), RETURNING newly inserted ids
+      3. Run Google NL API NER only on the returned (new) rows — zero API calls for duplicates
+      4. UPDATE those rows with extracted tickers
+
+    NL API free tier: 5,000 req/month. At 12h interval ~50 new articles/run
+    = ~100 calls/day → ~3,000/month. Stays within free tier.
+    If GOOGLE_CLOUD_API_KEY not set: articles saved with tickers=[].
+    """
+    from db.pool import get_pool
+    from extraction.adapters.news.google_news_rss import GoogleNewsRSSAdapter
+    from extraction.adapters.news.ticker_extractor import TickerExtractor, load_company_map
+    from extraction.base import AdapterError
+    from mgmt.config import get_settings
+
+    cfg = get_settings()
+
+    async with job_run("news_scrape", stream_name="news_en") as ctx:
+        pool = await get_pool()
+
+        # ── 1. Fetch articles ──────────────────────────────────────────────
+        adapter = GoogleNewsRSSAdapter()
+        try:
+            result = await adapter.fetch()
+        except AdapterError as exc:
+            logger.error("news_scrape_adapter_failed", error=str(exc))
+            raise
+
+        df = result.data
+        ctx["records_fetched"] = len(df)
+
+        if df.empty:
+            logger.info("news_scrape_no_articles")
+            return
+
+        # ── 2. Insert new articles, get back IDs of rows actually inserted ─
+        # Dedup on content_hash (MD5 of headline+source), NOT url.
+        # Google News proxy URLs regenerate for the same article → url dedup fails.
+        newly_inserted: list[dict] = []
+        for _, row in df.iterrows():
+            rec = await pool.fetchrow(
+                """
+                INSERT INTO news
+                    (source, url, headline, body, language, published_at, fetched_at,
+                     tickers, ingestion_job, content_hash)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10)
+                ON CONFLICT (content_hash) WHERE content_hash IS NOT NULL DO NOTHING
+                RETURNING id, headline, body
+                """,
+                row["source"],
+                row["url"],
+                row["headline"],
+                row.get("body") or None,
+                row["language"],
+                row["published_at"],
+                row["fetched_at"],
+                [],
+                ctx["job_id"],
+                row.get("content_hash"),
+            )
+            if rec:
+                newly_inserted.append({"id": rec["id"], "headline": rec["headline"], "body": rec["body"] or ""})
+
+        ctx["records_inserted"] = len(newly_inserted)
+        logger.info("news_scrape_inserted", inserted=len(newly_inserted), skipped=len(df) - len(newly_inserted))
+
+        # ── 3 + 4. NER: extract tickers for new articles only ─────────────
+        if not newly_inserted or not cfg.google_cloud_api_key:
+            if not cfg.google_cloud_api_key:
+                logger.warning("news_scrape_no_ner_key", reason="GOOGLE_CLOUD_API_KEY not set — tickers empty")
+            return
+
+        company_map = await load_company_map(pool)
+        extractor = TickerExtractor(cfg.google_cloud_api_key, company_map)
+
+        for article in newly_inserted:
+            text = f"{article['headline']} {article['body']}"
+            result = await extractor.extract(text)
+            if result.tickers or result.context_orgs or result.sentiment_score is not None:
+                await pool.execute(
+                    """
+                    UPDATE news
+                    SET tickers         = $1::text[],
+                        context_orgs    = $2::text[],
+                        sentiment_score = $3,
+                        sentiment_label = $4
+                    WHERE id = $5
+                    """,
+                    result.tickers,
+                    result.context_orgs,
+                    result.sentiment_score,
+                    result.sentiment_label,
+                    article["id"],
+                )
+
+        logger.info("news_scrape_ner_complete", articles_processed=len(newly_inserted))
+
+
 async def job_daily_macro() -> None:
     """Daily macro indicators at 02:00."""
     logger.info("job_daily_macro: starting")
@@ -206,7 +309,15 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         replace_existing=True,
     )
 
-    logger.info("scheduler: all 8 jobs registered (production mode)")
+    scheduler.add_job(
+        job_news_scrape,
+        trigger="interval",
+        hours=cfg.news_scrape_interval_hours,
+        id="news_scrape",
+        replace_existing=True,
+    )
+
+    logger.info("scheduler: all 9 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
@@ -226,6 +337,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         (job_live_prices,         "live_price_pull",     cfg.test_live_prices_minutes),
         (job_eod_snapshot,        "eod_snapshot",        cfg.test_eod_snapshot_minutes),
         (job_announcements,       "dse_announcements",   cfg.test_announcements_minutes),
+        (job_news_scrape,         "news_scrape",         cfg.test_news_scrape_minutes),
         (job_daily_macro,         "daily_macro",         cfg.test_daily_macro_minutes),
         (job_weekly_fundamentals, "weekly_fundamentals", cfg.test_weekly_fundamentals_minutes),
         (job_monthly,             "monthly",             cfg.test_monthly_minutes),
@@ -242,7 +354,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         )
 
     logger.warning(
-        "scheduler: TEST MODE — all intervals compressed to minutes. "
+        "scheduler: TEST MODE — all 9 intervals compressed to minutes. "
         "Do NOT use in production."
     )
 

@@ -58,6 +58,7 @@ dependencies = [
 
     # Feed parsing (news)
     "feedparser>=6.0.11",
+    "rapidfuzz>=3.9.0",
 ]
 
 [project.optional-dependencies]

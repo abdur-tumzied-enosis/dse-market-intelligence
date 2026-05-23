@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     # Google Generative AI (Gemini)
     google_api_key: str = ""
 
+    # Google Cloud Natural Language API GOOGLE_CLOUD_API_KEY (NER for news ticker extraction)
+    google_cloud_api_key: str = ""
+
     # ── Scheduler ────────────────────────────────────────────────────────
     scheduler_timezone: str = "Asia/Dhaka"
 
@@ -59,6 +62,9 @@ class Settings(BaseSettings):
 
     # announcements: interval every N hours
     announcements_interval_hours: int = 2
+
+    # news_scrape: interval every N hours (free NL API tier: 5k req/month → 12h = ~3k/month)
+    news_scrape_interval_hours: int = 12
 
     # daily_macro: cron at HH:MM every day
     daily_macro_hour: int = 2
@@ -91,6 +97,7 @@ class Settings(BaseSettings):
     test_live_prices_minutes: int = 2
     test_eod_snapshot_minutes: int = 5
     test_announcements_minutes: int = 5
+    test_news_scrape_minutes: int = 8
     test_daily_macro_minutes: int = 7
     test_weekly_fundamentals_minutes: int = 10
     test_monthly_minutes: int = 15

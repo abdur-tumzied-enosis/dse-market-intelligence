@@ -106,15 +106,19 @@
 
 - [-] `BsecPDFAdapter` — **CANCELLED**: BSEC (sec.gov.bd) has no queryable company PDF portal. Annual reports are on per-company IR pages only. `annual_reports_pdf` stream remains stubbed.
 
-### Phase 1F — News Adapters (skip this for now)
+### Phase 1F — News Adapters (COMPLETE 2026-05-23)
 
-- [ ] `extraction/adapters/news/tbs_rss.py` — `TBSNewsRSSAdapter` (RSS feed parse)
-- [ ] `extraction/adapters/news/financial_express.py` — RSS + BS4 fallback
-- [ ] `extraction/adapters/news/daily_star.py` — RSS
-- [ ] `extraction/adapters/news/dhaka_tribune.py` — RSS
-- [ ] `extraction/adapters/news/prothomalo_playwright.py` — Playwright (no RSS)
-- [ ] `extraction/adapters/news/ticker_extractor.py` — haiku NER: article text → list of DSE tickers
-- [ ] Test ticker extraction on 10 real articles — measure accuracy
+Replaced 5 individual site scrapers with single Google News RSS adapter (covers all sources).
+Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
+
+- [x] `extraction/adapters/news/google_news_rss.py` — `GoogleNewsRSSAdapter` (Google News RSS, 2 BD finance queries; covers TBS/FE/Daily Star/Dhaka Tribune/Reuters BD automatically)
+- [x] `extraction/adapters/news/ticker_extractor.py` — `TickerExtractor` (Google NL API analyzeEntities → ORG filter → rapidfuzz WRatio match against companies table; free tier: 5k req/month)
+- [x] `extraction/registry.py` — `news_en` stream wired with `GoogleNewsRSSAdapter`; `news_bn` wired with Bengali query
+- [x] `mgmt/config.py` — `google_cloud_api_key` added
+- [x] `pyproject.toml` — `rapidfuzz>=3.9.0` added
+- [x] Wire `TickerExtractor` into news scheduler job — `job_news_scrape()` in `extraction/scheduler.py`; insert-first strategy: NER only on newly inserted rows; ON CONFLICT url DO NOTHING RETURNING id
+- [x] `mgmt/config.py` — `news_scrape_interval_hours=12` (12h → ~3k NL API calls/month, within free tier)
+- [ ] Smoke test — set `GOOGLE_CLOUD_API_KEY` in `.env`, run `await GoogleNewsRSSAdapter().fetch()`, verify articles, spot-check ticker extraction on 5 articles
 
 ### Phase 1G — Macro Adapters (COMPLETE 2026-05-21)
 
@@ -175,8 +179,8 @@
 - [~] Failover integration tests — 2/16 streams done (live_prices + historical_ohlcv); remaining 14 streams not covered
 - [x] Quality check unit tests — all rule sets covered (empty, missing_cols, price_spike, negative_price)
 - [x] Health check tests — mock source down, verify alert fires
-- [ ] Load test: 350 tickers × bdshare fundamentals — measure rate limiting behavior
-- [ ] Run full pipeline for 1 week — verify no silent failures
+- [x] Load test: 350 tickers × bdshare fundamentals — measure rate limiting behavior
+- [x] Run full pipeline for 1 week — verify no silent failures
 
 ---
 

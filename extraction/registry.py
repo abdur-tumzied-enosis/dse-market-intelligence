@@ -29,7 +29,7 @@ from extraction.adapters.macro.bangladesh_bank import BangladeshBankAdapter
 from extraction.adapters.macro.worldbank import WorldBankAdapter
 from extraction.base import DataStream
 
-# Phase 1F — news adapters (TODO)
+from extraction.adapters.news.google_news_rss import GoogleNewsRSSAdapter
 
 
 def _build_registry() -> dict[str, DataStream]:
@@ -147,18 +147,15 @@ def _build_registry() -> dict[str, DataStream]:
     # Sources: TBS, Financial Express, Daily Star, Dhaka Tribune
     # ------------------------------------------------------------------
     streams["news_en"] = DataStream(name="news_en", adapters=[
-        # TBSNewsRSSAdapter(priority=1),           # Phase 1F
-        # FinancialExpressRSSAdapter(priority=2),  # Phase 1F
-        # DailyStarRSSAdapter(priority=3),         # Phase 1F
-        # DhakaTribuneRSSAdapter(priority=4),      # Phase 1F
+        GoogleNewsRSSAdapter(),
     ])
 
     # ------------------------------------------------------------------
     # Stream: news_bn (Bengali-language financial news)
-    # Source: Prothom Alo (Playwright only — no RSS)
+    # Source: Prothom Alo (Playwright only — no RSS) — deferred
     # ------------------------------------------------------------------
     streams["news_bn"] = DataStream(name="news_bn", adapters=[
-        # ProthomAloPlaywrightAdapter(priority=1), # Phase 1F
+        GoogleNewsRSSAdapter(queries=["Bangladesh শেয়ার বাজার ডিএসই"]),
     ])
 
     # ------------------------------------------------------------------
