@@ -4,7 +4,7 @@
 
 ---
 
-## CURRENT FOCUS → Phase 1L: Testing gaps (macro + bsec unit tests, announcement parser tests, failover tests)
+## CURRENT FOCUS → Phase 1L complete. Scheduler wiring complete. Next: Phase 1F smoke test (needs GOOGLE_CLOUD_API_KEY) or Layer 4 start.
 
 ---
 
@@ -151,7 +151,7 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 - [x] Wire all 16 streams in `extraction/registry.py` with real adapter instances
 - [x] Failover integration tests — patch primary adapter to fail, verify secondary takes over (4/4 tests passing)
 - [x] Schema consistency test — all adapters per stream return identical columns (5/5 streams compliant; baseline validation passed)
-- [x] `extraction/scheduler.py` — all 7 APScheduler jobs scaffolded (market hours, EOD, announcements, macro, weekly, monthly, quarterly)
+- [x] `extraction/scheduler.py` — all 9 APScheduler jobs scaffolded and wired: live_prices, eod_snapshot, announcements (→ bulk_load_announcements), news_scrape, daily_macro (→ macro_usd_bdt + policy_rate), weekly_fundamentals (→ bulk_load_fundamentals_historical), monthly (→ all 5 macro streams), quarterly, health_checks
 - [x] `extraction/tasks.py` — all 6 Celery task stubs (scraper/nlp/ml queues)
 - [x] `extraction/jobs.py` — `job_run()` context manager (logs to pipeline_jobs table)
 
@@ -194,8 +194,8 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 
 ### Phase 1L — Testing + Hardening
 
-- [~] Per-adapter unit tests (normalize() on fixture data) — amarstock/bdshare/dse_direct done (194 tests); macro + bsec missing
-- [~] Failover integration tests — 2/16 streams done (live_prices + historical_ohlcv); remaining 14 streams not covered
+- [x] Per-adapter unit tests (normalize() on fixture data) — all done: amarstock/bdshare/dse_direct + macro + bsec + announcement parser (412 tests total)
+- [x] Failover integration tests — 12 streams covered (live_prices, historical_ohlcv, fundamentals, announcements, psn, top_gainers_losers, market_depth, 5 macro streams)
 - [x] Quality check unit tests — all rule sets covered (empty, missing_cols, price_spike, negative_price)
 - [x] Health check tests — mock source down, verify alert fires
 - [x] Load test: 350 tickers × bdshare fundamentals — measure rate limiting behavior
