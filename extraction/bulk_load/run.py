@@ -18,6 +18,10 @@ Usage:
     python -m extraction.bulk_load.run all                   # seed + load + report
     python -m extraction.bulk_load.run announcements
     python -m extraction.bulk_load.run announcements --tickers GP,BRACBANK
+    python -m extraction.bulk_load.run bdshare-backfill
+    python -m extraction.bulk_load.run bdshare-backfill --concurrency 3 --delay 2.0
+    python -m extraction.bulk_load.run bdshare-backfill --tickers GP,BRACBANK
+    python -m extraction.bulk_load.run bdshare-backfill --force
 """
 from __future__ import annotations
 
@@ -90,6 +94,30 @@ async def _run(args: argparse.Namespace) -> None:
         gaps = await run_report(dsn, from_date=from_date)
         print_report(gaps)
 
+    if args.cmd == "bdshare-backfill":
+        from extraction.bulk_load.bdshare_backfill import run_backfill
+        print("-- BDShare full backfill: 2012-present, all active tickers ----------")
+        tickers = (
+            [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+            if getattr(args, "tickers", "")
+            else None
+        )
+        report = await run_backfill(
+            dsn=dsn,
+            tickers=tickers,
+            concurrency=args.concurrency,
+            delay=args.delay,
+            force=args.force,
+        )
+        print(f"\n   -> Loaded  : {report.loaded} tickers, {report.total_rows:,} rows upserted")
+        print(f"   -> Skipped : {report.skipped_checkpoint} (already in checkpoint)")
+        print(f"   -> Failed  : {report.failed}")
+        if report.failed > 0:
+            failed = [r.ticker for r in report.results if r.error][:30]
+            print(f"   -> Failed tickers: {', '.join(failed)}")
+        print(f"\n   Checkpoint: tests/fixtures/bdshare_backfill_checkpoint.json")
+        print()
+
     if args.cmd == "announcements":
         from extraction.bulk_load.announcement_loader import bulk_load_announcements
         print("-- Announcements: fetching per-company historical announcements ------")
@@ -138,6 +166,9 @@ def main() -> None:
     all_p = sub.add_parser("all", help="Run seed → load → report in sequence")
     _add_load_args(all_p)
     _add_report_args(all_p)
+
+    bb_p = sub.add_parser("bdshare-backfill", help="Full BDShare OHLCV backfill 2012-present (pre-ML prerequisite)")
+    _add_load_args(bb_p)
 
     ann_p = sub.add_parser("announcements", help="Fetch per-company historical announcements for all tickers")
     ann_p.add_argument("--tickers", default="", help="Comma-separated tickers (default: all active)")

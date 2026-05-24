@@ -250,19 +250,60 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 
 ## Layer 3 — ML Prediction Engine (FUTURE)
 
-> Not started. Requires ≥1 year of clean extracted data first.
+> Not started. Data situation (2026-05-25): 244k rows across 406 tickers. ~475 rows/ticker full OHLCV (2024–2026), ~625 rows/ticker high/low/vol only (2019–2023). AmarStock CSV bulk endpoint broken; BDShare limited to 1yr lookback. Retry AmarStock CSV weekly — if it recovers, 1 script fetches full 2012–present history.
 
-- [ ] Feature engineering pipeline (technical indicators: RSI, MACD, BB, OBV, ATR, ADX)
-- [ ] LSTM model: architecture + training (2012–2022) + validation (2023) + test (2024)
-- [ ] Sector-specific LSTM variants (banking, pharma, telecom, general)
-- [ ] XGBoost fundamental model + feature selection
-- [ ] DCF calculator
-- [ ] Monte Carlo simulation (10,000 scenarios, 5–10yr horizon)
-- [ ] Stock Health Score composite formula calibration
-- [ ] Model versioning + artifact storage (`/models/v1/`)
-- [ ] Nightly inference pipeline (350+ stocks)
-- [ ] Prediction accuracy monitoring (MAE + directional accuracy)
-- [ ] Quarterly retrain trigger
+### Goal: 4 outputs
+> 1. **Price direction** — LSTM: P(price higher in 5/10/20 days), per ticker, nightly
+> 2. **Fundamental rank** — XGBoost: composite score from EPS growth/NAV/PE vs sector/dividend consistency
+> 3. **Intrinsic value** — DCF: fair value estimate using historical EPS + growth rate
+> 4. **Stock Health Score (0–100)** — composite of above 3; shown as gauge on every stock page
+
+### Phase 3A — Dependencies + DB
+
+- [ ] Add to `pyproject.toml`: `scikit-learn>=1.5`, `xgboost>=2.0`, `ta>=0.11` (technical indicators), `torch>=2.3` (LSTM), `joblib>=1.4`
+- [ ] `db/migrations/018_ml_predictions.sql` — `ml_predictions` table: ticker, predicted_at, horizon_days (5/10/20), direction (up/down), confidence (0–1), target_price, model_version
+- [ ] `db/migrations/019_stock_scores.sql` — `stock_scores` table: ticker, scored_at, health_score (0–100), fundamental_score, momentum_score, valuation_score, model_version
+- [ ] `models/` directory — gitignored artifact storage (`.pkl` / `.pt` files per model version)
+
+### Phase 3B — Feature Engineering
+
+- [ ] `ml/features/price_features.py` — compute from `stock_prices`: RSI(14), MACD(12/26/9), Bollinger(20), ATR(14), ADX(14), OBV, returns (1d/5d/20d), volume_zscore. Input: ticker + date range → DataFrame. Uses `ta` library.
+- [ ] `ml/features/fundamental_features.py` — from `fundamentals` table: EPS YoY growth, NAV growth, PE vs sector median, dividend yield, EPS consistency score (stddev). Input: ticker → latest feature vector.
+- [ ] `ml/features/macro_features.py` — from `macro_indicators`: USD/BDT 20d change, policy rate delta, CPI trend. Joined to price features by date.
+- [ ] `ml/features/feature_store.py` — `build_feature_matrix(ticker, lookback_days)` → combined DataFrame ready for model input; handles missing values (forward-fill then zero-fill).
+
+### Phase 3C — XGBoost Fundamental Model (FIRST — works with current data)
+
+> Can train NOW: 1,945 fundamental rows × 406 tickers. No price history needed.
+
+- [ ] `ml/models/fundamental_scorer.py` — `FundamentalScorer`: XGBoost classifier; features: EPS_growth_1yr, EPS_growth_3yr, NAV_growth, PE_vs_sector, div_yield, EPS_consistency; label: stock outperformed DSEX index over next 6m (derived from existing price data)
+- [ ] `ml/train/train_fundamental.py` — train script: load features, train/val split by time (not random), train XGBoost, save to `models/v1/fundamental_scorer.pkl`, print feature importances
+- [ ] `ml/inference/score_fundamentals.py` — run scorer on all active tickers, write to `stock_scores` table (fundamental_score column)
+
+### Phase 3D — LSTM Price Direction Model
+
+> Train on 2024–2026 full OHLCV (475 rows/ticker). 60-day input window → 5/10/20d direction label. Thin data — treat as v0 baseline; retrain when AmarStock CSV or DSE scrape adds pre-2024 history.
+
+- [ ] `ml/models/lstm_predictor.py` — `LSTMPredictor`: 2-layer LSTM (hidden=64, dropout=0.2), input=60d × N_features, output=3 logits (5d/10d/20d direction). PyTorch.
+- [ ] `ml/train/train_lstm.py` — train script: build sequences from feature_store, walk-forward validation (train on T, validate on T+60d), save best checkpoint to `models/v1/lstm_v0.pt`
+- [ ] `ml/train/train_lstm.py` — sector-specific variants: train separate models for banking/pharma/telecom/general using `companies.sector` grouping
+- [ ] `ml/inference/predict_prices.py` — load latest 60d features per ticker, run LSTM, write to `ml_predictions` table
+
+### Phase 3E — DCF + Monte Carlo
+
+- [ ] `ml/valuation/dcf.py` — `DCFCalculator`: inputs: EPS_ttm, EPS_growth_3yr_avg, cost_of_equity (WACC proxy: risk_free + beta × market_premium), terminal_growth=0.03; outputs: intrinsic_value, margin_of_safety_pct
+- [ ] `ml/valuation/monte_carlo.py` — `MonteCarloSimulator`: 10,000 scenarios × 5yr horizon; samples EPS growth from historical distribution + macro noise; outputs: P10/P50/P90 price ranges
+
+### Phase 3F — Stock Health Score + Inference Pipeline
+
+- [ ] `ml/scoring/health_score.py` — composite: `0.35 × fundamental_score + 0.35 × momentum_score + 0.20 × valuation_score + 0.10 × sentiment_score`; calibrate weights against DSEX returns
+- [ ] `extraction/scheduler.py` — add `job_nightly_ml()`: runs price_features → LSTM inference → DCF → health_score → writes all to DB; triggered 10pm BD time (after EOD snapshot)
+- [ ] `extraction/scheduler.py` — add `job_quarterly_retrain()`: re-runs train_lstm + train_fundamental; triggered first Sunday of each quarter
+
+### Phase 3G — Accuracy Monitoring
+
+- [ ] `db/migrations/020_prediction_outcomes.sql` — `prediction_outcomes` table: tracks actual vs predicted direction per ticker per horizon; populated nightly when horizon passes
+- [ ] `ml/monitoring/accuracy_report.py` — MAE on target_price, directional accuracy (%), Sharpe of following predictions; prints report + writes to `pipeline_alerts` if accuracy drops below threshold
 
 ---
 
