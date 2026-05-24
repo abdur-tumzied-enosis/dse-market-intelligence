@@ -137,7 +137,7 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 - [x] `pyproject.toml` — `rapidfuzz>=3.9.0` added
 - [x] Wire `TickerExtractor` into news scheduler job — `job_news_scrape()` in `extraction/scheduler.py`; insert-first strategy: NER only on newly inserted rows; ON CONFLICT url DO NOTHING RETURNING id
 - [x] `mgmt/config.py` — `news_scrape_interval_hours=12` (12h → ~3k NL API calls/month, within free tier)
-- [x] Smoke test — 164 articles from 9 sources, content-hash dedup verified, blocklist preflight working (2026-05-24). NL API (analyzeEntitySentiment) 2 tests skip: Cloud NL API not enabled for key's project (enable at console.cloud.google.com)
+- [x] Smoke test — 164 articles from 9 sources, content-hash dedup verified, blocklist preflight working (2026-05-24). NL API enabled (2026-05-24): GP + BRACBANK extracted correctly, BSEC/DSE blocklisted to context_orgs, sentiment +0.33 (positive) on earnings article, preflight skips macro-only articles. 8/8 smoke tests pass.
 
 ### Phase 1G — Macro Adapters (COMPLETE 2026-05-21)
 
