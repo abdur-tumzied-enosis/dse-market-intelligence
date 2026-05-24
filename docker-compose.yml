@@ -42,6 +42,41 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
+  # pgBouncer — connection pooler (transaction mode; all app services connect
+  # here instead of directly to db:5432; multiplexes ~100 app conns → 20 PG)
+  # NOTE: DATABASE_SYNC_URL (APScheduler SQLAlchemy job store) bypasses
+  # pgBouncer and connects to db:5432 directly — transaction mode breaks
+  # LISTEN/NOTIFY and prepared statements used by SQLAlchemy.
+  # ---------------------------------------------------------------------------
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.25.1-p0
+    container_name: dse_pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-dse}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-dse_intelligence}
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 100
+      DEFAULT_POOL_SIZE: 20
+      AUTH_TYPE: scram-sha-256
+      IGNORE_STARTUP_PARAMETERS: extra_float_digits
+      LISTEN_PORT: 6432
+    ports:
+      - "${PGBOUNCER_PORT:-6432}:6432"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 6432 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
   # Celery worker — heavy async tasks (PDF extraction, bulk fundamentals, ML)
   # ---------------------------------------------------------------------------
   worker:
@@ -53,7 +88,7 @@ services:
     restart: unless-stopped
     command: celery -A extraction.celery_app worker --loglevel=${LOG_LEVEL:-info} --concurrency=4 -Q scraper,nlp,ml,celery
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-dse_intelligence}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -62,7 +97,7 @@ services:
       BDSHARE_CACHE_TTL: ${BDSHARE_CACHE_TTL:-60}
       AMARSTOCK_REQUEST_DELAY: ${AMARSTOCK_REQUEST_DELAY:-2.0}
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -82,7 +117,7 @@ services:
     restart: unless-stopped
     command: python -m extraction.scheduler
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-dse_intelligence}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -97,7 +132,7 @@ services:
       MACRO_INTERVAL_HOURS: ${MACRO_INTERVAL_HOURS:-24}
       HEALTH_CHECK_INTERVAL_HOURS: ${HEALTH_CHECK_INTERVAL_HOURS:-6}
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -119,14 +154,15 @@ services:
       - "${MGMT_API_PORT:-8001}:8001"
     env_file: .env
     environment:
-      # Override DB/Redis URLs to use Docker service hostnames instead of localhost
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
+      # DATABASE_URL → pgBouncer (transaction pooling)
+      # DATABASE_SYNC_URL → db direct (APScheduler SQLAlchemy job store needs it)
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-dse_intelligence}
       DATABASE_SYNC_URL: postgresql+psycopg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-dse_intelligence}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
-      db:
+      pgbouncer:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -166,7 +202,7 @@ services:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
       POSTGRES_USER: ${POSTGRES_USER:-dse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_strong_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
       POSTGRES_DB: ${POSTGRES_DB:-dse_intelligence}
     volumes:
       - grafana_data:/var/lib/grafana

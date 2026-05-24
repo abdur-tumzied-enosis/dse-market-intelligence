@@ -1,10 +1,11 @@
 """
-Phase 1I — Bulk historical load orchestrator.
+Bulk historical load orchestrator.
 
-Steps (run individually or all at once):
-  1. seed   — Upsert companies table from AmarStock live prices
-  2. load   — Bulk-load historical prices for all tickers
-  3. report — Print gap analysis report
+Steps:
+  1. seed          — Upsert companies table from AmarStock live prices
+  2. load          — Bulk-load historical prices for all tickers
+  3. report        — Print gap analysis report
+  4. announcements — Fetch per-company historical announcements for all tickers
 
 Usage:
     python -m extraction.bulk_load.run seed
@@ -15,6 +16,8 @@ Usage:
     python -m extraction.bulk_load.run report
     python -m extraction.bulk_load.run report --from-date 2018-01-01
     python -m extraction.bulk_load.run all                   # seed + load + report
+    python -m extraction.bulk_load.run announcements
+    python -m extraction.bulk_load.run announcements --tickers GP,BRACBANK
 """
 from __future__ import annotations
 
@@ -87,6 +90,19 @@ async def _run(args: argparse.Namespace) -> None:
         gaps = await run_report(dsn, from_date=from_date)
         print_report(gaps)
 
+    if args.cmd == "announcements":
+        from extraction.bulk_load.announcement_loader import bulk_load_announcements
+        print("-- Announcements: fetching per-company historical announcements ------")
+        tickers = (
+            [t.strip().upper() for t in args.tickers.split(",") if t.strip()]
+            if getattr(args, "tickers", "")
+            else None
+        )
+        result = await bulk_load_announcements(tickers)
+        print(f"   -> OK      : {result['ok']} tickers")
+        print(f"   -> Failed  : {result['failed']} tickers")
+        print(f"   -> Inserted: {result['total_inserted']:,} rows")
+
 
 def _add_load_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--tickers",     default="", help="Comma-separated tickers (default: all)")
@@ -122,6 +138,9 @@ def main() -> None:
     all_p = sub.add_parser("all", help="Run seed → load → report in sequence")
     _add_load_args(all_p)
     _add_report_args(all_p)
+
+    ann_p = sub.add_parser("announcements", help="Fetch per-company historical announcements for all tickers")
+    ann_p.add_argument("--tickers", default="", help="Comma-separated tickers (default: all active)")
 
     args = parser.parse_args()
 

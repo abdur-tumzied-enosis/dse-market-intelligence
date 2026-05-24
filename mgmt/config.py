@@ -121,6 +121,13 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # Cache TTLs (seconds)
+    cache_ttl_live_prices: int = 300
+    cache_ttl_market_summary: int = 900
+    cache_ttl_fundamentals: int = 86400
+    cache_ttl_sector_pe: int = 3600
+    cache_ttl_pipeline_status: int = 30
+
     # Observability
     grafana_port: int = 3001
     grafana_admin_password: str = "admin"

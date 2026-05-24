@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from mgmt.cache import cache_get, cache_set
+from mgmt.config import get_settings
 from mgmt.deps import get_db
 
 router = APIRouter(prefix="/mgmt/jobs", tags=["jobs"])
@@ -15,6 +17,11 @@ async def list_jobs(
     status: str | None = Query(None),
     pool=Depends(get_db),
 ):
+    cache_key = f"cache:pipeline_status:{stream}:{status}:{limit}:{offset}"
+    cached = await cache_get(cache_key)
+    if cached is not None:
+        return cached
+
     conditions = []
     params: list = []
     i = 1
@@ -43,7 +50,10 @@ async def list_jobs(
         """,
         *params,
     )
-    return [dict(r) for r in rows]
+    result = [dict(r) for r in rows]
+    cfg = get_settings()
+    await cache_set(cache_key, result, cfg.cache_ttl_pipeline_status)
+    return result
 
 
 @router.get("/stats")

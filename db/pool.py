@@ -21,9 +21,10 @@ async def get_pool() -> asyncpg.Pool:
     if _pool is None:
         _pool = await asyncpg.create_pool(
             _dsn(),
-            min_size=1,
-            max_size=5,
+            min_size=2,
+            max_size=10,
             command_timeout=30,
+            statement_cache_size=0,  # pgBouncer transaction mode breaks prepared statements
         )
     return _pool
 

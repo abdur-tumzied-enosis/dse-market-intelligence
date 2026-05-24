@@ -71,6 +71,7 @@ def _parse_th_td(soup: BeautifulSoup) -> dict[str, str]:
         "reserve & surplus without oci (mn)": "reserve_surplus_mn",
         "year end":                           "fiscal_year_end",
         "cash dividend":                     "dividend_raw",
+        "bonus issue (stock dividend)":      "bonus_raw",
         "last trading price":               "ltp",
         "details of financial statement":   "ir_url",
     }
@@ -203,6 +204,122 @@ def _parse_quarterly_eps(soup: BeautifulSoup) -> dict[str, Any]:
                     break
             break
     return result
+
+
+def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """All year rows from EPS+NAV table → [{fiscal_year, eps, eps_diluted, nav}, ...]."""
+    for tbl in soup.find_all("table"):
+        headers = [td.get_text(strip=True) for td in tbl.find_all(["th", "td"])[:12]]
+        if "nav per share" in " ".join(headers).lower() and any(re.match(r"^\d{4}$", h) is None for h in headers):
+            rows_out = []
+            for row in tbl.find_all("tr"):
+                cells = [td.get_text(strip=True) for td in row.find_all("td")]
+                if not (cells and re.match(r"^\d{4}$", cells[0])):
+                    continue
+
+                def _fnum(idxs: list[int]) -> Any:
+                    for i in idxs:
+                        if i < len(cells) and cells[i] not in ("-", "", "N/A"):
+                            return to_decimal(cells[i])
+                    return None
+
+                rows_out.append({
+                    "fiscal_year": int(cells[0]),
+                    "eps":         _fnum([4, 3, 2, 1]),
+                    "eps_diluted": _fnum([3, 4]),
+                    "nav":         _fnum([8, 7]),
+                })
+            if rows_out:
+                return rows_out
+    return []
+
+
+_DIV_HIST_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%\s*(\d{4})")
+
+
+def _parse_pe_dividend_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """
+    All year rows from P/E + Dividend Yield table — hardcoded column indices.
+    Three-row colspan headers break dynamic detection; indices confirmed from existing
+    single-year parser comment:
+      0=Year, 1=P/E basic orig, 2=P/E basic rest, 3=P/E diluted orig, 4=P/E diluted rest,
+      5=P/E cont basic orig, 6=P/E cont basic rest, 7=Dividend in %, 8=Dividend Yield in %
+    Cash/stock dividend history comes from th/td strings — NOT this table.
+    Returns [{fiscal_year, pe}, ...]
+    """
+    for tbl in soup.find_all("table"):
+        headers = " ".join(c.get_text(strip=True) for c in tbl.find_all(["th", "td"])[:20]).lower()
+        if "dividend yield" not in headers or "year" not in headers:
+            continue
+
+        rows_out = []
+        for row in tbl.find_all("tr"):
+            cells = [td.get_text(strip=True) for td in row.find_all("td")]
+            if not (cells and re.match(r"^\d{4}$", cells[0])):
+                continue
+
+            def _fnum(idxs: list[int]) -> Any:
+                for i in idxs:
+                    if i < len(cells) and cells[i] not in ("-", "", "N/A"):
+                        return to_decimal(cells[i])
+                return None
+
+            rows_out.append({
+                "fiscal_year": int(cells[0]),
+                "pe":          _fnum([4, 3, 2, 1]),
+            })
+
+        if rows_out:
+            return rows_out
+    return []
+
+
+def _parse_dividend_history_th_td(
+    cash_raw: str | None,
+    bonus_raw: str | None,
+) -> dict[int, dict[str, Any]]:
+    """
+    Parse th/td dividend history strings into per-year dicts.
+    Input:  "12.50% 2024, 10% 2023, 7.50% 2022"
+    Output: {2024: {"cash": 12.5, "bonus": None}, 2023: {"cash": 10.0, ...}, ...}
+    """
+    by_year: dict[int, dict[str, Any]] = {}
+    for m in _DIV_HIST_RE.finditer(cash_raw or ""):
+        yr = int(m.group(2))
+        by_year.setdefault(yr, {"cash": None, "bonus": None})
+        by_year[yr]["cash"] = float(m.group(1))
+    for m in _DIV_HIST_RE.finditer(bonus_raw or ""):
+        yr = int(m.group(2))
+        by_year.setdefault(yr, {"cash": None, "bonus": None})
+        by_year[yr]["bonus"] = float(m.group(1))
+    return by_year
+
+
+def _merge_yearly_rows(
+    eps_rows: list[dict],
+    pe_rows: list[dict],
+    div_by_year: dict[int, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Merge EPS+NAV, PE, and th/td dividend history rows by fiscal_year."""
+    eps_map = {r["fiscal_year"]: r for r in eps_rows}
+    pe_map  = {r["fiscal_year"]: r for r in pe_rows}
+    years   = sorted(set(eps_map) | set(pe_map))
+    div_map = div_by_year or {}
+    out = []
+    for yr in years:
+        e = eps_map.get(yr, {})
+        p = pe_map.get(yr, {})
+        d = div_map.get(yr, {})
+        out.append({
+            "fiscal_year":   yr,
+            "eps":           e.get("eps"),
+            "eps_diluted":   e.get("eps_diluted"),
+            "nav":           e.get("nav"),
+            "pe":            p.get("pe"),
+            "cash_div_pct":  d.get("cash"),
+            "stock_div_pct": d.get("bonus"),
+        })
+    return out
 
 
 def _parse_shareholding(soup: BeautifulSoup) -> dict[str, Any]:
@@ -385,6 +502,71 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
             quality="partial",  # no MA signals / multi-period shareholding
             records=1,
             raw_sample=parsed,
+        )
+
+    async def fetch_historical(self, ticker: str = "", **kwargs: Any) -> AdapterResult:
+        """
+        Multi-year fundamentals from displayCompany.php.
+        Returns one DataFrame row per fiscal year (typically 5–8 years).
+        Columns: ticker, fiscal_year, eps, eps_diluted, nav, pe, cash_div_pct, stock_div_pct, source
+        """
+        if not ticker:
+            raise AdapterError(self.name, "ticker required", retryable=False)
+
+        url = COMPANY_URL.format(ticker=ticker.upper())
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True) as c:
+                resp = await c.get(url)
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise AdapterError(self.name, f"HTTP {exc.response.status_code} for {ticker}", retryable=True) from exc
+        except Exception as exc:
+            raise AdapterError(self.name, f"request failed: {exc}", retryable=True) from exc
+
+        try:
+            from bs4 import BeautifulSoup as _BS
+            soup        = _BS(resp.text, "lxml")
+            eps_rows    = _parse_eps_nav_all_years(soup)
+            pe_rows     = _parse_pe_dividend_all_years(soup)
+            th_td       = _parse_th_td(soup)
+            div_by_year = _parse_dividend_history_th_td(
+                th_td.get("dividend_raw"), th_td.get("bonus_raw")
+            )
+            yearly      = _merge_yearly_rows(eps_rows, pe_rows, div_by_year)
+        except Exception as exc:
+            raise AdapterError(self.name, f"parse failed: {exc}", retryable=False) from exc
+
+        if not yearly:
+            raise AdapterError(
+                self.name,
+                f"no historical year rows found for {ticker}",
+                retryable=False,
+            )
+
+        now = datetime.now(timezone.utc)
+        rows = [
+            {
+                "ticker":        normalize_ticker(ticker),
+                "fiscal_year":   y["fiscal_year"],
+                "eps":           y["eps"],
+                "eps_diluted":   y["eps_diluted"],
+                "nav":           y["nav"],
+                "pe":            y["pe"],
+                "cash_div_pct":  y["cash_div_pct"],
+                "stock_div_pct": y["stock_div_pct"],
+                "fetched_at":    now,
+                "source":        self.name,
+            }
+            for y in yearly
+        ]
+        df = pd.DataFrame(rows)
+        return AdapterResult(
+            data=df,
+            source_name=self.name,
+            fetched_at=now,
+            quality="ok",
+            records=len(df),
+            raw_sample=yearly[0] if yearly else {},
         )
 
     async def health_check(self) -> bool:

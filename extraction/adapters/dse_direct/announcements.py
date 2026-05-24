@@ -21,8 +21,9 @@ from extraction.normalizers import bd_date_str_to_utc, normalize_ticker
 #   <th>Post Date:</th>     <td>2026-05-21</td>
 # Followed by 2 separator rows (no <th>/<td> pair), then next announcement.
 
-NEWS_URL    = "https://www.dsebd.org/display_news.php"
-NEWS_7D_URL = "https://www.dsebd.org/news_archive_7days.php"
+NEWS_URL        = "https://www.dsebd.org/display_news.php"
+NEWS_7D_URL     = "https://www.dsebd.org/news_archive_7days.php"
+OLD_NEWS_URL    = "https://www.dsebd.org/old_news.php"
 
 _LABEL_MAP = {
     "Trading Code": "ticker",
@@ -198,6 +199,122 @@ class DSEDirectPSNAdapter(BaseAdapter):
     async def health_check(self) -> bool:
         try:
             result = await self.fetch()
+            return result.records > 0
+        except Exception:
+            return False
+
+
+async def _httpx_fetch_company_news(
+    ticker: str,
+    adapter_name: str,
+    criteria: int = 3,
+    timeout_s: int = 30,
+) -> list[dict[str, Any]]:
+    """
+    Fetch per-company historical announcements from old_news.php (static HTML).
+
+    criteria=3 filters by inst (company). criteria=1/2 return all-company feeds.
+    """
+    import httpx
+    from bs4 import BeautifulSoup
+
+    url = f"{OLD_NEWS_URL}?inst={ticker}&criteria={criteria}&archive=news"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Referer": "https://www.dsebd.org/",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            resp = await client.get(url, headers=headers, follow_redirects=True)
+            resp.raise_for_status()
+    except Exception as exc:
+        raise AdapterError(adapter_name, f"HTTP fetch failed: {exc}", retryable=True) from exc
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    records: list[dict[str, Any]] = []
+    current: dict[str, str] = {}
+
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            th = tr.find("th")
+            td = tr.find("td")
+            if th and td:
+                label = th.get_text(strip=True).rstrip(":")
+                field = _LABEL_MAP.get(label)
+                if field:
+                    current[field] = td.get_text(strip=True)
+            if len(current) == 4:
+                records.append({
+                    "ticker":   normalize_ticker(current.get("ticker", "")),
+                    "date_str": current.get("date_str", ""),
+                    "headline": current.get("headline", ""),
+                    "details":  current.get("details", ""),
+                    "category": f"criteria_{criteria}",
+                })
+                current = {}
+
+    return records
+
+
+class DSEDirectCompanyNewsAdapter(BaseAdapter):
+    """
+    DSE official site — per-company historical announcements via httpx (static HTML).
+
+    URL: https://www.dsebd.org/old_news.php?inst={ticker}&criteria=3&archive=news
+
+    Unlike display_news.php (JS-rendered, needs Playwright), old_news.php is
+    static HTML — httpx + BeautifulSoup only.
+
+    criteria=3 is the per-company filter. criteria=1/2 return all-company feeds
+    regardless of the inst parameter.
+    """
+
+    name = "dse_direct_company_news"
+    priority = 1
+    timeout_seconds = 30
+
+    def __init__(self, ticker: str = "", criteria: int = 3) -> None:
+        self._ticker = ticker
+        self._criteria = criteria
+
+    def normalize(self, rows: list[dict[str, Any]]) -> pd.DataFrame:
+        return _normalize_rows(rows, self.name)
+
+    async def fetch(self, ticker: str = "", **kwargs: Any) -> AdapterResult:
+        target = ticker or self._ticker
+        if not target:
+            raise AdapterError(self.name, "ticker required", retryable=False)
+
+        rows = await _httpx_fetch_company_news(
+            target, self.name, self._criteria, self.timeout_seconds
+        )
+
+        if not rows:
+            raise AdapterError(
+                self.name,
+                f"no announcements for {target} — ticker invalid or no history",
+                retryable=False,
+            )
+
+        normalized = self.normalize(rows)
+        return AdapterResult(
+            data=normalized,
+            source_name=self.name,
+            fetched_at=datetime.now(timezone.utc),
+            quality="ok",
+            records=len(normalized),
+            raw_sample=rows[0] if rows else {},
+        )
+
+    async def health_check(self) -> bool:
+        try:
+            result = await self.fetch(ticker="CITYBANK")
             return result.records > 0
         except Exception:
             return False

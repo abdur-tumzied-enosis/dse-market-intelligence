@@ -16,6 +16,7 @@ from db.pool import close_pool, get_pool
 from extraction.scheduler import configure_scheduler, get_scheduler
 from mgmt.adapter_state import load_overrides
 from mgmt.agent.agent import Agent
+from mgmt.cache import close_redis, get_redis
 from mgmt.config import get_settings
 from mgmt.routers import agent, alerts, health, jobs, metrics, quality, scheduler, streams, tasks
 
@@ -29,6 +30,10 @@ async def lifespan(app: FastAPI):
     # DB pool
     pool = await get_pool()
 
+    # Redis cache
+    await get_redis()
+    logger.info("redis_cache_connected")
+
     # Restore adapter override state
     try:
         await load_overrides(pool)
@@ -36,13 +41,9 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("adapter_overrides_load_failed", error=str(exc))
 
-    # APScheduler — SQLAlchemy job store needs sync psycopg3 driver URL
-    sync_db_url = (
-        settings.database_url
-        .replace("postgresql+asyncpg://", "postgresql+psycopg://")
-        .replace("postgresql://", "postgresql+psycopg://")
-    )
-    sched = get_scheduler(sync_db_url)
+    # APScheduler — SQLAlchemy job store must bypass pgBouncer (transaction mode
+    # breaks LISTEN/NOTIFY and prepared statements used by SQLAlchemy)
+    sched = get_scheduler(settings.database_sync_url)
     configure_scheduler(sched)
     sched.start()
     app.state.scheduler = sched
@@ -61,6 +62,7 @@ async def lifespan(app: FastAPI):
     yield
 
     sched.shutdown(wait=False)
+    await close_redis()
     await close_pool()
     logger.info("mgmt_shutdown_complete")
 

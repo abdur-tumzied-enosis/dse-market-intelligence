@@ -4,7 +4,7 @@
 
 ---
 
-## CURRENT FOCUS → Layer 1: Data Extraction
+## CURRENT FOCUS → Phase 1L: Testing gaps (macro + bsec unit tests, announcement parser tests, failover tests)
 
 ---
 
@@ -70,7 +70,26 @@
 - [x] `extraction/adapters/bdshare/depth.py` — `BDShareDepthAdapter`
 - [ ] Unit tests: `normalize()` for each bdshare adapter using fixtures (blocked on smoke test)
 
-### Phase 1D — AmarStock Adapters (BACKUP / fundamentals PRIMARY)
+### Phase 1D — Company Announcements + AmarStock Adapters
+
+#### Company Announcements Pipeline (2026-05-24)
+
+- [x] `extraction/adapters/dse_direct/announcements.py` — `DSEDirectCompanyNewsAdapter` (httpx static HTML; `old_news.php?inst={ticker}&criteria=3`; no Playwright needed; browser-like headers required)
+- [x] `db/migrations/016_company_announcements.sql` — `company_announcements` table: structured fields (announcement_type, eps_value, eps_period, eps_type, dividend_cash_pct, dividend_stock_pct, dividend_year, content_hash); 4 indexes
+- [x] `extraction/parsers/__init__.py` + `extraction/parsers/announcement_parser.py` — classifies 10 announcement types; extracts EPS (value + period + type) and dividend (cash % + stock % + year) from text; EPS extracted across all types (not just eps_disclosure — DSE embeds EPS in dividend continuation news)
+- [x] `extraction/bulk_load/announcement_loader.py` — bulk scraper: semaphore(3) + 1.5s delay; ~12 min for 406 tickers; ON CONFLICT content_hash DO NOTHING
+- [x] `extraction/bulk_load/run.py` — added `announcements` subcommand
+- [x] Migration applied; tested on BRACBANK/CITYBANK/GP (162 rows, EPS + stock dividend extracted correctly)
+- [x] Run full bulk load: 406 tickers → 399 ok / 7 failed (no DSE history: AFCAGRO, ACTIVEFINE, BXSYNTH, KAY&QUE, REGENTTEX, SAVAREFR, SHURWID) / **20,868 rows inserted** (2026-05-24)
+- [ ] Unit tests: parser on fixture announcements (EPS, dividend, AGM, board_meeting, other)
+
+#### Historical Fundamentals Load (2026-05-24)
+
+- [x] `db/migrations/017_fundamentals_fiscal_year_index.sql` — partial unique index on `(ticker, fiscal_year) WHERE fiscal_year IS NOT NULL`; NULL rows (weekly scrapes) unaffected
+- [x] `extraction/bulk_load/fundamentals_historical_loader.py` — scrapes `displayCompany.php` for all active tickers; 5–8 years EPS/NAV/PE/cash_div/stock_div; ON CONFLICT (ticker, fiscal_year) DO UPDATE; 3 concurrent, 1.5s delay
+- [x] Run full bulk load: 406 tickers → 395 ok / 11 failed (bonds/sukuk have no EPS tables — expected) / **1,945 rows upserted** (2026-05-24)
+
+#### AmarStock Adapters (BACKUP / fundamentals PRIMARY)
 
 - [x] Smoke-test all AmarStock endpoints — 14/14 passing (2026-05-21)
   - API is SPA-internal JSON (not the assumed REST API). Actual endpoints discovered via Playwright network intercept.
@@ -95,9 +114,9 @@
 - [x] `extraction/adapters/dse_direct/announcements.py` — `DSEDirectAnnouncementsAdapter` + `DSEDirectPSNAdapter` (Playwright; key-value row parser; 106/548 rows; published_at correct)
 - [x] `extraction/adapters/dse_direct/depth.py` — `DSEDirectDepthPlaywrightAdapter` (price stats only; no auth → no bid/ask; quality=partial)
 - [x] `extraction/adapters/dse_direct/pdf_reports.py` — `DSEDirectPDFAdapter` STUB — DSE + BSEC don't host company annual report PDFs; per-company IR pages only; no viable generic scraper
-- [~] `extraction/adapters/dse_direct/company_info.py` — `DSEDirectCompanyInfoAdapter` (in progress)
-- [~] `extraction/adapters/dse_direct/gainers_losers.py` — `DSEDirectGainersLosersAdapter` (in progress)
-- [~] `extraction/adapters/dse_direct/sector_pe.py` — `DSEDirectSectorPEAdapter` (in progress)
+- [x] `extraction/adapters/dse_direct/company_info.py` — `DSEDirectCompanyInfoAdapter` + `fetch_historical()` (multi-year EPS/NAV/PE/cash_div/stock_div; hardcoded PE table column indices; th/td dividend history strings parsed per-year)
+- [x] `extraction/adapters/dse_direct/gainers_losers.py` — `DSEDirectGainersAdapter` + `DSEDirectLosersAdapter` (10 gainers, 10 losers; confirmed working 2026-05-24)
+- [x] `extraction/adapters/dse_direct/sector_pe.py` — `DSEDirectSectorPEAdapter` (18 sectors; confirmed working 2026-05-24)
 - [s] Test PDF discovery for 3 tickers — N/A; confirmed no centralized PDF source exists
 - [s] Structure hash baseline — deferred to Phase 1L
 - [x] `tests/smoke/test_dse_direct_smoke.py` — 9/9 pass
@@ -184,18 +203,48 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 
 ---
 
-## Layer 2 — Storage (FUTURE)
+## Layer 2 — Storage (ACTIVE)
 
-> Not started. Unlock after Layer 1 is stable.
+> Approach A: pgBouncer → Redis TTL cache → TimescaleDB tuning. Deferred: MinIO, backup, pgvector tuning, llm_usage_log, Neo4j.
 
-- [ ] TimescaleDB continuous aggregates tuned for query patterns
-- [ ] pgvector index tuning (ivfflat lists parameter)
-- [ ] Redis cache layer: TTLs per data type
-- [ ] MinIO / S3 setup for PDF storage
-- [ ] DB backup strategy (pg_dump schedule)
-- [ ] Connection pooling (pgBouncer or asyncpg pool tuning)
-- [ ] `db/migrations/011_llm_usage_log.sql` — `llm_usage_log` table (user, tier, model, tokens, cache_hit, cost_usd)
-- [ ] Neo4j service in docker-compose — for Graphiti knowledge graph (planned after extraction layer stable)
+### Phase 2A — pgBouncer (connection multiplexing)
+
+- [x] Add `pgbouncer` service to `docker-compose.yml` — `edoburu/pgbouncer:1.23.1-p0`, transaction mode, port 6432
+- [s] `docker/pgbouncer/pgbouncer.ini` — not needed; edoburu image is fully env-var driven
+- [s] `docker/pgbouncer/userlist.txt` — not needed; edoburu generates it from DB_USER/DB_PASSWORD env vars
+- [x] Update all app services (`mgmt_api`, `worker`, `scheduler`) — `DATABASE_URL` → `pgbouncer:6432`; `DATABASE_SYNC_URL` stays `db:5432` direct (APScheduler SQLAlchemy needs it)
+- [x] `.env.example` — `DATABASE_URL` → localhost:6432; `DATABASE_SYNC_URL` stays localhost:5432; added `PGBOUNCER_PORT=6432`
+- [x] `db/pool.py` — `min_size=2`, `max_size=10`, `statement_cache_size=0` (required: pgBouncer transaction mode breaks asyncpg prepared statements)
+- [x] Smoke: pgBouncer healthy, mgmt_api connects through pool. Fixed: `AUTH_TYPE=scram-sha-256` (timescaledb-ha pg16 ignores `POSTGRES_HOST_AUTH_METHOD`; defaults to scram)
+
+### Phase 2B — Redis TTL Cache Layer (COMPLETE 2026-05-24)
+
+- [x] `mgmt/cache.py` — `get_redis()` singleton (redis.asyncio), `cache_get(key)`, `cache_set(key, value, ttl)`, `cache_delete_pattern(pattern)` (SCAN-based, safe in prod)
+- [x] `mgmt/config.py` — TTL constants: `cache_ttl_live_prices=300`, `cache_ttl_market_summary=900`, `cache_ttl_fundamentals=86400`, `cache_ttl_sector_pe=3600`, `cache_ttl_pipeline_status=30`
+- [x] Key schema: `cache:pipeline_status:{stream}:{status}:{limit}:{offset}`, `cache:live_prices*`
+- [x] `extraction/scheduler.py` — cache invalidation in `job_live_prices()` (deletes `cache:pipeline_status:*` + `cache:live_prices*` after each run; non-fatal on failure)
+- [s] `mgmt/routers/streams.py` — streams router reads in-memory `STREAMS` registry, not DB; caching adds no value
+- [x] `mgmt/routers/jobs.py` — cache-aside on `/mgmt/jobs` list; key encodes all query params; 30s TTL
+- [x] `mgmt/main.py` — `get_redis()` warm on startup, `close_redis()` on shutdown
+- [X] Smoke: hit `/mgmt/jobs` twice in < 30s, verify cache hit via `make redis-cli` → `MONITOR`
+
+### Phase 2C — TimescaleDB Continuous Aggregate Tuning
+
+- [x] `db/migrations/013_weekly_ohlcv.sql` — `weekly_ohlcv` hierarchical CA on `daily_ohlcv`; 7-day bucket; refresh weekly, 8-week lookback
+- [x] `db/migrations/014_monthly_ohlcv.sql` — `monthly_ohlcv` hierarchical CA on `daily_ohlcv` (not weekly — avoids bucket-alignment drift at month boundaries); refresh monthly
+- [x] `db/migrations/015_sector_daily_stats.sql` — `sector_daily_stats` regular matview (CA can't join non-hypertable tables); `refresh_sector_daily_stats` procedure scheduled via `add_job` daily; `REFRESH CONCURRENTLY` backed by unique index
+- [x] Tune `daily_ohlcv` refresh policy: `schedule_interval` 1h → 1d (in 015; uses `alter_job` via dynamic job_id lookup)
+- [x] Index audit in 015: `fundamentals(ticker, fetched_at DESC)`, `news(published_at DESC)`, `news USING gin(tickers)` — all confirmed/idempotent
+- [x] `make migrate` — applied via `docker compose exec mgmt_api python db/migrate.py` (local .env uses Docker hostnames; run inside container)
+- [x] EXPLAIN ANALYZE — all 3 patterns index-only, no seq scans. weekly_ohlcv ChunkAppend 0.47ms, sector_daily_stats Bitmap+GIN 0.48ms, news GIN 0.07ms. Fixed: `refresh_sector_daily_stats` now runs `ANALYZE` post-refresh (planner was overestimating 6938→278 before stats update)
+
+### Deferred (post-Layer 2)
+
+- [ ] pgvector index tuning (ivfflat lists parameter) — defer until embeddings volume known
+- [ ] MinIO / S3 setup for PDF storage — defer until annual report PDF pipeline built
+- [ ] DB backup strategy (pg_dump schedule) — pre-prod task - skip for now
+- [ ] `db/migrations/011_llm_usage_log.sql` — `llm_usage_log` table — defer to Layer 4 LLM layer
+- [ ] Neo4j service in docker-compose — defer until Layer 4 Graphiti integration
 
 ---
 

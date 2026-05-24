@@ -45,7 +45,12 @@ async def job_live_prices() -> None:
     """Fetch live prices every 15 min during market hours."""
     logger.info("job_live_prices: starting")
     # TODO: implement ingest_live_prices()
-    # TODO: update_redis_cache()
+    try:
+        from mgmt.cache import cache_delete_pattern
+        await cache_delete_pattern("cache:pipeline_status:*")
+        await cache_delete_pattern("cache:live_prices*")
+    except Exception as exc:
+        logger.warning("job_live_prices: cache invalidation failed", error=str(exc))
     logger.info("job_live_prices: complete")
 
 
