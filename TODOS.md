@@ -4,7 +4,7 @@
 
 ---
 
-## CURRENT FOCUS → Phase 1L complete. Scheduler wiring complete. Next: Phase 1F smoke test (needs GOOGLE_CLOUD_API_KEY) or Layer 4 start.
+## CURRENT FOCUS → Layer 1 complete. All phases 1A-1L done. Next: Layer 4 (embeddings + RAG chatbot) or enable Cloud NL API for full ticker extraction.
 
 ---
 
@@ -137,7 +137,7 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 - [x] `pyproject.toml` — `rapidfuzz>=3.9.0` added
 - [x] Wire `TickerExtractor` into news scheduler job — `job_news_scrape()` in `extraction/scheduler.py`; insert-first strategy: NER only on newly inserted rows; ON CONFLICT url DO NOTHING RETURNING id
 - [x] `mgmt/config.py` — `news_scrape_interval_hours=12` (12h → ~3k NL API calls/month, within free tier)
-- [ ] Smoke test — set `GOOGLE_CLOUD_API_KEY` in `.env`, run `await GoogleNewsRSSAdapter().fetch()`, verify articles, spot-check ticker extraction on 5 articles
+- [x] Smoke test — 164 articles from 9 sources, content-hash dedup verified, blocklist preflight working (2026-05-24). NL API (analyzeEntitySentiment) 2 tests skip: Cloud NL API not enabled for key's project (enable at console.cloud.google.com)
 
 ### Phase 1G — Macro Adapters (COMPLETE 2026-05-21)
 
