@@ -481,6 +481,8 @@ class TestSchedulerHealthCheckJob:
         cfg.quarterly_day = 1
         cfg.quarterly_hour = 3
         cfg.quarterly_minute = 0
+        cfg.pipeline_test_mode = False
+        cfg.news_scrape_interval_hours = 12
         return cfg
 
     def _capture_jobs(self, scheduler: MagicMock) -> list[dict]:
@@ -524,7 +526,7 @@ class TestSchedulerHealthCheckJob:
             from extraction.scheduler import configure_scheduler
             configure_scheduler(scheduler)
 
-        assert len(jobs) == 8
+        assert len(jobs) == 9
 
     def test_health_check_interval_reads_env_var(self, monkeypatch):
         """Set HEALTH_CHECK_INTERVAL_HOURS=1 to run checks every hour instead of every 6."""

@@ -60,8 +60,8 @@ class Settings(BaseSettings):
     eod_snapshot_hour: int = 14
     eod_snapshot_minute: int = 35
 
-    # announcements: interval every N hours
-    announcements_interval_hours: int = 2
+    # announcements: interval every N hours (full 406-ticker scrape, ~12 min; ON CONFLICT deduplicates)
+    announcements_interval_hours: int = 24
 
     # news_scrape: interval every N hours (free NL API tier: 5k req/month → 12h = ~3k/month)
     news_scrape_interval_hours: int = 12

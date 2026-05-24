@@ -38,6 +38,37 @@ def get_scheduler(database_url: str) -> AsyncIOScheduler:
     return scheduler
 
 
+# ── Helpers ────────────────────────────────────────────────────────────
+
+
+async def _upsert_macro_df(pool, df) -> int:
+    """Insert/update rows from a macro AdapterResult DataFrame into macro_indicators."""
+    import pandas as pd
+    count = 0
+    for _, row in df.iterrows():
+        r = await pool.fetchrow(
+            """
+            INSERT INTO macro_indicators
+                (indicator, value, unit, period, period_type, source, fetched_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ON CONFLICT (indicator, period, source) DO UPDATE
+                SET value      = EXCLUDED.value,
+                    fetched_at = EXCLUDED.fetched_at
+            RETURNING id
+            """,
+            row["indicator"],
+            row["value"],
+            row.get("unit"),
+            row["period"],
+            row.get("period_type", "unknown"),
+            row["source"],
+            row["fetched_at"],
+        )
+        if r:
+            count += 1
+    return count
+
+
 # ── Job Functions ──────────────────────────────────────────────────────
 
 
@@ -66,12 +97,16 @@ async def job_eod_snapshot() -> None:
 
 
 async def job_announcements() -> None:
-    """Fetch announcements and news every 2 hours."""
+    """Fetch DSE company announcements for all active tickers (daily after market close)."""
+    from extraction.bulk_load.announcement_loader import bulk_load_announcements
     logger.info("job_announcements: starting")
-    # TODO: implement scrape_dse_announcements()
-    # TODO: scrape_news_all_sources()
-    # TODO: enqueue celery task: process_new_articles (sentiment + embedding)
-    logger.info("job_announcements: complete")
+    summary = await bulk_load_announcements()
+    logger.info(
+        "job_announcements: complete",
+        ok=summary["ok"],
+        failed=summary["failed"],
+        inserted=summary["total_inserted"],
+    )
 
 
 async def job_news_scrape() -> None:
@@ -178,32 +213,62 @@ async def job_news_scrape() -> None:
 
 
 async def job_daily_macro() -> None:
-    """Daily macro indicators at 02:00."""
-    logger.info("job_daily_macro: starting")
-    # TODO: implement fetch_usd_bdt_rate()
-    # TODO: check_bsec_circulars()
-    # TODO: check_new_ipo_filings()
-    logger.info("job_daily_macro: complete")
+    """Daily macro indicators at 02:00 — FX rate + policy rate check."""
+    from db.pool import get_pool
+    from extraction.registry import STREAMS
+    from extraction.jobs import job_run
+
+    async with job_run("daily_macro") as ctx:
+        pool = await get_pool()
+        total = 0
+        for stream_name in ("macro_usd_bdt", "macro_policy_rate"):
+            try:
+                result = await STREAMS[stream_name].fetch()
+                n = await _upsert_macro_df(pool, result.data)
+                total += n
+                logger.info("daily_macro_stream_done", stream=stream_name, upserted=n)
+            except Exception as exc:
+                logger.warning("daily_macro_stream_failed", stream=stream_name, error=str(exc))
+        ctx["records_inserted"] = total
 
 
 async def job_weekly_fundamentals() -> None:
-    """Weekly fundamental scrape (Sunday 23:00).
+    """Weekly fundamental scrape (Sunday 23:00) — multi-year EPS/NAV/PE/div for all tickers.
 
-    ~18 min for 350 pages → offload to Celery.
+    ~18 min for 406 tickers at 3 concurrent, 1.5s delay.
     """
-    logger.info("job_weekly_fundamentals: enqueueing to Celery")
-    # TODO: enqueue celery task: scrape_all_fundamentals
-    # TODO: enqueue celery task: check_index_composition
-    logger.info("job_weekly_fundamentals: queued")
+    from extraction.bulk_load.fundamentals_historical_loader import bulk_load_fundamentals_historical
+    logger.info("job_weekly_fundamentals: starting")
+    summary = await bulk_load_fundamentals_historical()
+    logger.info(
+        "job_weekly_fundamentals: complete",
+        ok=summary["ok"],
+        failed=summary["failed"],
+        upserted=summary["total_upserted"],
+    )
 
 
 async def job_monthly() -> None:
-    """Monthly macro data (1st day, 01:00)."""
-    logger.info("job_monthly: starting")
-    # TODO: implement fetch_bangladesh_bank_rates()
-    # TODO: fetch_forex_reserves()
-    # TODO: enqueue celery task: recalculate_beta_all_stocks
-    logger.info("job_monthly: complete")
+    """Monthly macro data (1st day, 01:00) — all 5 macro streams."""
+    from db.pool import get_pool
+    from extraction.registry import STREAMS
+    from extraction.jobs import job_run
+
+    async with job_run("monthly_macro") as ctx:
+        pool = await get_pool()
+        total = 0
+        for stream_name in (
+            "macro_policy_rate", "macro_cpi", "macro_usd_bdt",
+            "macro_gdp", "macro_remittance",
+        ):
+            try:
+                result = await STREAMS[stream_name].fetch()
+                n = await _upsert_macro_df(pool, result.data)
+                total += n
+                logger.info("monthly_macro_stream_done", stream=stream_name, upserted=n)
+            except Exception as exc:
+                logger.warning("monthly_macro_stream_failed", stream=stream_name, error=str(exc))
+        ctx["records_inserted"] = total
 
 
 async def job_quarterly() -> None:
