@@ -75,7 +75,7 @@ _MONTH_TO_QUARTER: dict[frozenset, str] = {
 }
 # FY year
 _FY_RE = re.compile(r'\bFY\s*(\d{4})\b', re.IGNORECASE)
-_YEAR_ENDED_RE = re.compile(r'year\s+ended\s+(?:\w+\s+\d+,?\s+)?(\d{4})', re.IGNORECASE)
+_YEAR_ENDED_RE = re.compile(r'year\s+ended\s+(?:\w+\s+)?(\d{4})', re.IGNORECASE)
 
 
 def _extract_eps(text: str) -> tuple[Optional[float], Optional[str], Optional[str]]:
@@ -134,7 +134,7 @@ _STOCK_DIV_RES = [
     re.compile(r'(\d+(?:\.\d+)?)\s*%\s*(?:[Ss]tock|[Bb]onus)'),
 ]
 _DIV_YEAR_RE = re.compile(
-    r'(?:for\s+)?(?:the\s+)?(?:year|FY)\s*(?:ended\s+)?(?:\w+\s+\d+,?\s+)?(\d{4})',
+    r'(?:for\s+)?(?:the\s+)?(?:year|FY)\s*(?:ended\s+)?(?:\w+\s+)?(\d{4})',
     re.IGNORECASE,
 )
 

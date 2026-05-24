@@ -86,9 +86,9 @@ def _parse_period(text: str) -> str | None:
     if not t or t in ("-", "N/A", "n/a", "NA"):
         return None
 
-    # ISO: 2024-07 or 2024-07-15
+    # ISO: 2024-07 or 2024-07-15 (month must be 01-12)
     m = re.match(r"(\d{4})-(\d{2})(?:-\d{2})?", t)
-    if m:
+    if m and 1 <= int(m.group(2)) <= 12:
         return f"{m.group(1)}-{m.group(2)}"
 
     # DD/MM/YYYY or DD-MM-YYYY

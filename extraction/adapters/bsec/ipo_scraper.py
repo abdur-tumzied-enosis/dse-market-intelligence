@@ -38,6 +38,10 @@ def _parse_date(raw: str) -> str | None:
     try:
         return datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%d %b %Y").date().isoformat()
     except ValueError:
+        pass
+    try:
+        return datetime.strptime(f"{m.group(1)} {m.group(2)} {m.group(3)}", "%d %B %Y").date().isoformat()
+    except ValueError:
         return None
 
 

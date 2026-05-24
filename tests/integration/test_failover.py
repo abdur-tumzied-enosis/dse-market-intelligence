@@ -31,6 +31,56 @@ FAILOVER_STREAMS = {
         "secondary": 1,
         "baseline_cols": {"ticker", "date", "high", "low", "volume", "source"},
     },
+    "fundamentals": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"ticker", "eps", "nav", "source", "fetched_at"},
+    },
+    "announcements": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"ticker", "published_at", "headline", "source"},
+    },
+    "psn": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"ticker", "published_at", "headline", "source"},
+    },
+    "top_gainers_losers": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"ticker", "close", "change_pct", "direction", "source", "fetched_at"},
+    },
+    "market_depth": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"ticker", "source", "fetched_at"},
+    },
+    "macro_policy_rate": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"indicator", "value", "period", "source", "fetched_at"},
+    },
+    "macro_cpi": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"indicator", "value", "period", "source", "fetched_at"},
+    },
+    "macro_usd_bdt": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"indicator", "value", "period", "source", "fetched_at"},
+    },
+    "macro_gdp": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"indicator", "value", "period", "source", "fetched_at"},
+    },
+    "macro_remittance": {
+        "primary": 0,
+        "secondary": 1,
+        "baseline_cols": {"indicator", "value", "period", "source", "fetched_at"},
+    },
 }
 
 
