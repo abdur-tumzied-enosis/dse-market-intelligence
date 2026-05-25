@@ -426,6 +426,133 @@ async def job_health_checks() -> None:
     logger.info("job_health_checks: complete")
 
 
+async def job_nightly_ml() -> None:
+    """
+    Nightly ML inference pipeline (~22:00 BD time, after EOD snapshot).
+
+    Steps:
+    1. Fundamental scoring (XGBoost) → stock_scores.fundamental_score
+    2. Price direction (LSTM) → ml_predictions
+    3. DCF valuation → stock_scores.valuation_score + health_score
+    """
+    from pathlib import Path
+    from datetime import datetime, timezone
+    from db.pool import get_pool
+    from extraction.jobs import job_run
+
+    async with job_run("nightly_ml") as ctx:
+        pool = await get_pool()
+        fund_scores: dict = {}
+
+        # ── 1. Fundamental scoring ──────────────────────────────────────
+        fund_path = Path("models/v1/fundamental_scorer.pkl")
+        if fund_path.exists():
+            from ml.models.fundamental_scorer import FundamentalScorer
+            from ml.inference.score_fundamentals import score_all_tickers, write_scores
+
+            scorer = FundamentalScorer()
+            scorer.load(fund_path)
+            scored_at = datetime.now(timezone.utc)
+            fund_scores = await score_all_tickers(pool, scorer)
+            await write_scores(pool, fund_scores, scored_at)
+            logger.info("nightly_ml: fundamental scoring done n=%d", len(fund_scores))
+            ctx["records_inserted"] = len(fund_scores)
+        else:
+            logger.warning("nightly_ml: fundamental_scorer.pkl not found — skipping")
+
+        # ── 2. LSTM price direction ────────────────────────────────────
+        lstm_path = Path("models/v1/lstm_v0.pt")
+        if lstm_path.exists():
+            from ml.models.lstm_predictor import LSTMPredictor
+            from ml.inference.predict_prices import predict_ticker
+
+            model = LSTMPredictor.load(lstm_path)
+            model.eval()
+            tickers = await pool.fetch(
+                "SELECT ticker FROM companies WHERE is_active = true"
+            )
+            ok = 0
+            for row in tickers:
+                try:
+                    await predict_ticker(pool, model, row["ticker"])
+                    ok += 1
+                except Exception as exc:
+                    logger.warning("nightly_ml: lstm skip ticker=%s error=%s", row["ticker"], exc)
+            logger.info("nightly_ml: LSTM inference done n=%d", ok)
+        else:
+            logger.warning("nightly_ml: lstm_v0.pt not found — skipping")
+
+        # ── 3. DCF valuation + health score ───────────────────────────
+        from ml.valuation.dcf import DCFCalculator
+        from ml.scoring.health_score import compute_health_score
+
+        tickers = await pool.fetch(
+            "SELECT ticker FROM companies WHERE is_active = true"
+        )
+        now = datetime.now(timezone.utc)
+        for row in tickers:
+            ticker = row["ticker"]
+            try:
+                fund_row = await pool.fetchrow(
+                    """
+                    SELECT eps, pe FROM fundamentals
+                    WHERE ticker = $1 AND fiscal_year IS NOT NULL
+                    ORDER BY fiscal_year DESC LIMIT 1
+                    """,
+                    ticker,
+                )
+                price_row = await pool.fetchrow(
+                    "SELECT close FROM stock_prices WHERE ticker = $1 ORDER BY time DESC LIMIT 1",
+                    ticker,
+                )
+                if not fund_row or not price_row or not fund_row["eps"]:
+                    continue
+
+                eps_rows = await pool.fetch(
+                    """
+                    SELECT eps FROM fundamentals
+                    WHERE ticker = $1 AND fiscal_year IS NOT NULL AND eps IS NOT NULL
+                    ORDER BY fiscal_year DESC LIMIT 3
+                    """,
+                    ticker,
+                )
+                eps_vals = [float(r["eps"]) for r in eps_rows if r["eps"]]
+                if len(eps_vals) < 2:
+                    continue
+                growth = (eps_vals[0] / eps_vals[-1]) ** (1 / len(eps_vals)) - 1
+                growth = max(min(growth, 0.30), -0.20)
+
+                calc = DCFCalculator(
+                    eps_ttm=float(fund_row["eps"]),
+                    eps_growth_rate=growth,
+                    cost_of_equity=0.12,
+                    terminal_growth=0.03,
+                )
+                dcf = calc.calculate(float(price_row["close"]))
+
+                if dcf["margin_of_safety_pct"] is not None:
+                    mos = dcf["margin_of_safety_pct"]
+                    valuation_score = min(max((mos + 50) / 100, 0.0), 1.0)
+                    fund_score = fund_scores.get(ticker)
+                    health = compute_health_score(
+                        fundamental_score=fund_score,
+                        valuation_score=valuation_score,
+                    )
+                    await pool.execute(
+                        """
+                        UPDATE stock_scores SET valuation_score = $1, health_score = $2
+                        WHERE ticker = $3 AND scored_at = (
+                            SELECT MAX(scored_at) FROM stock_scores WHERE ticker = $3
+                        )
+                        """,
+                        valuation_score, health, ticker,
+                    )
+            except Exception as exc:
+                logger.warning("nightly_ml: dcf skip ticker=%s error=%s", ticker, exc)
+
+        logger.info("nightly_ml: complete")
+
+
 # ── Scheduler Configuration ────────────────────────────────────────────
 
 
@@ -526,7 +653,18 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         replace_existing=True,
     )
 
-    logger.info("scheduler: all 9 jobs registered (production mode)")
+    scheduler.add_job(
+        job_nightly_ml,
+        trigger="cron",
+        hour=22,
+        minute=0,
+        timezone=BD_TZ,
+        id="nightly_ml",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    logger.info("scheduler: all 10 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
@@ -552,6 +690,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         (job_monthly,             "monthly",             cfg.test_monthly_minutes),
         (job_quarterly,           "quarterly_retrain",   cfg.test_quarterly_minutes),
         (job_health_checks,       "health_checks",       cfg.test_health_check_minutes),
+        (job_nightly_ml,          "nightly_ml",          cfg.test_nightly_ml_minutes),
     ]
     for func, job_id, interval_minutes in job_map:
         scheduler.add_job(
