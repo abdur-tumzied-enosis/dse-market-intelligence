@@ -91,3 +91,82 @@ async def test_authenticate_user_correct_password():
     result = await authenticate_user(mock_pool, "a@b.com", "correctpass")
     assert result is not None
     assert result["email"] == "a@b.com"
+
+
+from fastapi.testclient import TestClient
+from fastapi import FastAPI
+import asyncpg
+
+
+def _make_app():
+    from api.auth.router import router
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    return app
+
+
+def test_register_success():
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = {
+        "id": 1, "email": "user@test.com", "full_name": None,
+        "tier": "free", "is_active": True, "created_at": None,
+    }
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    app = _make_app()
+
+    from api import deps
+
+    async def _get_db():
+        return mock_pool
+
+    app.dependency_overrides[deps.get_db] = _get_db
+
+    client = TestClient(app)
+    resp = client.post("/api/auth/register", json={"email": "user@test.com", "password": "password123"})
+    assert resp.status_code == 201
+    assert resp.json()["email"] == "user@test.com"
+
+
+def test_register_duplicate_email_returns_409():
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.side_effect = asyncpg.UniqueViolationError()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    app = _make_app()
+
+    from api import deps
+
+    async def _get_db():
+        return mock_pool
+
+    app.dependency_overrides[deps.get_db] = _get_db
+
+    client = TestClient(app)
+    resp = client.post("/api/auth/register", json={"email": "user@test.com", "password": "password123"})
+    assert resp.status_code == 409
+
+
+def test_login_bad_credentials_returns_401():
+    mock_pool = MagicMock()
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = None
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    app = _make_app()
+
+    from api import deps
+
+    async def _get_db():
+        return mock_pool
+
+    app.dependency_overrides[deps.get_db] = _get_db
+
+    client = TestClient(app)
+    resp = client.post("/api/auth/login", json={"email": "x@x.com", "password": "wrong"})
+    assert resp.status_code == 401
