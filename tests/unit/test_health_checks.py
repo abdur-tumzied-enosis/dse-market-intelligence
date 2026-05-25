@@ -517,7 +517,7 @@ class TestSchedulerHealthCheckJob:
         health_job = next(j for j in jobs if j.get("id") == "health_checks")
         assert health_job["hours"] == 1
 
-    def test_all_8_jobs_registered(self):
+    def test_all_10_jobs_registered(self):
         scheduler = MagicMock()
         jobs = self._capture_jobs(scheduler)
         cfg = self._mock_settings()
@@ -526,7 +526,7 @@ class TestSchedulerHealthCheckJob:
             from extraction.scheduler import configure_scheduler
             configure_scheduler(scheduler)
 
-        assert len(jobs) == 9
+        assert len(jobs) == 10
 
     def test_health_check_interval_reads_env_var(self, monkeypatch):
         """Set HEALTH_CHECK_INTERVAL_HOURS=1 to run checks every hour instead of every 6."""
