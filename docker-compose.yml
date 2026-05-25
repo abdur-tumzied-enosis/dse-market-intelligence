@@ -177,6 +177,31 @@ services:
       - ./:/app
 
   # ---------------------------------------------------------------------------
+  # Product API (FastAPI — user-facing stock data + auth)
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: mgmt
+    container_name: dse_api
+    restart: unless-stopped
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-dse_intelligence}
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+
+  # ---------------------------------------------------------------------------
   # Prometheus — metrics collection
   # ---------------------------------------------------------------------------
   prometheus:
