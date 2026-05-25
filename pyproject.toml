@@ -111,4 +111,4 @@ markers = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["extraction", "db", "mgmt", "ml"]
+packages = ["extraction", "db", "mgmt", "ml", "chat"]
