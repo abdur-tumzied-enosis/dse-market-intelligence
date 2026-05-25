@@ -25,7 +25,10 @@ async def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Not an access token")
-    user = await get_user_by_id(pool, int(payload["sub"]))
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    user = await get_user_by_id(pool, int(sub))
     if not user or not user["is_active"]:
         raise HTTPException(status_code=401, detail="User not found")
     return user
