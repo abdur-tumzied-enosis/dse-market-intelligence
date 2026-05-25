@@ -127,6 +127,7 @@ async def job_news_scrape() -> None:
     from extraction.adapters.news.google_news_rss import GoogleNewsRSSAdapter
     from extraction.adapters.news.ticker_extractor import TickerExtractor, load_company_map
     from extraction.base import AdapterError
+    from extraction.jobs import job_run
     from mgmt.config import get_settings
 
     cfg = get_settings()
@@ -311,9 +312,9 @@ async def job_news_sentiment() -> None:
 
     _log = _logging.getLogger(__name__)
     settings = get_settings()
-    pool = await get_pool()
 
-    async with job_run(pool, "news_sentiment", "news_en"):
+    async with job_run("news_sentiment", stream_name="news_en"):
+        pool = await get_pool()
         from chat.agent import StockAnalystAgent
         from chat.sentiment import score_new_articles
         agent = StockAnalystAgent(
