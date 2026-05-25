@@ -18,7 +18,8 @@ from mgmt.adapter_state import load_overrides
 from mgmt.agent.agent import Agent
 from mgmt.cache import close_redis, get_redis
 from mgmt.config import get_settings
-from mgmt.routers import agent, alerts, health, jobs, metrics, quality, scheduler, streams, tasks
+from chat.agent import StockAnalystAgent
+from mgmt.routers import agent, alerts, chat, health, jobs, metrics, quality, scheduler, streams, tasks
 
 logger = structlog.get_logger(__name__)
 
@@ -59,6 +60,14 @@ async def lifespan(app: FastAPI):
     app.state.ops_agent = ops_agent
     logger.info("ops_agent_initialized", provider=settings.agent_provider, model=settings.agent_model)
 
+    # Chat agent (user-facing stock analyst)
+    chat_agent = StockAnalystAgent(
+        provider=settings.chat_agent_provider,
+        model=settings.chat_agent_model,
+    )
+    app.state.chat_agent = chat_agent
+    logger.info("chat_agent_initialized", provider=settings.chat_agent_provider, model=settings.chat_agent_model)
+
     yield
 
     sched.shutdown(wait=False)
@@ -90,6 +99,7 @@ app.include_router(alerts.router)
 app.include_router(agent.router)
 app.include_router(tasks.router)
 app.include_router(metrics.router)
+app.include_router(chat.router)
 
 
 @app.get("/mgmt/ping")

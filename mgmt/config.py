@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     agent_model: str = "gemini-2.5-flash"
     ops_agent_auto_execute_risk: str = "low"
 
+    # ── Chat Agent ────────────────────────────────────────────────────────────────
+    chat_agent_provider: str = "google"
+    chat_agent_model: str = "gemini-2.5-flash"
+    chat_default_tier: str = "free"
+    gemini_context_cache_enabled: bool = False
+    gemini_context_cache_ttl_minutes: int = 30
+
     # Anthropic
     anthropic_api_key: str = ""
 

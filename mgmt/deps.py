@@ -27,6 +27,13 @@ async def get_ops_agent(request: Request):
     return agent
 
 
+async def get_chat_agent(request: Request):
+    agent = getattr(request.app.state, "chat_agent", None)
+    if agent is None:
+        raise HTTPException(503, "Chat agent not initialized")
+    return agent
+
+
 async def require_api_key(key: str | None = Security(_api_key_header)) -> None:
     settings = get_settings()
     if settings.mgmt_api_key and key != settings.mgmt_api_key:
