@@ -81,7 +81,7 @@ async def job_live_prices() -> None:
         await cache_delete_pattern("cache:pipeline_status:*")
         await cache_delete_pattern("cache:live_prices*")
     except Exception as exc:
-        logger.warning("job_live_prices: cache invalidation failed", error=str(exc))
+        logger.warning("job_live_prices: cache invalidation failed error=%s", exc)
     logger.info("job_live_prices: complete")
 
 
@@ -102,10 +102,8 @@ async def job_announcements() -> None:
     logger.info("job_announcements: starting")
     summary = await bulk_load_announcements()
     logger.info(
-        "job_announcements: complete",
-        ok=summary["ok"],
-        failed=summary["failed"],
-        inserted=summary["total_inserted"],
+        "job_announcements: complete ok=%d failed=%d inserted=%d",
+        summary["ok"], summary["failed"], summary["total_inserted"],
     )
 
 
@@ -140,7 +138,7 @@ async def job_news_scrape() -> None:
         try:
             result = await adapter.fetch()
         except AdapterError as exc:
-            logger.error("news_scrape_adapter_failed", error=str(exc))
+            logger.error("news_scrape_adapter_failed error=%s", exc)
             raise
 
         df = result.data
@@ -179,12 +177,12 @@ async def job_news_scrape() -> None:
                 newly_inserted.append({"id": rec["id"], "headline": rec["headline"], "body": rec["body"] or ""})
 
         ctx["records_inserted"] = len(newly_inserted)
-        logger.info("news_scrape_inserted", inserted=len(newly_inserted), skipped=len(df) - len(newly_inserted))
+        logger.info("news_scrape_inserted inserted=%d skipped=%d", len(newly_inserted), len(df) - len(newly_inserted))
 
         # ── 3 + 4. NER: extract tickers for new articles only ─────────────
         if not newly_inserted or not cfg.google_cloud_api_key:
             if not cfg.google_cloud_api_key:
-                logger.warning("news_scrape_no_ner_key", reason="GOOGLE_CLOUD_API_KEY not set — tickers empty")
+                logger.warning("news_scrape_no_ner_key: GOOGLE_CLOUD_API_KEY not set — tickers empty")
             return
 
         company_map = await load_company_map(pool)
@@ -210,7 +208,7 @@ async def job_news_scrape() -> None:
                     article["id"],
                 )
 
-        logger.info("news_scrape_ner_complete", articles_processed=len(newly_inserted))
+        logger.info("news_scrape_ner_complete articles_processed=%d", len(newly_inserted))
 
 
 async def job_daily_macro() -> None:
@@ -227,9 +225,9 @@ async def job_daily_macro() -> None:
                 result = await STREAMS[stream_name].fetch()
                 n = await _upsert_macro_df(pool, result.data)
                 total += n
-                logger.info("daily_macro_stream_done", stream=stream_name, upserted=n)
+                logger.info("daily_macro_stream_done stream=%s upserted=%d", stream_name, n)
             except Exception as exc:
-                logger.warning("daily_macro_stream_failed", stream=stream_name, error=str(exc))
+                logger.warning("daily_macro_stream_failed stream=%s error=%s", stream_name, exc)
         ctx["records_inserted"] = total
 
 
@@ -242,10 +240,8 @@ async def job_weekly_fundamentals() -> None:
     logger.info("job_weekly_fundamentals: starting")
     summary = await bulk_load_fundamentals_historical()
     logger.info(
-        "job_weekly_fundamentals: complete",
-        ok=summary["ok"],
-        failed=summary["failed"],
-        upserted=summary["total_upserted"],
+        "job_weekly_fundamentals: complete ok=%d failed=%d upserted=%d",
+        summary["ok"], summary["failed"], summary["total_upserted"],
     )
 
 
@@ -266,9 +262,9 @@ async def job_monthly() -> None:
                 result = await STREAMS[stream_name].fetch()
                 n = await _upsert_macro_df(pool, result.data)
                 total += n
-                logger.info("monthly_macro_stream_done", stream=stream_name, upserted=n)
+                logger.info("monthly_macro_stream_done stream=%s upserted=%d", stream_name, n)
             except Exception as exc:
-                logger.warning("monthly_macro_stream_failed", stream=stream_name, error=str(exc))
+                logger.warning("monthly_macro_stream_failed stream=%s error=%s", stream_name, exc)
         ctx["records_inserted"] = total
 
 

@@ -84,7 +84,8 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
     full_df = pd.concat(feature_rows, ignore_index=True)
     full_df = full_df.dropna(subset=["price_at_fy_end", "price_6m_later"])
     full_df["label"] = (full_df["price_6m_later"] > full_df["price_at_fy_end"]).astype(int)
-    full_df = full_df.dropna(subset=FEATURE_COLS + ["label"])
+    required_cols = [c for c in FEATURE_COLS if c != "pe_vs_sector"]
+    full_df = full_df.dropna(subset=required_cols + ["label"])
 
     X = full_df[FEATURE_COLS].reset_index(drop=True)
     y = full_df["label"].reset_index(drop=True)
@@ -98,11 +99,15 @@ async def main() -> None:
     X, y = await build_training_dataset(pool)
     log.info(f"Training set: {len(X)} rows, {y.mean():.1%} positive labels")
 
-    if len(X) < 30:
+    if len(X) < 40:
         log.warning("Very few training samples — model may not generalize")
+        if len(X) < 2:
+            log.error("Not enough data to train (need ≥2 rows). Aborting.")
+            await pool.close()
+            return
 
     # Walk-forward cross-validation
-    tscv = TimeSeriesSplit(n_splits=min(3, len(X) // 20))
+    tscv = TimeSeriesSplit(n_splits=max(2, min(3, len(X) // 20)))
     auc_scores = []
     for fold, (train_idx, val_idx) in enumerate(tscv.split(X)):
         scorer = FundamentalScorer()
