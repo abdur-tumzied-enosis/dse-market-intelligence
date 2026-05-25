@@ -5,6 +5,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from api.config import get_settings
+from api.middleware.rate_limit import RateLimitMiddleware
 from api.auth.router import router as auth_router
 from db.pool import close_pool, get_pool
 from mgmt.cache import close_redis, get_redis
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RateLimitMiddleware)
 
     app.include_router(auth_router, prefix="/api")
 
