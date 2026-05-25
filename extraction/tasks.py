@@ -77,131 +77,134 @@ async def _run_ml_inference_async() -> dict:
     from pathlib import Path
 
     from db.pool import get_pool
+    from extraction.jobs import job_run
     from ml.valuation.dcf import DCFCalculator
     from ml.scoring.health_score import compute_health_score
 
-    pool = await get_pool()
-    fund_scores: dict[str, float] = {}
+    async with job_run("nightly_ml") as ctx:
+        pool = await get_pool()
+        fund_scores: dict[str, float] = {}
 
-    # ── 1. Fundamental scoring (XGBoost) ──────────────────────────
-    fund_path = Path("models/v1/fundamental_scorer.pkl")
-    if fund_path.exists():
-        from ml.models.fundamental_scorer import FundamentalScorer
-        from ml.inference.score_fundamentals import score_all_tickers, write_scores
+        # ── 1. Fundamental scoring (XGBoost) ──────────────────────────
+        fund_path = Path("models/v1/fundamental_scorer.pkl")
+        if fund_path.exists():
+            from ml.models.fundamental_scorer import FundamentalScorer
+            from ml.inference.score_fundamentals import score_all_tickers, write_scores
 
-        scorer = FundamentalScorer()
-        scorer.load(fund_path)
-        scored_at = datetime.now(timezone.utc)
-        fund_scores = await score_all_tickers(pool, scorer)
-        await write_scores(pool, fund_scores, scored_at)
-        logger.info("run_ml_inference: fundamental scoring done n=%d", len(fund_scores))
-    else:
-        logger.warning("run_ml_inference: fundamental_scorer.pkl not found — skipping")
+            scorer = FundamentalScorer()
+            scorer.load(fund_path)
+            scored_at = datetime.now(timezone.utc)
+            fund_scores = await score_all_tickers(pool, scorer)
+            await write_scores(pool, fund_scores, scored_at)
+            logger.info("run_ml_inference: fundamental scoring done n=%d", len(fund_scores))
+        else:
+            logger.warning("run_ml_inference: fundamental_scorer.pkl not found — skipping")
 
-    # ── 2. LSTM price direction ────────────────────────────────────
-    lstm_path = Path("models/v1/lstm_v0.pt")
-    lstm_ok = 0
-    if lstm_path.exists():
-        from ml.models.lstm_predictor import LSTMPredictor
-        from ml.inference.predict_prices import predict_ticker
+        # ── 2. LSTM price direction ────────────────────────────────────
+        lstm_path = Path("models/v1/lstm_v0.pt")
+        lstm_ok = 0
+        if lstm_path.exists():
+            from ml.models.lstm_predictor import LSTMPredictor
+            from ml.inference.predict_prices import predict_ticker
 
-        model = LSTMPredictor.load(lstm_path)
-        model.eval()
+            model = LSTMPredictor.load(lstm_path)
+            model.eval()
+            tickers = await pool.fetch(
+                "SELECT ticker FROM companies WHERE is_active = true"
+            )
+            for row in tickers:
+                try:
+                    await predict_ticker(pool, model, row["ticker"])
+                    lstm_ok += 1
+                except Exception as exc:
+                    logger.warning(
+                        "run_ml_inference: lstm skip ticker=%s error=%s", row["ticker"], exc
+                    )
+            logger.info("run_ml_inference: LSTM inference done n=%d", lstm_ok)
+        else:
+            logger.warning("run_ml_inference: lstm_v0.pt not found — skipping")
+
+        # ── 3. DCF valuation + health score ───────────────────────────
         tickers = await pool.fetch(
             "SELECT ticker FROM companies WHERE is_active = true"
         )
+        dcf_ok = 0
         for row in tickers:
+            ticker = row["ticker"]
             try:
-                await predict_ticker(pool, model, row["ticker"])
-                lstm_ok += 1
-            except Exception as exc:
-                logger.warning(
-                    "run_ml_inference: lstm skip ticker=%s error=%s", row["ticker"], exc
-                )
-        logger.info("run_ml_inference: LSTM inference done n=%d", lstm_ok)
-    else:
-        logger.warning("run_ml_inference: lstm_v0.pt not found — skipping")
-
-    # ── 3. DCF valuation + health score ───────────────────────────
-    tickers = await pool.fetch(
-        "SELECT ticker FROM companies WHERE is_active = true"
-    )
-    dcf_ok = 0
-    for row in tickers:
-        ticker = row["ticker"]
-        try:
-            fund_row = await pool.fetchrow(
-                """
-                SELECT eps FROM fundamentals
-                WHERE ticker = $1 AND fiscal_year IS NOT NULL
-                ORDER BY fiscal_year DESC LIMIT 1
-                """,
-                ticker,
-            )
-            price_row = await pool.fetchrow(
-                "SELECT close FROM stock_prices WHERE ticker = $1 ORDER BY time DESC LIMIT 1",
-                ticker,
-            )
-            if not fund_row or not price_row or not fund_row["eps"]:
-                continue
-
-            eps_rows = await pool.fetch(
-                """
-                SELECT eps FROM fundamentals
-                WHERE ticker = $1 AND fiscal_year IS NOT NULL AND eps IS NOT NULL
-                ORDER BY fiscal_year DESC LIMIT 3
-                """,
-                ticker,
-            )
-            eps_vals = [float(r["eps"]) for r in eps_rows if r["eps"]]
-            if len(eps_vals) < 2:
-                continue
-            if eps_vals[-1] <= 0:
-                continue
-
-            growth = (eps_vals[0] / eps_vals[-1]) ** (1 / (len(eps_vals) - 1)) - 1
-            growth = max(min(growth, 0.30), -0.20)
-
-            calc = DCFCalculator(
-                eps_ttm=float(fund_row["eps"]),
-                eps_growth_rate=growth,
-                cost_of_equity=0.12,
-                terminal_growth=0.03,
-            )
-            dcf = calc.calculate(float(price_row["close"]))
-
-            if dcf["margin_of_safety_pct"] is not None:
-                mos = dcf["margin_of_safety_pct"]
-                valuation_score = min(max((mos + 50) / 100, 0.0), 1.0)
-                fund_score = fund_scores.get(ticker)
-                health = compute_health_score(
-                    fundamental_score=fund_score,
-                    valuation_score=valuation_score,
-                )
-                await pool.execute(
+                fund_row = await pool.fetchrow(
                     """
-                    UPDATE stock_scores SET valuation_score = $1, health_score = $2
-                    WHERE ticker = $3 AND scored_at = (
-                        SELECT MAX(scored_at) FROM stock_scores WHERE ticker = $3
-                    )
+                    SELECT eps FROM fundamentals
+                    WHERE ticker = $1 AND fiscal_year IS NOT NULL
+                    ORDER BY fiscal_year DESC LIMIT 1
                     """,
-                    valuation_score,
-                    health,
                     ticker,
                 )
-                dcf_ok += 1
-        except Exception as exc:
-            logger.warning("run_ml_inference: dcf skip ticker=%s error=%s", ticker, exc)
+                price_row = await pool.fetchrow(
+                    "SELECT close FROM stock_prices WHERE ticker = $1 ORDER BY time DESC LIMIT 1",
+                    ticker,
+                )
+                if not fund_row or not price_row or not fund_row["eps"]:
+                    continue
 
-    logger.info(
-        "run_ml_inference: complete fundamental=%d lstm=%d dcf=%d",
-        len(fund_scores), lstm_ok, dcf_ok,
-    )
-    return {
-        "fundamental_scored": len(fund_scores),
-        "lstm_predicted": lstm_ok,
-        "dcf_valued": dcf_ok,
-    }
+                eps_rows = await pool.fetch(
+                    """
+                    SELECT eps FROM fundamentals
+                    WHERE ticker = $1 AND fiscal_year IS NOT NULL AND eps IS NOT NULL
+                    ORDER BY fiscal_year DESC LIMIT 3
+                    """,
+                    ticker,
+                )
+                eps_vals = [float(r["eps"]) for r in eps_rows if r["eps"] is not None]
+                if len(eps_vals) < 2:
+                    continue
+                if eps_vals[-1] <= 0 or eps_vals[0] <= 0:
+                    continue
+
+                growth = (eps_vals[0] / eps_vals[-1]) ** (1 / (len(eps_vals) - 1)) - 1
+                growth = max(min(growth, 0.30), -0.20)
+
+                calc = DCFCalculator(
+                    eps_ttm=float(fund_row["eps"]),
+                    eps_growth_rate=growth,
+                    cost_of_equity=0.12,
+                    terminal_growth=0.03,
+                )
+                dcf = calc.calculate(float(price_row["close"]))
+
+                if dcf["margin_of_safety_pct"] is not None:
+                    mos = dcf["margin_of_safety_pct"]
+                    valuation_score = min(max((mos + 50) / 100, 0.0), 1.0)
+                    fund_score = fund_scores.get(ticker)
+                    health = compute_health_score(
+                        fundamental_score=fund_score,
+                        valuation_score=valuation_score,
+                    )
+                    await pool.execute(
+                        """
+                        UPDATE stock_scores SET valuation_score = $1, health_score = $2
+                        WHERE ticker = $3 AND scored_at = (
+                            SELECT MAX(scored_at) FROM stock_scores WHERE ticker = $3
+                        )
+                        """,
+                        valuation_score,
+                        health,
+                        ticker,
+                    )
+                    dcf_ok += 1
+            except Exception as exc:
+                logger.warning("run_ml_inference: dcf skip ticker=%s error=%s", ticker, exc)
+
+        logger.info(
+            "run_ml_inference: complete fundamental=%d lstm=%d dcf=%d",
+            len(fund_scores), lstm_ok, dcf_ok,
+        )
+        ctx["records_inserted"] = len(fund_scores) + lstm_ok + dcf_ok
+        return {
+            "fundamental_scored": len(fund_scores),
+            "lstm_predicted": lstm_ok,
+            "dcf_valued": dcf_ok,
+        }
 
 
 async def _retrain_ml_models_async() -> dict:
@@ -211,149 +214,157 @@ async def _retrain_ml_models_async() -> dict:
     from pathlib import Path
 
     from db.pool import get_pool
+    from extraction.jobs import job_run
     from extraction.observability import fire_alert
     from ml.monitoring.accuracy_report import check_accuracy_thresholds, populate_outcomes
 
-    pool = await get_pool()
+    async with job_run("quarterly_retrain") as ctx:
+        pool = await get_pool()
 
-    # ── 1. Catch up unevaluated prediction outcomes ────────────────
-    n_outcomes = await populate_outcomes(pool)
-    logger.info("retrain_ml_models: outcomes populated: %d", n_outcomes)
+        # ── 1. Catch up unevaluated prediction outcomes ────────────────
+        n_outcomes = await populate_outcomes(pool)
+        logger.info("retrain_ml_models: outcomes populated: %d", n_outcomes)
 
-    # ── 2. Accuracy check + alert ──────────────────────────────────
-    check = await check_accuracy_thresholds(pool)
-    if check["alert_level"]:
-        logger.warning(
-            "retrain_ml_models: accuracy degraded level=%s horizon=%s accuracy=%s",
-            check["alert_level"], check["worst_horizon"], check["worst_accuracy"],
-        )
-        await fire_alert(
-            severity=check["alert_level"],
-            stream_name="ml_predictions",
-            message=(
-                f"ML accuracy degraded: {check['worst_horizon']}d horizon = "
-                f"{check['worst_accuracy']:.1%} directional accuracy"
-            ),
-            details=check,
-        )
-
-    # ── 3+4. Retrain models ────────────────────────────────────────
-    version = datetime.now(timezone.utc).strftime("%Y%m%d")
-    versioned_dir = Path(f"models/{version}")
-    current_dir = Path("models/v1")
-    versioned_dir.mkdir(parents=True, exist_ok=True)
-    current_dir.mkdir(parents=True, exist_ok=True)
-    errors: list[str] = []
-
-    # XGBoost retrain
-    try:
-        from ml.models.fundamental_scorer import FundamentalScorer
-        from ml.train.train_fundamental import build_training_dataset
-
-        X, y = await build_training_dataset(pool)
-        if len(X) >= 30:
-            scorer = FundamentalScorer()
-            scorer.fit(X, y)
-            scorer.save(versioned_dir / "fundamental_scorer.pkl")
-            shutil.copy(
-                versioned_dir / "fundamental_scorer.pkl",
-                current_dir / "fundamental_scorer.pkl",
-            )
-            logger.info("retrain_ml_models: XGBoost retrained on %d samples", len(X))
-        else:
-            logger.warning("retrain_ml_models: XGBoost skipped — only %d samples", len(X))
-    except Exception as exc:
-        logger.error("retrain_ml_models: XGBoost failed: %s", exc)
-        errors.append(f"XGBoost: {exc}")
-
-    # LSTM retrain
-    try:
-        import torch
-        import torch.nn as nn
-        from torch.utils.data import DataLoader, TensorDataset
-
-        from ml.models.lstm_predictor import LSTMPredictor
-        from ml.train.train_lstm import PRICE_FEATURE_COLS, build_sequences
-
-        X_arr, y_arr = await build_sequences(pool)
-        if len(X_arr) >= 200:
-            split = int(len(X_arr) * 0.8)
-            train_dl = DataLoader(
-                TensorDataset(
-                    torch.from_numpy(X_arr[:split]),
-                    torch.from_numpy(y_arr[:split]),
-                ),
-                batch_size=64,
-                shuffle=True,
-            )
-            val_dl = DataLoader(
-                TensorDataset(
-                    torch.from_numpy(X_arr[split:]),
-                    torch.from_numpy(y_arr[split:]),
-                ),
-                batch_size=256,
-                shuffle=False,
-            )
-            model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS))
-            optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-            criterion = nn.BCEWithLogitsLoss()
-            best_val_loss = float("inf")
-            patience_count = 0
-            lstm_path = versioned_dir / "lstm_v0.pt"
-
-            for _ in range(30):
-                model.train()
-                for xb, yb in train_dl:
-                    optimizer.zero_grad()
-                    loss = criterion(model(xb), yb)
-                    loss.backward()
-                    nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                    optimizer.step()
-                model.eval()
-                val_losses = []
-                with torch.no_grad():
-                    for xb, yb in val_dl:
-                        val_losses.append(criterion(model(xb), yb).item())
-                val_loss = sum(val_losses) / len(val_losses)
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    patience_count = 0
-                    model.save(lstm_path)
-                else:
-                    patience_count += 1
-                    if patience_count >= 5:
-                        break
-
-            if lstm_path.exists():
-                shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
-            logger.info(
-                "retrain_ml_models: LSTM retrained best_val_loss=%.4f", best_val_loss
-            )
-        else:
+        # ── 2. Accuracy check + alert ──────────────────────────────────
+        check = await check_accuracy_thresholds(pool)
+        if check["alert_level"]:
             logger.warning(
-                "retrain_ml_models: LSTM skipped — only %d sequences", len(X_arr)
+                "retrain_ml_models: accuracy degraded level=%s horizon=%s accuracy=%s",
+                check["alert_level"], check["worst_horizon"], check["worst_accuracy"],
             )
-    except Exception as exc:
-        logger.error("retrain_ml_models: LSTM failed: %s", exc)
-        errors.append(f"LSTM: {exc}")
+            await fire_alert(
+                severity=check["alert_level"],
+                stream_name="ml_predictions",
+                message=(
+                    f"ML accuracy degraded: {check['worst_horizon']}d horizon = "
+                    f"{check['worst_accuracy']:.1%} directional accuracy"
+                ),
+                details=check,
+            )
 
-    # ── 5. Summary alert ───────────────────────────────────────────
-    await fire_alert(
-        severity="INFO",
-        stream_name="ml_predictions",
-        message=f"Quarterly ML retrain complete (version={version})",
-        details={"version": version, "errors": errors, "accuracy_check": check},
-    )
+        # ── 3+4. Retrain models ────────────────────────────────────────
+        version = datetime.now(timezone.utc).strftime("%Y%m%d")
+        versioned_dir = Path(f"models/{version}")
+        current_dir = Path("models/v1")
+        versioned_dir.mkdir(parents=True, exist_ok=True)
+        current_dir.mkdir(parents=True, exist_ok=True)
+        errors: list[str] = []
 
-    logger.info(
-        "retrain_ml_models: complete version=%s errors=%s", version, errors
-    )
-    return {"outcomes_evaluated": n_outcomes, "version": version, "errors": errors}
+        # XGBoost retrain
+        try:
+            from ml.models.fundamental_scorer import FundamentalScorer
+            from ml.train.train_fundamental import build_training_dataset
+
+            X, y = await build_training_dataset(pool)
+            if len(X) >= 30:
+                scorer = FundamentalScorer()
+                scorer.fit(X, y)
+                scorer.save(versioned_dir / "fundamental_scorer.pkl")
+                shutil.copy(
+                    versioned_dir / "fundamental_scorer.pkl",
+                    current_dir / "fundamental_scorer.pkl",
+                )
+                logger.info("retrain_ml_models: XGBoost retrained on %d samples", len(X))
+            else:
+                logger.warning("retrain_ml_models: XGBoost skipped — only %d samples", len(X))
+        except Exception as exc:
+            logger.error("retrain_ml_models: XGBoost failed: %s", exc)
+            errors.append(f"XGBoost: {exc}")
+
+        # LSTM retrain
+        try:
+            import torch
+            import torch.nn as nn
+            from torch.utils.data import DataLoader, TensorDataset
+
+            from ml.models.lstm_predictor import LSTMPredictor
+            from ml.train.train_lstm import PRICE_FEATURE_COLS, build_sequences
+
+            X_arr, y_arr = await build_sequences(pool)
+            if len(X_arr) >= 200:
+                split = int(len(X_arr) * 0.8)
+                train_dl = DataLoader(
+                    TensorDataset(
+                        torch.from_numpy(X_arr[:split]),
+                        torch.from_numpy(y_arr[:split]),
+                    ),
+                    batch_size=64,
+                    shuffle=True,
+                )
+                val_dl = DataLoader(
+                    TensorDataset(
+                        torch.from_numpy(X_arr[split:]),
+                        torch.from_numpy(y_arr[split:]),
+                    ),
+                    batch_size=256,
+                    shuffle=False,
+                )
+                model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS))
+                optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+                criterion = nn.BCEWithLogitsLoss()
+                best_val_loss = float("inf")
+                patience_count = 0
+                lstm_path = versioned_dir / "lstm_v0.pt"
+
+                for _ in range(30):
+                    model.train()
+                    for xb, yb in train_dl:
+                        optimizer.zero_grad()
+                        loss = criterion(model(xb), yb)
+                        loss.backward()
+                        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+                    model.eval()
+                    val_losses = []
+                    with torch.no_grad():
+                        for xb, yb in val_dl:
+                            val_losses.append(criterion(model(xb), yb).item())
+                    val_loss = sum(val_losses) / len(val_losses)
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        patience_count = 0
+                        model.save(lstm_path)
+                    else:
+                        patience_count += 1
+                        if patience_count >= 5:
+                            break
+
+                if lstm_path.exists():
+                    shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
+                logger.info(
+                    "retrain_ml_models: LSTM retrained best_val_loss=%.4f", best_val_loss
+                )
+            else:
+                logger.warning(
+                    "retrain_ml_models: LSTM skipped — only %d sequences", len(X_arr)
+                )
+        except Exception as exc:
+            logger.error("retrain_ml_models: LSTM failed: %s", exc)
+            errors.append(f"LSTM: {exc}")
+
+        # ── 5. Summary alert ───────────────────────────────────────────
+        await fire_alert(
+            severity="INFO",
+            stream_name="ml_predictions",
+            message=f"Quarterly ML retrain complete (version={version})",
+            details={"version": version, "errors": errors, "accuracy_check": check},
+        )
+
+        logger.info(
+            "retrain_ml_models: complete version=%s errors=%s", version, errors
+        )
+        ctx["records_inserted"] = n_outcomes
+        return {"outcomes_evaluated": n_outcomes, "version": version, "errors": errors}
 
 
-@celery_app.task(name="extraction.tasks.run_ml_inference", bind=True, max_retries=3)
+@celery_app.task(name="extraction.tasks.run_ml_inference", bind=True, max_retries=0)
 def run_ml_inference(self) -> dict:
-    """Nightly ML inference: fundamental scoring, LSTM price direction, DCF valuation."""
+    """Nightly ML inference: fundamental scoring, LSTM price direction, DCF valuation.
+
+    max_retries=0: write_scores and predict_ticker use plain INSERT — automatic
+    retry after partial completion would produce duplicate rows in stock_scores
+    and ml_predictions. Set to >0 once those writes use ON CONFLICT DO UPDATE.
+    """
     logger.info("task: run_ml_inference: starting")
     try:
         return asyncio.run(_run_ml_inference_async())
