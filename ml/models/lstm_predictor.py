@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -52,7 +52,7 @@ class LSTMPredictor(nn.Module):
         with torch.no_grad():
             return torch.sigmoid(self(x))
 
-    def save(self, path: Path) -> None:
+    def save(self, path: Path, scaler: Optional[Any] = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
@@ -60,12 +60,14 @@ class LSTMPredictor(nn.Module):
                 "input_size": self._input_size,
                 "hidden_size": self._hidden_size,
                 "num_layers": self._num_layers,
+                "scaler": scaler,
             },
             path,
         )
 
     @classmethod
-    def load(cls, path: Path) -> "LSTMPredictor":
+    def load(cls, path: Path) -> "tuple[LSTMPredictor, Any]":
+        """Returns (model, scaler). scaler is None if checkpoint predates scaling."""
         checkpoint: dict[str, Any] = torch.load(path, map_location="cpu", weights_only=False)
         model = cls(
             input_size=checkpoint["input_size"],
@@ -74,4 +76,4 @@ class LSTMPredictor(nn.Module):
         )
         model.load_state_dict(checkpoint["state_dict"])
         model.eval()
-        return model
+        return model, checkpoint.get("scaler")

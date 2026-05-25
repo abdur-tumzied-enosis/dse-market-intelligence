@@ -51,8 +51,7 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
     """
     Fetch multi-year fundamentals from DB and return latest feature vector.
 
-    Returns Series with keys: eps_growth_1yr, eps_growth_3yr, nav_growth,
-    div_yield, eps_consistency, pe_vs_sector. Missing values are NaN.
+    Returns Series matching FEATURE_COLS in fundamental_scorer. Missing values are NaN.
     Returns empty Series if no fundamental data found.
     """
     from ml.features.fundamental_features import compute_fundamental_features
@@ -61,11 +60,18 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         """
         SELECT f.fiscal_year, f.eps, f.nav, f.pe, f.cash_div_pct, f.stock_div_pct,
                (
-                   SELECT sp.pe FROM sector_pe sp
-                   JOIN companies c ON c.sector = sp.sector
-                   WHERE c.ticker = f.ticker
-                   ORDER BY sp.fetched_at DESC LIMIT 1
-               ) AS sector_pe
+                   SELECT sp.close FROM stock_prices sp
+                   WHERE sp.ticker = f.ticker
+                     AND sp.time >= make_date(f.fiscal_year, 10, 1)
+                     AND sp.time <= make_date(f.fiscal_year + 1, 1, 31)
+                   ORDER BY sp.time DESC LIMIT 1
+               ) AS price_at_fy_end,
+               -- cross-sectional median PE for this fiscal year across all tickers
+               (
+                   SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY f2.pe)
+                   FROM fundamentals f2
+                   WHERE f2.fiscal_year = f.fiscal_year AND f2.pe > 0
+               ) AS median_pe
         FROM fundamentals f
         WHERE f.ticker = $1 AND f.fiscal_year IS NOT NULL
         ORDER BY f.fiscal_year
@@ -78,17 +84,22 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
 
     df = pd.DataFrame(
         list(rows),
-        columns=["fiscal_year", "eps", "nav", "pe", "cash_div_pct", "stock_div_pct", "sector_pe"],
+        columns=["fiscal_year", "eps", "nav", "pe", "cash_div_pct", "stock_div_pct",
+                 "price_at_fy_end", "median_pe"],
     )
-    for col in ["eps", "nav", "pe", "cash_div_pct", "stock_div_pct", "sector_pe"]:
+    for col in df.columns:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     features = compute_fundamental_features(df)
     latest = features.iloc[-1]
 
-    sector_pe = float(df["sector_pe"].iloc[-1]) if pd.notna(df["sector_pe"].iloc[-1]) else np.nan
     pe = float(df["pe"].iloc[-1]) if pd.notna(df["pe"].iloc[-1]) else np.nan
-    pe_vs_sector = pe / sector_pe if (sector_pe and sector_pe != 0) else np.nan
+    median_pe = float(df["median_pe"].iloc[-1]) if pd.notna(df["median_pe"].iloc[-1]) else np.nan
+    pe_vs_sector = float(np.clip(pe / median_pe, 0, 10)) if (median_pe and median_pe != 0) else np.nan
+
+    nav = float(df["nav"].iloc[-1]) if pd.notna(df["nav"].iloc[-1]) else np.nan
+    price = float(df["price_at_fy_end"].iloc[-1]) if pd.notna(df["price_at_fy_end"].iloc[-1]) else np.nan
+    pb_ratio = float(np.clip(price / nav, 0, 20)) if (nav and nav != 0 and not np.isnan(price)) else np.nan
 
     return pd.Series({
         "eps_growth_1yr": float(latest.get("eps_growth_1yr", np.nan)),
@@ -96,5 +107,8 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         "nav_growth":     float(latest.get("nav_growth", np.nan)),
         "div_yield":      float(latest.get("div_yield", np.nan)),
         "eps_consistency":float(latest.get("eps_consistency", np.nan)),
+        "roe":            float(latest.get("roe", np.nan)),
+        "payout_ratio":   float(latest.get("payout_ratio", np.nan)),
         "pe_vs_sector":   pe_vs_sector,
+        "pb_ratio":       pb_ratio,
     })

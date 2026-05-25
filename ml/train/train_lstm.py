@@ -8,6 +8,7 @@ Run: python -m ml.train.train_lstm
 """
 from __future__ import annotations
 
+import argparse
 import asyncio
 import logging
 from pathlib import Path
@@ -16,6 +17,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 
 from db.pool import get_pool
@@ -64,7 +66,12 @@ async def build_sequences(pool) -> tuple[np.ndarray, np.ndarray]:
             continue
 
         feats = compute_price_features(grp.set_index("time"))
-        feats = feats[PRICE_FEATURE_COLS].ffill().fillna(0)
+        feats = (
+            feats[PRICE_FEATURE_COLS]
+            .replace([np.inf, -np.inf], np.nan)
+            .ffill()
+            .fillna(0)
+        )
         close = grp["close"].values
 
         feat_arr = feats.values.astype(np.float32)
@@ -82,7 +89,12 @@ async def build_sequences(pool) -> tuple[np.ndarray, np.ndarray]:
     if not all_X:
         raise ValueError("No training sequences built — check stock_prices data")
 
-    return np.stack(all_X), np.stack(all_y)
+    X_out = np.stack(all_X)
+    y_out = np.stack(all_y)
+    nan_count = int(np.isnan(X_out).sum())
+    if nan_count:
+        raise ValueError(f"NaN in feature array after cleaning: {nan_count} values")
+    return X_out, y_out
 
 
 async def main() -> None:
@@ -98,13 +110,22 @@ async def main() -> None:
     X_train, X_val = X[:split], X[split:]
     y_train, y_val = y[:split], y[split:]
 
+    # Fit scaler on train rows only; apply to both (no leakage)
+    n_train, seq_len, n_feat = X_train.shape
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train.reshape(-1, n_feat)).reshape(n_train, seq_len, n_feat).astype(np.float32)
+    n_val = X_val.shape[0]
+    X_val = scaler.transform(X_val.reshape(-1, n_feat)).reshape(n_val, seq_len, n_feat).astype(np.float32)
+    log.info(f"Feature means (train): {scaler.mean_.round(3)}")
+    log.info(f"Feature stds  (train): {scaler.scale_.round(3)}")
+
     train_ds = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
     val_ds   = TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val))
     train_dl = DataLoader(train_ds, batch_size=64, shuffle=True)
     val_dl   = DataLoader(val_ds, batch_size=256, shuffle=False)
 
-    model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS))
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS), dropout=0.4)
+    optimizer = torch.optim.Adam(model.parameters(), lr=3e-4, weight_decay=1e-4)
     criterion = nn.BCEWithLogitsLoss()
 
     best_val_loss = float("inf")
@@ -135,7 +156,7 @@ async def main() -> None:
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_count = 0
-            model.save(MODEL_PATH)
+            model.save(MODEL_PATH, scaler=scaler)
             log.info(f"  → saved (val_loss={val_loss:.4f})")
         else:
             patience_count += 1
@@ -147,5 +168,32 @@ async def main() -> None:
     log.info(f"Model saved → {MODEL_PATH}")
 
 
+async def dump(out_path: Path) -> None:
+    pool = await get_pool()
+    log.info("Building sequences...")
+    X, y = await build_sequences(pool)
+    split = int(len(X) * 0.8)
+    n_train, seq_len, n_feat = X[:split].shape
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X.reshape(-1, n_feat)).reshape(len(X), seq_len, n_feat).astype("float32")
+    np.savez_compressed(
+        out_path,
+        X=X_scaled,
+        y=y,
+        feature_names=np.array(PRICE_FEATURE_COLS),
+        scaler_mean=scaler.mean_,
+        scaler_scale=scaler.scale_,
+    )
+    log.info(f"Saved → {out_path}  (X={X_scaled.shape}, y={y.shape})")
+    log.info("Load with: data = np.load('dataset.npz'); X=data['X']; y=data['y']")
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dump", metavar="PATH", help="dump dataset to .npz and exit")
+    args = parser.parse_args()
+
+    if args.dump:
+        asyncio.run(dump(Path(args.dump)))
+    else:
+        asyncio.run(main())

@@ -52,15 +52,19 @@ async def score_all_tickers(pool, scorer: FundamentalScorer) -> dict[str, float]
 
 async def write_scores(pool, scores: dict[str, float], scored_at: datetime) -> int:
     """Upsert fundamental_score into stock_scores. Returns rows inserted."""
+    scored_date = scored_at.date()
     count = 0
     for ticker, score in scores.items():
         await pool.execute(
             """
             INSERT INTO stock_scores
-                (ticker, scored_at, fundamental_score, model_version)
-            VALUES ($1, $2, $3, $4)
+                (ticker, scored_at, scored_date, fundamental_score, model_version)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (ticker, model_version, scored_date) DO UPDATE
+                SET fundamental_score = EXCLUDED.fundamental_score,
+                    scored_at         = EXCLUDED.scored_at
             """,
-            ticker, scored_at, score, MODEL_VERSION,
+            ticker, scored_at, scored_date, score, MODEL_VERSION,
         )
         count += 1
     return count

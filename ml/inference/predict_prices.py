@@ -50,6 +50,7 @@ async def predict_ticker(pool, model: LSTMPredictor, ticker: str) -> None:
     proba = model.predict_proba(x).squeeze(0)  # (3,)
 
     predicted_at = datetime.now(timezone.utc)
+    prediction_date = predicted_at.date()
     last_close = float(feat_df["close"].iloc[-1]) if "close" in feat_df.columns else None
 
     for i, horizon in enumerate(HORIZONS):
@@ -61,11 +62,16 @@ async def predict_ticker(pool, model: LSTMPredictor, ticker: str) -> None:
         await pool.execute(
             """
             INSERT INTO ml_predictions
-                (ticker, predicted_at, horizon_days, predicted_direction, confidence,
-                 target_price, model_version)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                (ticker, predicted_at, prediction_date, horizon_days,
+                 predicted_direction, confidence, target_price, model_version)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (ticker, horizon_days, model_version, prediction_date) DO UPDATE
+                SET predicted_direction = EXCLUDED.predicted_direction,
+                    confidence          = EXCLUDED.confidence,
+                    target_price        = EXCLUDED.target_price,
+                    predicted_at        = EXCLUDED.predicted_at
             """,
-            ticker, predicted_at, horizon, predicted_direction, confidence,
+            ticker, predicted_at, prediction_date, horizon, predicted_direction, confidence,
             target_price, MODEL_VERSION,
         )
 
@@ -77,7 +83,7 @@ async def main() -> None:
         )
 
     pool = await get_pool()
-    model = LSTMPredictor.load(MODEL_PATH)
+    model, _scaler = LSTMPredictor.load(MODEL_PATH)
     model.eval()
 
     tickers = await pool.fetch(

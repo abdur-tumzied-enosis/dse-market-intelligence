@@ -5,6 +5,7 @@
 ---
 
 ## CURRENT FOCUS → Layer 4 complete. Next: Layer 5 (Backend API — FastAPI, JWT auth, all /api/stocks and /api/market endpoints).
+--- pe_vs_sector work on it with proper data
 
 ---
 

@@ -34,6 +34,9 @@ def compute_fundamental_features(df: pd.DataFrame) -> pd.DataFrame:
     eps_mean = eps.rolling(3, min_periods=2).mean().abs().replace(0, np.nan)
     result["eps_consistency"] = 1.0 / (1.0 + (eps_std / eps_mean).fillna(1.0))
 
+    result["roe"] = (eps / nav).clip(-5, 5)
+    result["payout_ratio"] = (cash_div / 100.0 / eps.abs().replace(0, np.nan)).clip(0, 3)
+
     # Clip extreme values (data errors in DSE filings)
     for col in ["eps_growth_1yr", "eps_growth_3yr", "nav_growth"]:
         result[col] = result[col].clip(-5, 5)

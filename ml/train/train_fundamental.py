@@ -35,13 +35,6 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
         SELECT f.ticker, f.fiscal_year,
                f.eps, f.nav, f.pe, f.cash_div_pct, f.stock_div_pct,
                (
-                   SELECT sp2.pe FROM sector_pe sp2
-                   JOIN companies c2 ON c2.sector = sp2.sector
-                   WHERE c2.ticker = f.ticker
-                     AND sp2.fetched_at <= make_date(f.fiscal_year, 12, 31)
-                   ORDER BY sp2.fetched_at DESC LIMIT 1
-               ) AS sector_pe,
-               (
                    SELECT sp3.close FROM stock_prices sp3
                    WHERE sp3.ticker = f.ticker
                      AND sp3.time >= make_date(f.fiscal_year, 10, 1)
@@ -63,18 +56,19 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
 
     df = pd.DataFrame(list(rows), columns=[
         "ticker", "fiscal_year", "eps", "nav", "pe",
-        "cash_div_pct", "stock_div_pct", "sector_pe",
+        "cash_div_pct", "stock_div_pct",
         "price_at_fy_end", "price_6m_later",
     ])
     for col in ["eps", "nav", "pe", "cash_div_pct", "stock_div_pct",
-                "sector_pe", "price_at_fy_end", "price_6m_later"]:
+                "price_at_fy_end", "price_6m_later"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     feature_rows = []
     for ticker, grp in df.groupby("ticker"):
         grp = grp.sort_values("fiscal_year").reset_index(drop=True)
         feats = compute_fundamental_features(grp)
-        feats["pe_vs_sector"] = grp["pe"] / grp["sector_pe"].replace(0, np.nan)
+        feats["pe_raw"] = grp["pe"].values
+        feats["nav_raw"] = grp["nav"].astype(float).replace(0, np.nan).values
         feats["ticker"] = ticker
         feats["fiscal_year"] = grp["fiscal_year"]
         feats["price_at_fy_end"] = grp["price_at_fy_end"].values
@@ -83,8 +77,22 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
 
     full_df = pd.concat(feature_rows, ignore_index=True)
     full_df = full_df.dropna(subset=["price_at_fy_end", "price_6m_later"])
-    full_df["label"] = (full_df["price_6m_later"] > full_df["price_at_fy_end"]).astype(int)
-    required_cols = [c for c in FEATURE_COLS if c != "pe_vs_sector"]
+
+    # cross-sectional PE ratio (avoids dead sector_pe table)
+    fy_median_pe = full_df.groupby("fiscal_year")["pe_raw"].transform("median")
+    full_df["pe_vs_sector"] = (full_df["pe_raw"] / fy_median_pe.replace(0, np.nan)).clip(0, 10)
+
+    # price-to-book
+    full_df["pb_ratio"] = (full_df["price_at_fy_end"] / full_df["nav_raw"]).clip(0, 20)
+
+    # cross-sectional label: outperform fiscal-year cohort median, not just positive return
+    full_df["raw_return"] = (
+        (full_df["price_6m_later"] - full_df["price_at_fy_end"]) / full_df["price_at_fy_end"]
+    )
+    fy_median_ret = full_df.groupby("fiscal_year")["raw_return"].transform("median")
+    full_df["label"] = (full_df["raw_return"] > fy_median_ret).astype(int)
+
+    required_cols = [c for c in FEATURE_COLS if c not in ("pe_vs_sector", "pb_ratio")]
     full_df = full_df.dropna(subset=required_cols + ["label"])
 
     X = full_df[FEATURE_COLS].reset_index(drop=True)
