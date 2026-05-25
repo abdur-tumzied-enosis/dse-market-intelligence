@@ -272,11 +272,150 @@ async def job_monthly() -> None:
 
 
 async def job_quarterly() -> None:
-    """Quarterly retrain (Jan/Apr/Jul/Oct 1st, 03:00)."""
-    logger.info("job_quarterly: starting")
-    # TODO: implement fetch_gdp_data()
-    # TODO: enqueue celery task: retrain_ml_models
-    logger.info("job_quarterly: complete")
+    """Quarterly ML retrain (Jan/Apr/Jul/Oct 1st, 03:00 BD time).
+
+    1. Catch up any unevaluated prediction outcomes.
+    2. Check accuracy thresholds — fire alert if degraded.
+    3. Retrain XGBoost + LSTM on expanded dataset.
+    4. Save versioned models (models/YYYYMMDD/) + overwrite current (models/v1/).
+    5. Fire INFO alert with retrain summary.
+    """
+    import shutil
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from db.pool import get_pool
+    from extraction.jobs import job_run
+    from extraction.observability import fire_alert
+    from ml.monitoring.accuracy_report import check_accuracy_thresholds, populate_outcomes
+
+    async with job_run("quarterly_retrain") as ctx:
+        pool = await get_pool()
+
+        # ── 1. Catch up outcomes ───────────────────────────────────────
+        n_outcomes = await populate_outcomes(pool)
+        logger.info("quarterly_retrain: outcomes populated: %d", n_outcomes)
+
+        # ── 2. Accuracy check + alert ──────────────────────────────────
+        check = await check_accuracy_thresholds(pool)
+        if check["alert_level"]:
+            logger.warning(
+                "quarterly_retrain: accuracy degraded level=%s horizon=%s accuracy=%s",
+                check["alert_level"], check["worst_horizon"], check["worst_accuracy"],
+            )
+            await fire_alert(
+                severity=check["alert_level"],
+                stream_name="ml_predictions",
+                message=(
+                    f"ML accuracy degraded: {check['worst_horizon']}d horizon = "
+                    f"{check['worst_accuracy']:.1%} directional accuracy"
+                ),
+                details=check,
+            )
+
+        # ── 3 + 4. Retrain ─────────────────────────────────────────────
+        version = datetime.now(timezone.utc).strftime("%Y%m%d")
+        versioned_dir = Path(f"models/{version}")
+        current_dir = Path("models/v1")
+        versioned_dir.mkdir(parents=True, exist_ok=True)
+        current_dir.mkdir(parents=True, exist_ok=True)
+        errors: list[str] = []
+
+        # XGBoost retrain
+        try:
+            from ml.models.fundamental_scorer import FundamentalScorer
+            from ml.train.train_fundamental import build_training_dataset
+
+            X, y = await build_training_dataset(pool)
+            if len(X) >= 30:
+                scorer = FundamentalScorer()
+                scorer.fit(X, y)
+                scorer.save(versioned_dir / "fundamental_scorer.pkl")
+                shutil.copy(
+                    versioned_dir / "fundamental_scorer.pkl",
+                    current_dir / "fundamental_scorer.pkl",
+                )
+                logger.info("quarterly_retrain: XGBoost retrained on %d samples", len(X))
+            else:
+                logger.warning("quarterly_retrain: XGBoost skipped — only %d samples", len(X))
+        except Exception as exc:
+            logger.error("quarterly_retrain: XGBoost failed: %s", exc)
+            errors.append(f"XGBoost: {exc}")
+
+        # LSTM retrain
+        try:
+            import torch
+            import torch.nn as nn
+            from torch.utils.data import DataLoader, TensorDataset
+
+            from ml.models.lstm_predictor import LSTMPredictor
+            from ml.train.train_lstm import PRICE_FEATURE_COLS, build_sequences
+
+            X_arr, y_arr = await build_sequences(pool)
+            if len(X_arr) >= 200:
+                split = int(len(X_arr) * 0.8)
+                train_dl = DataLoader(
+                    TensorDataset(
+                        torch.from_numpy(X_arr[:split]),
+                        torch.from_numpy(y_arr[:split]),
+                    ),
+                    batch_size=64, shuffle=True,
+                )
+                val_dl = DataLoader(
+                    TensorDataset(
+                        torch.from_numpy(X_arr[split:]),
+                        torch.from_numpy(y_arr[split:]),
+                    ),
+                    batch_size=256, shuffle=False,
+                )
+                model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS))
+                optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+                criterion = nn.BCEWithLogitsLoss()
+                best_val_loss = float("inf")
+                patience_count = 0
+                lstm_path = versioned_dir / "lstm_v0.pt"
+
+                for _ in range(30):
+                    model.train()
+                    for xb, yb in train_dl:
+                        optimizer.zero_grad()
+                        loss = criterion(model(xb), yb)
+                        loss.backward()
+                        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+                    model.eval()
+                    val_losses = []
+                    with torch.no_grad():
+                        for xb, yb in val_dl:
+                            val_losses.append(criterion(model(xb), yb).item())
+                    val_loss = sum(val_losses) / len(val_losses)
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        patience_count = 0
+                        model.save(lstm_path)
+                    else:
+                        patience_count += 1
+                        if patience_count >= 5:
+                            break
+
+                shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
+                logger.info("quarterly_retrain: LSTM retrained best_val_loss=%.4f", best_val_loss)
+            else:
+                logger.warning("quarterly_retrain: LSTM skipped — only %d sequences", len(X_arr))
+        except Exception as exc:
+            logger.error("quarterly_retrain: LSTM failed: %s", exc)
+            errors.append(f"LSTM: {exc}")
+
+        # ── 5. Summary alert ───────────────────────────────────────────
+        await fire_alert(
+            severity="INFO",
+            stream_name="ml_predictions",
+            message=f"Quarterly ML retrain complete (version={version})",
+            details={"version": version, "errors": errors, "accuracy_check": check},
+        )
+
+        ctx["records_inserted"] = n_outcomes
+        logger.info("quarterly_retrain: complete version=%s errors=%s", version, errors)
 
 
 async def job_health_checks() -> None:

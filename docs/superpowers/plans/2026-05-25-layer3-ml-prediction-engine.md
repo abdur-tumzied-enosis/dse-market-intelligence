@@ -2803,6 +2803,303 @@ git commit -m "feat(ml): accuracy monitoring — populate outcomes + report by h
 
 ---
 
+## Task 17b: Accuracy-Gated Quarterly Retrain
+
+**Why:** After predictions age past their horizon, we know which were right. Quarterly retrain
+pulls that new labeled data into training, closing the feedback loop. If accuracy drops below
+48% directional (barely above random), we also fire an alert — and still retrain.
+
+**Files:**
+- Modify: `ml/monitoring/accuracy_report.py` — add `check_accuracy_thresholds()`
+- Modify: `extraction/scheduler.py` — replace `job_quarterly()` TODO stub with real retrain
+- Modify: `tests/unit/ml/test_accuracy_report.py` — add threshold tests
+
+- [ ] **Step 1: Write failing threshold tests**
+
+Add to `tests/unit/ml/test_accuracy_report.py`:
+
+```python
+@pytest.mark.asyncio
+async def test_check_accuracy_returns_critical_below_45pct():
+    from ml.monitoring.accuracy_report import check_accuracy_thresholds
+    pool = MagicMock()
+    pool.fetch = AsyncMock(return_value=[
+        {"horizon_days": 5, "total": 100, "correct": 43, "accuracy": 0.43},
+    ])
+    result = await check_accuracy_thresholds(pool, warning_threshold=0.48, critical_threshold=0.45)
+    assert result["alert_level"] == "CRITICAL"
+    assert result["worst_horizon"] == 5
+
+
+@pytest.mark.asyncio
+async def test_check_accuracy_returns_warning_between_45_and_48():
+    from ml.monitoring.accuracy_report import check_accuracy_thresholds
+    pool = MagicMock()
+    pool.fetch = AsyncMock(return_value=[
+        {"horizon_days": 10, "total": 100, "correct": 47, "accuracy": 0.47},
+    ])
+    result = await check_accuracy_thresholds(pool, warning_threshold=0.48, critical_threshold=0.45)
+    assert result["alert_level"] == "WARNING"
+
+
+@pytest.mark.asyncio
+async def test_check_accuracy_returns_none_when_ok():
+    from ml.monitoring.accuracy_report import check_accuracy_thresholds
+    pool = MagicMock()
+    pool.fetch = AsyncMock(return_value=[
+        {"horizon_days": 5, "total": 100, "correct": 55, "accuracy": 0.55},
+        {"horizon_days": 20, "total": 100, "correct": 52, "accuracy": 0.52},
+    ])
+    result = await check_accuracy_thresholds(pool)
+    assert result["alert_level"] is None
+
+
+@pytest.mark.asyncio
+async def test_check_accuracy_skips_small_sample_horizons():
+    from ml.monitoring.accuracy_report import check_accuracy_thresholds
+    pool = MagicMock()
+    # Only 5 outcomes — below min_samples=30, should not trigger alert
+    pool.fetch = AsyncMock(return_value=[
+        {"horizon_days": 5, "total": 5, "correct": 0, "accuracy": 0.0},
+    ])
+    result = await check_accuracy_thresholds(pool, min_samples=30)
+    assert result["alert_level"] is None
+```
+
+- [ ] **Step 2: Run tests — expect FAIL**
+
+```bash
+pytest tests/unit/ml/test_accuracy_report.py -k "threshold" -v
+```
+
+- [ ] **Step 3: Add `check_accuracy_thresholds()` to accuracy_report.py**
+
+```python
+async def check_accuracy_thresholds(
+    pool,
+    warning_threshold: float = 0.48,
+    critical_threshold: float = 0.45,
+    min_samples: int = 30,
+) -> dict:
+    """
+    Check if any horizon's directional accuracy has dropped below thresholds.
+
+    Skips horizons with fewer than min_samples evaluated outcomes — not
+    enough data to distinguish model failure from statistical noise.
+
+    Returns dict with keys:
+        alert_level: "CRITICAL" | "WARNING" | None
+        worst_horizon: int | None  (horizon with lowest accuracy)
+        worst_accuracy: float | None
+        report: list[dict]  (full by-horizon breakdown)
+    """
+    report = await generate_report(pool)
+    by_horizon = report["by_horizon"]
+
+    worst_accuracy = 1.0
+    worst_horizon = None
+
+    for h in by_horizon:
+        if h["total"] < min_samples:
+            continue
+        if h["accuracy"] < worst_accuracy:
+            worst_accuracy = h["accuracy"]
+            worst_horizon = h["horizon_days"]
+
+    if worst_horizon is None:
+        return {
+            "alert_level": None,
+            "worst_horizon": None,
+            "worst_accuracy": None,
+            "report": by_horizon,
+        }
+
+    if worst_accuracy < critical_threshold:
+        alert_level: str | None = "CRITICAL"
+    elif worst_accuracy < warning_threshold:
+        alert_level = "WARNING"
+    else:
+        alert_level = None
+
+    return {
+        "alert_level": alert_level,
+        "worst_horizon": worst_horizon,
+        "worst_accuracy": worst_accuracy,
+        "report": by_horizon,
+    }
+```
+
+- [ ] **Step 4: Run threshold tests — expect PASS**
+
+```bash
+pytest tests/unit/ml/test_accuracy_report.py -v
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 5: Replace `job_quarterly()` stub in `extraction/scheduler.py`**
+
+Replace the current stub (lines ~274–279):
+
+```python
+async def job_quarterly() -> None:
+    """Quarterly ML retrain (Jan/Apr/Jul/Oct 1st, 03:00 BD time).
+
+    1. Catch up any unevaluated prediction outcomes.
+    2. Check accuracy thresholds — fire alert if degraded.
+    3. Retrain XGBoost + LSTM on expanded dataset (includes periods model previously predicted).
+    4. Save versioned models (models/YYYYMMDD/) + overwrite current (models/v1/).
+    5. Fire INFO alert with retrain summary.
+    """
+    import shutil
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    from db.pool import get_pool
+    from extraction.jobs import job_run
+    from extraction.observability import fire_alert
+    from ml.monitoring.accuracy_report import check_accuracy_thresholds, populate_outcomes
+
+    async with job_run("quarterly_retrain") as ctx:
+        pool = await get_pool()
+
+        # ── 1. Catch up outcomes ───────────────────────────────────────
+        n_outcomes = await populate_outcomes(pool)
+        logger.info("quarterly_retrain: outcomes populated", extra={"n": n_outcomes})
+
+        # ── 2. Accuracy check ──────────────────────────────────────────
+        check = await check_accuracy_thresholds(pool)
+        if check["alert_level"]:
+            logger.warning(
+                "quarterly_retrain: accuracy degraded",
+                extra={
+                    "level": check["alert_level"],
+                    "horizon": check["worst_horizon"],
+                    "accuracy": check["worst_accuracy"],
+                },
+            )
+            await fire_alert(
+                severity=check["alert_level"],
+                stream_name="ml_predictions",
+                message=(
+                    f"ML accuracy degraded: {check['worst_horizon']}d horizon = "
+                    f"{check['worst_accuracy']:.1%} directional accuracy"
+                ),
+                details=check,
+            )
+
+        # ── 3 + 4. Retrain ─────────────────────────────────────────────
+        version = datetime.now(timezone.utc).strftime("%Y%m%d")
+        versioned_dir = Path(f"models/{version}")
+        current_dir = Path("models/v1")
+        versioned_dir.mkdir(parents=True, exist_ok=True)
+        current_dir.mkdir(parents=True, exist_ok=True)
+
+        errors: list[str] = []
+
+        # XGBoost retrain
+        try:
+            from ml.models.fundamental_scorer import FundamentalScorer
+            from ml.train.train_fundamental import build_training_dataset
+
+            X, y = await build_training_dataset(pool)
+            if len(X) >= 30:
+                scorer = FundamentalScorer()
+                scorer.fit(X, y)
+                scorer.save(versioned_dir / "fundamental_scorer.pkl")
+                shutil.copy(versioned_dir / "fundamental_scorer.pkl", current_dir / "fundamental_scorer.pkl")
+                logger.info("quarterly_retrain: XGBoost retrained", extra={"samples": len(X)})
+            else:
+                logger.warning("quarterly_retrain: XGBoost skipped — insufficient data", extra={"n": len(X)})
+        except Exception as exc:
+            logger.error("quarterly_retrain: XGBoost failed", extra={"error": str(exc)})
+            errors.append(f"XGBoost: {exc}")
+
+        # LSTM retrain
+        try:
+            import torch
+            import torch.nn as nn
+            from torch.utils.data import DataLoader, TensorDataset
+
+            from ml.models.lstm_predictor import LSTMPredictor
+            from ml.train.train_lstm import PRICE_FEATURE_COLS, build_sequences
+
+            X_arr, y_arr = await build_sequences(pool)
+            if len(X_arr) >= 200:
+                split = int(len(X_arr) * 0.8)
+                train_dl = DataLoader(
+                    TensorDataset(torch.from_numpy(X_arr[:split]), torch.from_numpy(y_arr[:split])),
+                    batch_size=64, shuffle=True,
+                )
+                val_dl = DataLoader(
+                    TensorDataset(torch.from_numpy(X_arr[split:]), torch.from_numpy(y_arr[split:])),
+                    batch_size=256, shuffle=False,
+                )
+                model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS))
+                optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+                criterion = nn.BCEWithLogitsLoss()
+                best_val_loss = float("inf")
+                patience_count = 0
+                lstm_path = versioned_dir / "lstm_v0.pt"
+
+                for _ in range(30):
+                    model.train()
+                    for xb, yb in train_dl:
+                        optimizer.zero_grad()
+                        loss = criterion(model(xb), yb)
+                        loss.backward()
+                        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                        optimizer.step()
+                    model.eval()
+                    val_loss = sum(
+                        criterion(model(xb), yb).item() for xb, yb in val_dl
+                    ) / len(val_dl)
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        patience_count = 0
+                        model.save(lstm_path)
+                    else:
+                        patience_count += 1
+                        if patience_count >= 5:
+                            break
+
+                shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
+                logger.info("quarterly_retrain: LSTM retrained", extra={"best_val_loss": best_val_loss})
+            else:
+                logger.warning("quarterly_retrain: LSTM skipped — insufficient sequences", extra={"n": len(X_arr)})
+        except Exception as exc:
+            logger.error("quarterly_retrain: LSTM failed", extra={"error": str(exc)})
+            errors.append(f"LSTM: {exc}")
+
+        # ── 5. Summary alert ───────────────────────────────────────────
+        await fire_alert(
+            severity="INFO",
+            stream_name="ml_predictions",
+            message=f"Quarterly ML retrain complete (version={version})",
+            details={"version": version, "errors": errors, "accuracy_check": check},
+        )
+
+        ctx["records_inserted"] = n_outcomes
+        logger.info("quarterly_retrain: complete", extra={"version": version, "errors": errors})
+```
+
+- [ ] **Step 6: Run all accuracy_report tests**
+
+```bash
+pytest tests/unit/ml/test_accuracy_report.py -v
+```
+
+Expected: all tests pass.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add ml/monitoring/accuracy_report.py tests/unit/ml/test_accuracy_report.py extraction/scheduler.py
+git commit -m "feat(ml): accuracy-gated quarterly retrain — threshold checks + versioned model saves"
+```
+
+---
+
 ## Task 17: Full Test Suite + Smoke Verification
 
 - [ ] **Step 1: Run all ML unit tests**
