@@ -54,18 +54,18 @@ async def predict_ticker(pool, model: LSTMPredictor, ticker: str) -> None:
 
     for i, horizon in enumerate(HORIZONS):
         p = float(proba[i])
-        direction = "up" if p >= 0.5 else "down"
-        confidence = p if direction == "up" else 1.0 - p
+        predicted_direction = "up" if p >= 0.5 else "down"
+        confidence = p if predicted_direction == "up" else 1.0 - p
         target_price = (last_close * (1 + (p - 0.5) * 0.1)) if last_close else None
 
         await pool.execute(
             """
             INSERT INTO ml_predictions
-                (ticker, predicted_at, horizon_days, direction, confidence,
+                (ticker, predicted_at, horizon_days, predicted_direction, confidence,
                  target_price, model_version)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
-            ticker, predicted_at, horizon, direction, confidence,
+            ticker, predicted_at, horizon, predicted_direction, confidence,
             target_price, MODEL_VERSION,
         )
 
