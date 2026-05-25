@@ -111,6 +111,7 @@ class Settings(BaseSettings):
     test_quarterly_minutes: int = 20
     test_health_check_minutes: int = 5
     test_nightly_ml_minutes: int = 15
+    test_news_sentiment_minutes: int = 20
 
     # Alerts — email
     smtp_host: str = "smtp.gmail.com"

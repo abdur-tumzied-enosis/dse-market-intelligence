@@ -553,6 +553,28 @@ async def job_nightly_ml() -> None:
         logger.info("nightly_ml: complete")
 
 
+async def job_news_sentiment() -> None:
+    """Score unscored news articles with Gemini Flash sentiment analysis."""
+    import logging as _logging
+    from db.pool import get_pool
+    from extraction.jobs import job_run
+    from mgmt.config import get_settings
+
+    _log = _logging.getLogger(__name__)
+    settings = get_settings()
+    pool = await get_pool()
+
+    async with job_run(pool, "news_sentiment", "news_en"):
+        from chat.agent import StockAnalystAgent
+        from chat.sentiment import score_new_articles
+        agent = StockAnalystAgent(
+            provider=settings.chat_agent_provider,
+            model=settings.chat_agent_model,
+        )
+        n = await score_new_articles(pool, agent._base_llm, limit=200)
+        _log.info("job_news_sentiment done scored=%d", n)
+
+
 # ── Scheduler Configuration ────────────────────────────────────────────
 
 
@@ -664,7 +686,18 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         misfire_grace_time=3600,
     )
 
-    logger.info("scheduler: all 10 jobs registered (production mode)")
+    scheduler.add_job(
+        job_news_sentiment,
+        "cron",
+        id="news_sentiment",
+        hour=3,
+        minute=30,
+        timezone=BD_TZ,
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    logger.info("scheduler: all 11 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
@@ -691,6 +724,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         (job_quarterly,           "quarterly_retrain",   cfg.test_quarterly_minutes),
         (job_health_checks,       "health_checks",       cfg.test_health_check_minutes),
         (job_nightly_ml,          "nightly_ml",          cfg.test_nightly_ml_minutes),
+        (job_news_sentiment,      "news_sentiment",      cfg.test_news_sentiment_minutes),
     ]
     for func, job_id, interval_minutes in job_map:
         scheduler.add_job(
@@ -702,7 +736,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         )
 
     logger.warning(
-        "scheduler: TEST MODE — all 9 intervals compressed to minutes. "
+        "scheduler: TEST MODE — all 10 intervals compressed to minutes. "
         "Do NOT use in production."
     )
 
