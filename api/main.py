@@ -8,6 +8,9 @@ from api.config import get_settings
 from api.middleware.rate_limit import RateLimitMiddleware
 from api.auth.router import router as auth_router
 from api.routers.stocks import router as stocks_router
+from api.routers.market import router as market_router
+from api.routers.sectors import router as sectors_router
+from api.routers.analyze import router as analyze_router
 from db.pool import close_pool, get_pool
 from mgmt.cache import close_redis, get_redis
 
@@ -40,6 +43,9 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router, prefix="/api")
     app.include_router(stocks_router, prefix="/api")
+    app.include_router(market_router, prefix="/api")
+    app.include_router(sectors_router, prefix="/api")
+    app.include_router(analyze_router, prefix="/api")
 
     @app.get("/health")
     async def health():
