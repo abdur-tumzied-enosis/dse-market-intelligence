@@ -78,6 +78,13 @@ services:
 
   # ---------------------------------------------------------------------------
   # Celery worker — heavy async tasks (PDF extraction, bulk fundamentals, ML)
+  #
+  # NOTE(models-volume): ML tasks write trained models to models/v1/ and
+  # models/YYYYMMDD/ inside this container. In dev, the ./:/app bind mount
+  # makes this transparent (files land on host disk). In production, add a
+  # named Docker volume for models/ so files persist across container rebuilds
+  # and are accessible if multiple worker replicas run.
+  # TODO: add `- models_data:/app/models` volume + declare under `volumes:`.
   # ---------------------------------------------------------------------------
   worker:
     build:
