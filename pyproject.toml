@@ -60,6 +60,13 @@ dependencies = [
     # Feed parsing (news)
     "feedparser>=6.0.11",
     "rapidfuzz>=3.9.0",
+
+    # ML
+    "scikit-learn>=1.5",
+    "xgboost>=2.0",
+    "ta>=0.11",
+    "torch>=2.3",
+    "joblib>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -104,4 +111,4 @@ markers = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["extraction", "db", "mgmt"]
+packages = ["extraction", "db", "mgmt", "ml"]

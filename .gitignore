@@ -42,7 +42,7 @@ ENV/
 *~
 
 # Models (large files — store in MinIO/S3)
-models/
+/models/
 *.pkl
 *.h5
 *.pt
