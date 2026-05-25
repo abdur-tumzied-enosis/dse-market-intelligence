@@ -4,7 +4,7 @@
 
 ---
 
-## CURRENT FOCUS → Layer 3 complete. Next: Layer 4 (LLM Agent — LangChain + Gemini Flash + pgvector RAG chatbot).
+## CURRENT FOCUS → Layer 4 complete. Next: Layer 5 (Backend API — FastAPI, JWT auth, all /api/stocks and /api/market endpoints).
 
 ---
 
@@ -305,29 +305,42 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 
 ---
 
-## Layer 4 — LLM Agent Layer (FUTURE)
+## Layer 4 — LLM Agent Layer (COMPLETE 2026-05-25)
 
-> Not started. Requires storage + ML layers.
-> **Framework:** LangChain (`langchain-core`, `langchain-google-genai`). Default model: Gemini 2.5 Flash. Provider switchable via `agent_provider` env var (google|anthropic|openai|openrouter|ollama) — zero code change.
+> **Framework:** LangChain + manual loop (mirrors OpsAgent). Default: Gemini 2.5 Flash (google provider). Provider switchable via `chat_agent_provider` env var. Embeddings: Google text-embedding-004 (768 dims).
 
-- [ ] LangChain setup: install `langchain-google-genai`, `langchain-anthropic`, `langchain-openai`, `langchain-community`
-- [ ] `chat/agent.py` — `AgentExecutor` with `create_tool_calling_agent`; reuse `get_llm()` from `mgmt/agent/llm.py`
-- [ ] System prompt finalized (English + Bengali)
-- [ ] All 8 `@tool` decorated functions implemented: `get_stock_price`, `get_fundamentals`, `get_sector_comparison`, `search_news`, `get_ml_prediction`, `screen_stocks`, `get_portfolio_analysis`, `get_macro_data`
-- [ ] RAG pipeline: embed query (voyage-finance-2) → pgvector search → inject top-k chunks into context
-- [ ] SSE streaming chat endpoint (`POST /api/chat`) via `AgentExecutor.astream()`
-- [ ] Multi-turn conversation support (`chat_history` via `MessagesPlaceholder`)
-- [ ] Context caching: Gemini `CachedContent` API — cache system prompt + stock context per session (30-min TTL, 75% token discount)
-- [ ] Model routing: thinking mode for complex analysis; non-thinking for simple lookups
-- [ ] Token budget by tier: free=4k, pro=12k, pro_plus=24k, institution=60k context tokens
-- [ ] Query quota middleware (Redis counter per user per day): free=3, pro=30, pro_plus=100, institution=unlimited
-- [ ] LLM usage logging: write to `llm_usage_log` table after every call; Grafana cost panels
-- [ ] Bengali language test suite
-- [ ] Annual report PDF extraction via Gemini Files API (`google.generativeai.upload_file`; not LangChain — file upload has no LC abstraction)
-- [ ] Gemini Flash sentiment scoring pipeline for news articles (daily, per `process_new_articles` Celery task)
-- [ ] Graphiti + Neo4j knowledge graph (planned — defer until extraction layer + pgvector RAG proven in prod)
-  - Entities: Company, Director, Event, Metric; edges: FILED, ANNOUNCED, DIVESTED, LEADS, OWNS
-  - New tool: `search_knowledge_graph()` for ownership chains, insider signals, entity timelines
+### Phase 4A — Core Agent + Tools (COMPLETE)
+
+- [x] `chat/__init__.py`, `chat/prompt.py` — bilingual system prompt (EN + BN) with live market context
+- [x] `chat/tools.py` — `build_tools(pool)` factory with 8 read-only @tool functions
+- [x] `chat/rag.py` — embed query → pgvector cosine search → build_rag_context()
+- [x] `chat/usage.py` — `log_llm_usage()`, `estimate_cost()`, writes to `llm_usage_log`
+- [x] `chat/agent.py` — `StockAnalystAgent` with `chat_stream()` SSE generator; SELECT/COMPRESS context strategies
+- [x] `chat/routing.py` — `is_complex_query()` + `make_routed_llm()` (Gemini thinking mode for complex queries)
+- [x] `chat/cache.py` — `GeminiContextCache` optional 30-min system prompt caching (Gemini CachedContent API)
+- [x] `chat/sentiment.py` — `score_article()` + `score_new_articles()` via Gemini Flash
+- [x] `chat/pdf_extractor.py` — `PdfExtractor` + `chunk_text()` via Gemini Files API
+
+### Phase 4B — API Endpoint + Scheduler (COMPLETE)
+
+- [x] `db/migrations/021_llm_usage_log.sql` — llm_usage_log table with cost tracking
+- [x] `db/migrations/022_embeddings_dimension.sql` — alter document_chunks to vector(768) for text-embedding-004
+- [x] `mgmt/routers/chat.py` — `POST /api/chat` SSE endpoint with Redis quota middleware
+- [x] `mgmt/deps.py` — `get_chat_agent()` dependency
+- [x] `mgmt/main.py` — StockAnalystAgent init in lifespan, chat router registered
+- [x] `mgmt/config.py` — chat agent config (provider, model, tier, cache TTL)
+- [x] `extraction/scheduler.py` — `job_news_sentiment` daily cron at 03:30 BD time
+
+### Phase 4C — Testing (COMPLETE)
+
+- [x] 77 unit tests across 11 test files — all passing
+- [x] Bengali language test suite (15 tests)
+- [x] Integration tests verifying full chain (7 tests)
+
+### Deferred
+
+- [ ] Graphiti + Neo4j knowledge graph — defer until pgvector RAG proven in prod
+- [ ] Annual report bulk PDF ingestion — limited data (no centralized DSE/BSEC PDF portal)
 
 ---
 
