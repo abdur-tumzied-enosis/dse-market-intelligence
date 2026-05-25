@@ -132,7 +132,7 @@ async def _run_ml_inference_async() -> dict:
         try:
             fund_row = await pool.fetchrow(
                 """
-                SELECT eps, pe FROM fundamentals
+                SELECT eps FROM fundamentals
                 WHERE ticker = $1 AND fiscal_year IS NOT NULL
                 ORDER BY fiscal_year DESC LIMIT 1
                 """,
@@ -156,8 +156,10 @@ async def _run_ml_inference_async() -> dict:
             eps_vals = [float(r["eps"]) for r in eps_rows if r["eps"]]
             if len(eps_vals) < 2:
                 continue
+            if eps_vals[-1] <= 0:
+                continue
 
-            growth = (eps_vals[0] / eps_vals[-1]) ** (1 / len(eps_vals)) - 1
+            growth = (eps_vals[0] / eps_vals[-1]) ** (1 / (len(eps_vals) - 1)) - 1
             growth = max(min(growth, 0.30), -0.20)
 
             calc = DCFCalculator(
@@ -322,7 +324,8 @@ async def _retrain_ml_models_async() -> dict:
                     if patience_count >= 5:
                         break
 
-            shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
+            if lstm_path.exists():
+                shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
             logger.info(
                 "retrain_ml_models: LSTM retrained best_val_loss=%.4f", best_val_loss
             )
