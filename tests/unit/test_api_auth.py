@@ -31,3 +31,63 @@ def test_tampered_token_raises():
     token = create_access_token(1, "a@b.com", "free")
     with pytest.raises(ValueError):
         decode_token(token + "tamper")
+
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
+from api.auth.service import hash_password, verify_password, create_user, authenticate_user, get_user_by_id
+
+
+def test_hash_and_verify():
+    hashed = hash_password("mysecretpass")
+    assert verify_password("mysecretpass", hashed)
+    assert not verify_password("wrongpass", hashed)
+
+
+@pytest.mark.asyncio
+async def test_create_user_returns_row():
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = {
+        "id": 1, "email": "a@b.com", "full_name": None,
+        "tier": "free", "is_active": True, "created_at": None,
+    }
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    result = await create_user(mock_pool, "a@b.com", "password123")
+    assert result["email"] == "a@b.com"
+    assert result["id"] == 1
+
+
+@pytest.mark.asyncio
+async def test_authenticate_user_wrong_password_returns_none():
+    hashed = hash_password("correctpass")
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = {
+        "id": 1, "email": "a@b.com", "hashed_password": hashed,
+        "full_name": None, "tier": "free", "is_active": True,
+    }
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    result = await authenticate_user(mock_pool, "a@b.com", "wrongpass")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_authenticate_user_correct_password():
+    hashed = hash_password("correctpass")
+    mock_conn = AsyncMock()
+    mock_conn.fetchrow.return_value = {
+        "id": 1, "email": "a@b.com", "hashed_password": hashed,
+        "full_name": None, "tier": "free", "is_active": True,
+    }
+    mock_pool = MagicMock()
+    mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+    mock_pool.acquire.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    result = await authenticate_user(mock_pool, "a@b.com", "correctpass")
+    assert result is not None
+    assert result["email"] == "a@b.com"
