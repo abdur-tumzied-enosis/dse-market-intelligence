@@ -36,7 +36,9 @@ export interface MarketSummary {
 
 export interface HeatmapItem {
   ticker: string
+  name: string
   sector: string
   change_pct: number | null
+  ltp: number | null
   value_bdt: number | null
 }

@@ -23,9 +23,11 @@ class TopMover(BaseModel):
 
 class HeatmapItem(BaseModel):
     ticker: str
+    name: str
     sector: str
-    change_pct: Decimal | None
-    value_bdt: Decimal | None
+    change_pct: float | None
+    ltp: float | None
+    value_bdt: float | None
 
 
 class MarketIndices(BaseModel):
