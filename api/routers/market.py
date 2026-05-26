@@ -165,49 +165,28 @@ async def market_movers(
 
 
 @router.get("/heatmap", response_model=list[HeatmapItem])
-async def market_heatmap(pool=Depends(get_db), _user=Depends(get_current_user)):
+async def market_heatmap(_user=Depends(get_current_user)):
     cache_key = "cache:api:market:heatmap"
     cached = await _cache_get(cache_key)
     if cached:
         return cached
 
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            """
-            WITH ranked AS (
-                SELECT sp.ticker, sp.time, sp.close, sp.value_bdt,
-                       DENSE_RANK() OVER (
-                           PARTITION BY sp.ticker ORDER BY sp.time::date DESC
-                       ) AS day_rank
-                FROM stock_prices sp
-                JOIN companies c ON c.ticker = sp.ticker
-                WHERE c.is_active = true
-            ),
-            today AS (
-                SELECT ticker, MAX(close) AS close, MAX(value_bdt) AS value_bdt
-                FROM ranked WHERE day_rank = 1
-                GROUP BY ticker
-            ),
-            yesterday AS (
-                SELECT ticker, MAX(close) AS close
-                FROM ranked WHERE day_rank = 2
-                GROUP BY ticker
-            )
-            SELECT t.ticker, c.sector,
-                CASE WHEN y.close IS NOT NULL AND y.close > 0
-                    THEN ROUND(((t.close - y.close) / y.close * 100)::numeric, 2)
-                    ELSE NULL
-                END AS change_pct,
-                t.value_bdt
-            FROM today t
-            JOIN companies c ON c.ticker = t.ticker
-            LEFT JOIN yesterday y ON y.ticker = t.ticker
-            ORDER BY c.sector, t.value_bdt DESC NULLS LAST
-            """
-        )
+    raw = await _fetch_live_prices()
 
-    result = [dict(r) for r in rows]
-    await _cache_set(cache_key, result, ttl=300)
+    result: list[dict] = []
+    for item in raw:
+        try:
+            result.append({
+                "ticker": str(item["Scrip"]).strip(),
+                "sector": str(item.get("BusinessSegment") or "Other").strip(),
+                "change_pct": float(item["ChangePer"]),
+                "value_bdt": float(item["Value"]) if item.get("Value") not in (None, "", "0") else None,
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    result.sort(key=lambda x: (x["sector"], -(x["value_bdt"] or 0)))
+    await _cache_set(cache_key, result, ttl=120)
     return result
 
 
