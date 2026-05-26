@@ -3,9 +3,11 @@ import userEvent from '@testing-library/user-event'
 import LoginPage from '@/app/(auth)/login/page'
 
 const mockPush = jest.fn()
+const mockSearchParams = new URLSearchParams()
 
 jest.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockPush }),
+  useSearchParams: () => mockSearchParams,
 }))
 jest.mock('@/lib/api', () => ({
   api: { auth: { login: jest.fn() } },
@@ -71,4 +73,24 @@ it('shows error alert when login fails', async () => {
   await waitFor(() => {
     expect(screen.getByRole('alert')).toHaveTextContent('Invalid credentials')
   })
+})
+
+it('redirects to ?from path when present after login', async () => {
+  const user = userEvent.setup()
+  mockSearchParams.set('from', '/stocks')
+  ;(api.auth.login as jest.Mock).mockResolvedValueOnce({
+    access_token: 'at',
+    refresh_token: 'rt',
+    token_type: 'bearer',
+  })
+
+  render(<LoginPage />)
+  await user.type(screen.getByLabelText(/email/i), 'test@test.com')
+  await user.type(screen.getByLabelText(/password/i), 'pass123')
+  await user.click(screen.getByRole('button', { name: /sign in/i }))
+
+  await waitFor(() => {
+    expect(mockPush).toHaveBeenCalledWith('/stocks')
+  })
+  mockSearchParams.delete('from') // cleanup for other tests
 })
