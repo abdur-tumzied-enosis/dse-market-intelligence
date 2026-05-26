@@ -26,3 +26,16 @@ class HeatmapItem(BaseModel):
     sector: str
     change_pct: Decimal | None
     value_bdt: Decimal | None
+
+
+class MarketIndices(BaseModel):
+    dsex_value: float
+    dsex_change_pct: float
+    ds30_value: float
+    ds30_change_pct: float
+    dses_value: float
+    dses_change_pct: float
+    market_status: str
+    advance: int
+    decline: int
+    unchanged: int

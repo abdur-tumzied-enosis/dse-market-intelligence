@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Depends, Query
 from api.deps import get_current_user, get_db
-from api.schemas.market import HeatmapItem, MarketSummary, TopMover
+from api.schemas.market import HeatmapItem, MarketSummary, TopMover, MarketIndices
+import httpx
 
 router = APIRouter(prefix="/market", tags=["market"])
 
@@ -22,6 +23,40 @@ async def _cache_set(key: str, value: Any, ttl: int) -> None:
         await cache_set(key, value, ttl)
     except Exception:
         pass
+
+
+_AMARSTOCK_MARKET_URL = "https://www.amarstock.com/Info/DSE"
+_AMARSTOCK_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DSEIntelBot/1.0)"}
+
+
+async def _fetch_indices_from_amarstock() -> dict:
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(_AMARSTOCK_MARKET_URL, headers=_AMARSTOCK_HEADERS)
+        resp.raise_for_status()
+        data = resp.json()
+    return {
+        "dsex_value": float(data["IndexValue"]),
+        "dsex_change_pct": float(data["ChangePct"]),
+        "ds30_value": float(data["D30Index"]),
+        "ds30_change_pct": float(data["D30ChangePct"]),
+        "dses_value": float(data["DsIndex"]),
+        "dses_change_pct": float(data["DsChangePct"]),
+        "market_status": data["MarketStatus"],
+        "advance": int(data["Advance"]),
+        "decline": int(data["Decline"]),
+        "unchanged": int(data["Unchange"]),
+    }
+
+
+@router.get("/indices", response_model=MarketIndices)
+async def market_indices(_user=Depends(get_current_user)):
+    cache_key = "cache:api:market:indices"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return cached
+    result = await _fetch_indices_from_amarstock()
+    await _cache_set(cache_key, result, ttl=60)
+    return result
 
 
 @router.get("/summary", response_model=MarketSummary)
