@@ -17,6 +17,7 @@ develop-eggs/
 lib/
 lib64/
 !frontend/lib/
+!frontend/__tests__/lib/
 .eggs/
 *.so
 .playwright-mcp/
