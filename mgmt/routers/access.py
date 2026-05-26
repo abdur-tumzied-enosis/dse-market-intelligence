@@ -85,3 +85,77 @@ async def update_feature_flag(flag_key: str, tier: str, body: FlagUpdate, pool=D
         )
     await cache_delete_pattern(f"access:flags:{flag_key}:{tier}")
     return {"flag_key": flag_key, "tier": tier, "enabled": body.enabled}
+
+
+# ── User Overrides ────────────────────────────────────────────────────
+
+@router.get("/users")
+async def search_users(email: str = "", limit: int = 20, pool=Depends(get_db)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, email, tier, is_active
+            FROM users
+            WHERE email ILIKE $1
+            ORDER BY email
+            LIMIT $2
+            """,
+            f"%{email}%",
+            limit,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get("/users/{user_id}/overrides")
+async def list_user_overrides(user_id: int, pool=Depends(get_db)):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, user_id, flag_key, override, expires_at, note, created_at
+            FROM user_access_overrides
+            WHERE user_id = $1
+            ORDER BY flag_key
+            """,
+            user_id,
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/users/{user_id}/overrides", status_code=201)
+async def create_user_override(user_id: int, body: OverrideCreate, pool=Depends(get_db)):
+    expires = None
+    if body.expires_at:
+        from datetime import datetime
+        expires = datetime.fromisoformat(body.expires_at)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO user_access_overrides (user_id, flag_key, override, expires_at, note)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (user_id, flag_key) DO UPDATE
+                SET override   = EXCLUDED.override,
+                    expires_at = EXCLUDED.expires_at,
+                    note       = EXCLUDED.note
+            RETURNING id, user_id, flag_key, override, expires_at, note, created_at
+            """,
+            user_id,
+            body.flag_key,
+            body.override,
+            expires,
+            body.note,
+        )
+    await cache_delete_pattern(f"access:overrides:{user_id}")
+    return dict(row)
+
+
+@router.delete("/users/{user_id}/overrides/{flag_key}")
+async def delete_user_override(user_id: int, flag_key: str, pool=Depends(get_db)):
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "DELETE FROM user_access_overrides WHERE user_id = $1 AND flag_key = $2",
+            user_id,
+            flag_key,
+        )
+    await cache_delete_pattern(f"access:overrides:{user_id}")
+    return {"deleted": True, "user_id": user_id, "flag_key": flag_key}

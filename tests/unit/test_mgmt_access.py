@@ -113,3 +113,62 @@ def test_update_feature_flag_writes_and_invalidates():
     assert resp.status_code == 200
     conn.execute.assert_called_once()
     mock_del.assert_called_once_with("access:flags:predictions:free")
+
+
+# ── User Overrides ────────────────────────────────────────────────────
+
+def test_search_users_by_email():
+    rows = [{"id": 1, "email": "bob@test.com", "tier": "free", "is_active": True}]
+    pool, conn = _make_pool(rows)
+    conn.fetch = AsyncMock(return_value=rows)
+    client = TestClient(_make_app(pool))
+
+    resp = client.get("/mgmt/access/users?email=bob")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["email"] == "bob@test.com"
+
+
+def test_list_user_overrides():
+    rows = [
+        {"id": 1, "user_id": 1, "flag_key": "predictions", "override": "grant",
+         "expires_at": None, "note": None, "created_at": None},
+    ]
+    pool, conn = _make_pool(rows)
+    conn.fetch = AsyncMock(return_value=rows)
+    client = TestClient(_make_app(pool))
+
+    resp = client.get("/mgmt/access/users/1/overrides")
+
+    assert resp.status_code == 200
+    assert resp.json()[0]["flag_key"] == "predictions"
+
+
+def test_create_override_writes_and_invalidates():
+    pool, conn = _make_pool()
+    conn.fetchrow = AsyncMock(return_value={
+        "id": 1, "user_id": 1, "flag_key": "reports", "override": "grant",
+        "expires_at": None, "note": "beta tester", "created_at": None,
+    })
+    client = TestClient(_make_app(pool))
+
+    with patch("mgmt.routers.access.cache_delete_pattern", new=AsyncMock()) as mock_del:
+        resp = client.post(
+            "/mgmt/access/users/1/overrides",
+            json={"flag_key": "reports", "override": "grant", "note": "beta tester"},
+        )
+
+    assert resp.status_code == 201
+    mock_del.assert_called_once_with("access:overrides:1")
+
+
+def test_delete_override_removes_and_invalidates():
+    pool, conn = _make_pool()
+    conn.execute = AsyncMock(return_value="DELETE 1")
+    client = TestClient(_make_app(pool))
+
+    with patch("mgmt.routers.access.cache_delete_pattern", new=AsyncMock()) as mock_del:
+        resp = client.delete("/mgmt/access/users/1/overrides/reports")
+
+    assert resp.status_code == 200
+    mock_del.assert_called_once_with("access:overrides:1")
