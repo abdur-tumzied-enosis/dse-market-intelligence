@@ -19,7 +19,7 @@ from mgmt.agent.agent import Agent
 from mgmt.cache import close_redis, get_redis
 from mgmt.config import get_settings
 from chat.agent import StockAnalystAgent
-from mgmt.routers import agent, alerts, chat, health, jobs, metrics, quality, scheduler, streams, tasks
+from mgmt.routers import access, agent, alerts, chat, health, jobs, metrics, quality, scheduler, streams, tasks
 
 logger = structlog.get_logger(__name__)
 
@@ -100,6 +100,7 @@ app.include_router(agent.router)
 app.include_router(tasks.router)
 app.include_router(metrics.router)
 app.include_router(chat.router)
+app.include_router(access.router)
 
 
 @app.get("/mgmt/ping")
