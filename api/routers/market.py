@@ -32,7 +32,16 @@ async def _cache_set(key: str, value: Any, ttl: int) -> None:
 
 
 _AMARSTOCK_MARKET_URL = "https://www.amarstock.com/Info/DSE"
+_AMARSTOCK_LIVE_URL   = "https://www.amarstock.com/LatestPrice/dbfd2587c77f"
 _AMARSTOCK_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DSEIntelBot/1.0)"}
+
+
+async def _fetch_live_prices() -> list[dict]:
+    """Return all stocks from AmarStock live prices endpoint."""
+    async with httpx.AsyncClient(timeout=20, headers=_AMARSTOCK_HEADERS) as client:
+        resp = await client.get(_AMARSTOCK_LIVE_URL)
+        resp.raise_for_status()
+        return resp.json()
 
 
 async def _fetch_indices_from_amarstock() -> dict:
@@ -124,7 +133,6 @@ async def market_summary(pool=Depends(get_db), _user=Depends(get_current_user)):
 @router.get("/movers")
 async def market_movers(
     n: int = Query(10, ge=1, le=50),
-    pool=Depends(get_db),
     _user=Depends(get_current_user),
 ):
     cache_key = f"cache:api:market:movers:{n}"
@@ -132,61 +140,27 @@ async def market_movers(
     if cached:
         return cached
 
-    computed_cte = """
-        WITH ranked AS (
-            SELECT sp.ticker, c.name, sp.close,
-                   DENSE_RANK() OVER (PARTITION BY sp.ticker ORDER BY sp.time::date DESC) AS day_rank
-            FROM stock_prices sp
-            JOIN companies c ON c.ticker = sp.ticker
-            WHERE c.is_active = true
-        ),
-        today AS (
-            SELECT ticker, name, MAX(close) AS close
-            FROM ranked WHERE day_rank = 1
-            GROUP BY ticker, name
-        ),
-        yesterday AS (
-            SELECT ticker, MAX(close) AS close
-            FROM ranked WHERE day_rank = 2
-            GROUP BY ticker
-        ),
-        computed AS (
-            SELECT t.ticker, t.name, t.close,
-                CASE WHEN y.close IS NOT NULL AND y.close > 0
-                    THEN ROUND(((t.close - y.close) / y.close * 100)::numeric, 2)
-                    ELSE NULL
-                END AS change_pct
-            FROM today t
-            LEFT JOIN yesterday y ON y.ticker = t.ticker
-        )
-    """
-    async with pool.acquire() as conn:
-        gainers = await conn.fetch(
-            computed_cte + """
-            SELECT ticker, name, close, change_pct
-            FROM computed
-            WHERE change_pct IS NOT NULL AND change_pct > 0
-            ORDER BY change_pct DESC
-            LIMIT $1
-            """,
-            n,
-        )
-        losers = await conn.fetch(
-            computed_cte + """
-            SELECT ticker, name, close, change_pct
-            FROM computed
-            WHERE change_pct IS NOT NULL AND change_pct < 0
-            ORDER BY change_pct ASC
-            LIMIT $1
-            """,
-            n,
-        )
+    raw = await _fetch_live_prices()
 
+    movers: list[dict] = []
+    for item in raw:
+        try:
+            change_pct = float(item["ChangePer"])
+            movers.append({
+                "ticker": str(item["Scrip"]).strip(),
+                "name": str(item.get("FullName") or item["Scrip"]).strip(),
+                "close": float(item["LTP"]),
+                "change_pct": change_pct,
+            })
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    movers.sort(key=lambda x: x["change_pct"], reverse=True)
     result = {
-        "gainers": [dict(r) for r in gainers],
-        "losers": [dict(r) for r in losers],
+        "gainers": movers[:n],
+        "losers": movers[:-n - 1:-1],
     }
-    await _cache_set(cache_key, result, ttl=300)
+    await _cache_set(cache_key, result, ttl=120)
     return result
 
 
