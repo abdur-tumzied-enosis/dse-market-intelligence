@@ -1,7 +1,7 @@
 # api/routers/market.py
 from __future__ import annotations
 from typing import Any
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from api.deps import get_current_user, get_db
 from api.schemas.market import HeatmapItem, MarketSummary, TopMover, MarketIndices
 import httpx
@@ -34,18 +34,21 @@ async def _fetch_indices_from_amarstock() -> dict:
         resp = await client.get(_AMARSTOCK_MARKET_URL, headers=_AMARSTOCK_HEADERS)
         resp.raise_for_status()
         data = resp.json()
-    return {
-        "dsex_value": float(data["IndexValue"]),
-        "dsex_change_pct": float(data["ChangePct"]),
-        "ds30_value": float(data["D30Index"]),
-        "ds30_change_pct": float(data["D30ChangePct"]),
-        "dses_value": float(data["DsIndex"]),
-        "dses_change_pct": float(data["DsChangePct"]),
-        "market_status": data["MarketStatus"],
-        "advance": int(data["Advance"]),
-        "decline": int(data["Decline"]),
-        "unchanged": int(data["Unchange"]),
-    }
+    try:
+        return {
+            "dsex_value": float(data["IndexValue"]),
+            "dsex_change_pct": float(data["ChangePct"]),
+            "ds30_value": float(data["D30Index"]),
+            "ds30_change_pct": float(data["D30ChangePct"]),
+            "dses_value": float(data["DsIndex"]),
+            "dses_change_pct": float(data["DsChangePct"]),
+            "market_status": data["MarketStatus"],
+            "advance": int(data["Advance"]),
+            "decline": int(data["Decline"]),
+            "unchanged": int(data["Unchange"]),
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"AmarStock response malformed: {exc}") from exc
 
 
 @router.get("/indices", response_model=MarketIndices)
