@@ -1,5 +1,7 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+
+const CLOSED_POLL_MS = 5 * 60 * 1000 // 5 min — re-check if market opened
 
 interface IndexSnap {
   dsex_value: number
@@ -10,19 +12,43 @@ interface IndexSnap {
 export default function MarketStreamBar({ apiBase }: { apiBase?: string }) {
   const base = apiBase ?? (process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000')
   const [snap, setSnap] = useState<IndexSnap | null>(null)
+  const esRef = useRef<EventSource | null>(null)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    const es = new EventSource(`${base}/api/market/stream`)
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data)
-        if (!data.error) setSnap(data)
-      } catch {
-        // ignore parse errors
+    function connect() {
+      const es = new EventSource(`${base}/api/market/stream`)
+      esRef.current = es
+
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          if (!data.error) {
+            setSnap(data)
+            if (data.market_status !== 'Open') {
+              // Server will close the stream; schedule sparse re-check
+              es.close()
+              timerRef.current = setTimeout(connect, CLOSED_POLL_MS)
+            }
+          }
+        } catch {
+          // ignore parse errors
+        }
+      }
+
+      // Server closed stream (e.g. market just closed mid-session):
+      // keep last snap visible, schedule reconnect instead of instant retry
+      es.onerror = () => {
+        es.close()
+        timerRef.current = setTimeout(connect, CLOSED_POLL_MS)
       }
     }
-    es.onerror = () => setSnap(null)
-    return () => es.close()
+
+    connect()
+    return () => {
+      esRef.current?.close()
+      if (timerRef.current) clearTimeout(timerRef.current)
+    }
   }, [base])
 
   if (!snap) {

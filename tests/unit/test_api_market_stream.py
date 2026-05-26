@@ -39,3 +39,20 @@ async def test_generate_market_events_on_error_yields_error_event():
     assert event.startswith("data: ")
     payload = json.loads(event[len("data: "):].strip())
     assert payload["error"] == "fetch_failed"
+
+
+@pytest.mark.asyncio
+async def test_generate_market_events_stops_when_market_closed():
+    """Generator must yield exactly one event then stop when market_status != 'Open'."""
+    closed = {**FAKE_INDICES, "market_status": "Closed"}
+
+    async def _fake_closed():
+        return closed
+
+    events = []
+    async for event in _generate_market_events(get_indices_fn=_fake_closed, interval=0):
+        events.append(event)
+
+    assert len(events) == 1
+    payload = json.loads(events[0][len("data: "):].strip())
+    assert payload["market_status"] == "Closed"

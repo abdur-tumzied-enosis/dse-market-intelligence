@@ -214,11 +214,17 @@ async def _default_get_indices() -> dict:
 
 
 async def _generate_market_events(get_indices_fn=_default_get_indices, interval: int = 30):
-    """Async generator that yields SSE-formatted market index events."""
+    """Async generator that yields SSE-formatted market index events.
+
+    Stops after the first event when market_status != 'Open'; the client is
+    responsible for reconnecting later to check if the market has re-opened.
+    """
     while True:
         try:
             data = await get_indices_fn()
             yield f"data: {_json.dumps(data)}\n\n"
+            if data.get("market_status") != "Open":
+                return  # market closed — client will reconnect later
         except (asyncio.CancelledError, GeneratorExit):
             return
         except Exception as exc:

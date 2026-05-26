@@ -18,8 +18,17 @@ class MockEventSource {
 }
 
 beforeAll(() => {
+  jest.useFakeTimers()
   // @ts-expect-error – mock only
   global.EventSource = MockEventSource
+})
+
+afterAll(() => {
+  jest.useRealTimers()
+})
+
+afterEach(() => {
+  jest.clearAllTimers()
 })
 
 test('shows loading state before first event', () => {
@@ -38,10 +47,21 @@ test('displays DSEX value from SSE event', async () => {
   expect(screen.getByText('+1.27%')).toBeInTheDocument()
 })
 
-test('shows error state on SSE error event', async () => {
+test('shows loading state on SSE error (no prior data)', async () => {
   render(<MarketStreamBar apiBase="http://localhost:8000" />)
   await act(async () => {
     MockEventSource.instance.onerror?.(new Event('error'))
   })
   expect(screen.getByText('—')).toBeInTheDocument()
+})
+
+test('keeps last value when market closed, does not blank display', async () => {
+  render(<MarketStreamBar apiBase="http://localhost:8000" />)
+  await act(async () => {
+    MockEventSource.instance.onmessage?.({
+      data: JSON.stringify({ dsex_value: 5200.00, dsex_change_pct: -0.5, market_status: 'Closed' }),
+    } as MessageEvent)
+  })
+  expect(screen.getByText('5,200.00')).toBeInTheDocument()
+  expect(screen.getByText('Closed')).toBeInTheDocument()
 })
