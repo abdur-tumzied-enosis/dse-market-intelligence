@@ -78,10 +78,31 @@ async def market_summary(pool=Depends(get_db), _user=Depends(get_current_user)):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             """
-            WITH latest AS (
-                SELECT DISTINCT ON (ticker) ticker, change_pct, volume, value_bdt
-                FROM stock_prices
-                ORDER BY ticker, time DESC
+            WITH ranked AS (
+                SELECT sp.ticker, sp.close, sp.volume, sp.value_bdt,
+                       DENSE_RANK() OVER (PARTITION BY sp.ticker ORDER BY sp.time::date DESC) AS day_rank
+                FROM stock_prices sp
+                JOIN companies c ON c.ticker = sp.ticker
+                WHERE c.is_active = true
+            ),
+            today AS (
+                SELECT ticker, MAX(close) AS close, MAX(volume) AS volume, MAX(value_bdt) AS value_bdt
+                FROM ranked WHERE day_rank = 1
+                GROUP BY ticker
+            ),
+            yesterday AS (
+                SELECT ticker, MAX(close) AS close
+                FROM ranked WHERE day_rank = 2
+                GROUP BY ticker
+            ),
+            computed AS (
+                SELECT t.ticker, t.volume, t.value_bdt,
+                    CASE WHEN y.close IS NOT NULL AND y.close > 0
+                        THEN ROUND(((t.close - y.close) / y.close * 100)::numeric, 4)
+                        ELSE NULL
+                    END AS change_pct
+                FROM today t
+                LEFT JOIN yesterday y ON y.ticker = t.ticker
             )
             SELECT
                 COUNT(*)                                        AS total_stocks,
@@ -91,7 +112,7 @@ async def market_summary(pool=Depends(get_db), _user=Depends(get_current_user)):
                 SUM(volume)                                     AS total_volume,
                 SUM(value_bdt)                                  AS total_value_bdt,
                 ROUND(AVG(change_pct), 4)                       AS avg_change_pct
-            FROM latest
+            FROM computed
             """
         )
 
@@ -111,36 +132,50 @@ async def market_movers(
     if cached:
         return cached
 
+    computed_cte = """
+        WITH ranked AS (
+            SELECT sp.ticker, c.name, sp.close,
+                   DENSE_RANK() OVER (PARTITION BY sp.ticker ORDER BY sp.time::date DESC) AS day_rank
+            FROM stock_prices sp
+            JOIN companies c ON c.ticker = sp.ticker
+            WHERE c.is_active = true
+        ),
+        today AS (
+            SELECT ticker, name, MAX(close) AS close
+            FROM ranked WHERE day_rank = 1
+            GROUP BY ticker, name
+        ),
+        yesterday AS (
+            SELECT ticker, MAX(close) AS close
+            FROM ranked WHERE day_rank = 2
+            GROUP BY ticker
+        ),
+        computed AS (
+            SELECT t.ticker, t.name, t.close,
+                CASE WHEN y.close IS NOT NULL AND y.close > 0
+                    THEN ROUND(((t.close - y.close) / y.close * 100)::numeric, 2)
+                    ELSE NULL
+                END AS change_pct
+            FROM today t
+            LEFT JOIN yesterday y ON y.ticker = t.ticker
+        )
+    """
     async with pool.acquire() as conn:
         gainers = await conn.fetch(
-            """
-            WITH latest AS (
-                SELECT DISTINCT ON (sp.ticker) sp.ticker, c.name, sp.close, sp.change_pct
-                FROM stock_prices sp
-                JOIN companies c ON c.ticker = sp.ticker
-                WHERE c.is_active = true
-                ORDER BY sp.ticker, sp.time DESC
-            )
+            computed_cte + """
             SELECT ticker, name, close, change_pct
-            FROM latest
-            WHERE change_pct IS NOT NULL
+            FROM computed
+            WHERE change_pct IS NOT NULL AND change_pct > 0
             ORDER BY change_pct DESC
             LIMIT $1
             """,
             n,
         )
         losers = await conn.fetch(
-            """
-            WITH latest AS (
-                SELECT DISTINCT ON (sp.ticker) sp.ticker, c.name, sp.close, sp.change_pct
-                FROM stock_prices sp
-                JOIN companies c ON c.ticker = sp.ticker
-                WHERE c.is_active = true
-                ORDER BY sp.ticker, sp.time DESC
-            )
+            computed_cte + """
             SELECT ticker, name, close, change_pct
-            FROM latest
-            WHERE change_pct IS NOT NULL
+            FROM computed
+            WHERE change_pct IS NOT NULL AND change_pct < 0
             ORDER BY change_pct ASC
             LIMIT $1
             """,
