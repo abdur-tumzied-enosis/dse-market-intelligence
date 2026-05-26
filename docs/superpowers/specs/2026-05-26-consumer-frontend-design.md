@@ -325,7 +325,145 @@ Six phases, each a self-contained PR. No phase merges until all items complete.
 - [ ] Error boundaries, loading skeletons, empty states
 - [ ] API integration tests (auth flow + tier gating)
 
-**Estimate:** ~15–18 days solo. Each phase is independently shippable.
+### Phase G — Access Control (build before Phase A; consumer API depends on it)
+- [ ] `025_access_control.sql` migration (tier_limits, feature_flags, user_access_overrides + seeds)
+- [ ] `mgmt/routers/access.py` — all 7 admin endpoints
+- [ ] `api/access.py` — `check_feature()` + `get_limit()` with Redis cache
+- [ ] Wire consumer API: replace all hardcoded limits + feature gates with `check_feature` / `get_limit`
+- [ ] mgmt-ui `/access` page — Tier Limits tab
+- [ ] mgmt-ui `/access` page — Feature Flags tab
+- [ ] mgmt-ui `/access` page — User Overrides tab (email search + CRUD)
+- [ ] Cache invalidation on every mgmt write
+
+**Estimate:** ~15–18 days solo + 2–3 days for Phase G. Each phase is independently shippable.
+
+---
+
+## 10. Access Control System
+
+### Overview
+Tier limits and feature gates are fully configurable at runtime via the mgmt API + mgmt-ui. No hardcoded limits in the consumer API. Per-user overrides allow granting or revoking specific features for individual users, bypassing their tier.
+
+### DB Migrations
+
+`025_access_control.sql`:
+```sql
+-- Configurable numeric limits per tier
+CREATE TABLE tier_limits (
+    tier        TEXT    NOT NULL,   -- 'free' | 'pro'
+    limit_key   TEXT    NOT NULL,   -- 'api_calls_per_day' | 'chat_queries_per_day' | 'portfolio_holdings_max'
+    limit_value INTEGER NOT NULL,
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (tier, limit_key)
+);
+
+-- Seed defaults
+INSERT INTO tier_limits VALUES
+  ('free', 'api_calls_per_day',       50),
+  ('free', 'chat_queries_per_day',     3),
+  ('free', 'portfolio_holdings_max',   5),
+  ('pro',  'api_calls_per_day',     1000),
+  ('pro',  'chat_queries_per_day',    30),
+  ('pro',  'portfolio_holdings_max', -1);   -- -1 = unlimited
+
+-- Feature flags per tier
+CREATE TABLE feature_flags (
+    flag_key    TEXT    NOT NULL,   -- 'predictions' | 'reports' | 'portfolio_analysis' | 'chat' | 'screener_health_score'
+    tier        TEXT    NOT NULL,   -- 'free' | 'pro'
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    updated_at  TIMESTAMPTZ DEFAULT NOW(),
+    updated_by  UUID,               -- mgmt user who last changed it
+    PRIMARY KEY (flag_key, tier)
+);
+
+-- Seed defaults
+INSERT INTO feature_flags VALUES
+  ('predictions',          'free',  false, NOW(), NULL),
+  ('predictions',          'pro',   true,  NOW(), NULL),
+  ('reports',              'free',  false, NOW(), NULL),
+  ('reports',              'pro',   true,  NOW(), NULL),
+  ('portfolio_analysis',   'free',  false, NOW(), NULL),
+  ('portfolio_analysis',   'pro',   true,  NOW(), NULL),
+  ('chat',                 'free',  true,  NOW(), NULL),
+  ('chat',                 'pro',   true,  NOW(), NULL),
+  ('screener_health_score','free',  false, NOW(), NULL),
+  ('screener_health_score','pro',   true,  NOW(), NULL);
+
+-- Per-user access overrides
+CREATE TABLE user_access_overrides (
+    id          UUID    PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id     UUID    NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    flag_key    TEXT    NOT NULL,
+    override    TEXT    NOT NULL CHECK (override IN ('grant', 'revoke')),
+    expires_at  TIMESTAMPTZ,            -- NULL = permanent
+    note        TEXT,                   -- admin note (reason)
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    created_by  UUID,
+    UNIQUE (user_id, flag_key)
+);
+
+CREATE INDEX ON user_access_overrides (user_id);
+```
+
+### Access Resolution (Consumer API)
+
+Every feature-gated endpoint calls `check_feature(user, flag_key)`:
+
+```python
+async def check_feature(user: User, flag_key: str) -> bool:
+    # 1. Per-user override (highest priority)
+    override = await cache_or_db_get_override(user.id, flag_key)
+    if override and (override.expires_at is None or override.expires_at > now()):
+        return override.override == "grant"
+
+    # 2. Tier feature flag
+    flag = await cache_or_db_get_flag(flag_key, user.tier)
+    return flag.enabled if flag else False
+```
+
+Tier limits resolved similarly via `get_limit(tier, limit_key)` — returns configured value, never hardcoded.
+
+### Caching Strategy
+- Redis key: `access:flags:{flag_key}:{tier}` → TTL 60s
+- Redis key: `access:limits:{tier}:{limit_key}` → TTL 60s
+- Redis key: `access:overrides:{user_id}` → hash of all overrides, TTL 60s
+- On any mgmt write → invalidate affected Redis keys immediately
+
+### mgmt API Endpoints
+
+Added to `mgmt/routers/access.py`:
+
+```
+Tier Limits:
+  GET  /mgmt/access/tier-limits                          → all limits (all tiers)
+  PUT  /mgmt/access/tier-limits/{tier}/{key}             → update one limit value
+
+Feature Flags:
+  GET  /mgmt/access/features                             → all flags
+  PUT  /mgmt/access/features/{flag_key}/{tier}           → { enabled: bool }
+
+User Overrides:
+  GET    /mgmt/access/users                              → search users by email
+  GET    /mgmt/access/users/{user_id}/overrides          → list overrides for user
+  POST   /mgmt/access/users/{user_id}/overrides          → { flag_key, override, expires_at?, note? }
+  DELETE /mgmt/access/users/{user_id}/overrides/{flag}   → remove override
+```
+
+### mgmt-ui — Access Control Page
+
+New page at `/access` in mgmt-ui. Three tabs:
+
+**Tab 1 — Tier Limits**
+Table with columns: `Limit`, `Free`, `Pro`. Inline number edit per cell. Save triggers `PUT` immediately. -1 displayed as "Unlimited".
+
+**Tab 2 — Feature Flags**
+Table rows = features, columns = Free / Pro. Each cell is a toggle switch. Visual diff: if free has something pro doesn't, highlight the row.
+
+**Tab 3 — User Overrides**
+- Email search box → shows matched users with tier badge
+- Click user → shows override list (flag, grant/revoke, expiry, note, delete button)
+- "Add Override" form: flag dropdown, grant/revoke select, optional expiry date, note field
+- Overrides with `expires_at` in the past shown as greyed-out "Expired" badge
 
 ---
 

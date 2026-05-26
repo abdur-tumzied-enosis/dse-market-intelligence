@@ -345,46 +345,88 @@ Replaced Haiku NER with Google Natural Language API + rapidfuzz fuzzy match.
 
 ---
 
-## Layer 5 — Backend API (FUTURE)
+## Layer 5 — Backend API (ACTIVE)
 
-> Not started. Requires LLM layer.
+> Spec: `docs/superpowers/specs/2026-05-26-consumer-frontend-design.md`
+> Stack: FastAPI (:8000), JWT auth, Redis rate-limiting, tier-gated endpoints
 
-- [ ] FastAPI app full setup: auth, CORS, rate limiting, error handling
-- [ ] JWT auth: register + login + refresh
-- [ ] All `/api/stocks` endpoints
-- [ ] All `/api/market` endpoints + WebSocket price stream
-- [ ] `/api/sectors` endpoints
-- [ ] `/api/chat` SSE + `/api/analyze` + `/api/compare`
-- [ ] Portfolio CRUD + analysis
-- [ ] PDF report generation (WeasyPrint)
-- [ ] Rate limiting per subscription tier: free=50 calls/day, pro=1000/day, institution=unlimited
-- [ ] Chat quota enforcement: free=3 queries/day, pro=30, pro_plus=100 (Redis counter, resets midnight BD)
-- [ ] LLM cost monitoring dashboard: daily spend, top users, cache hit rate (from `llm_usage_log`)
-- [ ] Budget hard cap: throttle all non-institution users when daily LLM spend > $100
-- [ ] Redis caching per endpoint (TTLs per data type)
-- [ ] API integration tests
+### Phase G — Access Control (prerequisite for all phases)
+
+- [ ] `db/migrations/025_access_control.sql` — tier_limits + feature_flags + user_access_overrides + seed data
+- [ ] `mgmt/routers/access.py` — 7 admin endpoints (tier limits CRUD, feature flags toggle, user overrides CRUD)
+- [ ] `api/access.py` — `check_feature(user, flag)` + `get_limit(tier, key)` with Redis cache (TTL 60s)
+- [ ] Cache invalidation on every mgmt write (delete affected Redis keys)
+- [ ] mgmt-ui `/access` page — Tab 1: Tier Limits (inline editable table)
+- [ ] mgmt-ui `/access` page — Tab 2: Feature Flags (toggle switches per tier)
+- [ ] mgmt-ui `/access` page — Tab 3: User Overrides (email search + grant/revoke + expiry + notes)
+
+### Phase A — Foundation
+
+- [ ] `db/migrations/023_users.sql` — users table (id, email, password_hash, tier, is_verified)
+- [ ] `api/` FastAPI skeleton: main.py, CORS, JWT middleware, deps.py
+- [ ] Auth endpoints: register, verify-email, login, refresh, logout
+- [ ] `frontend/` Next.js 16.2.6 init: Tailwind v4, shadcn dark theme, TypeScript
+- [ ] Sidebar + TopBar layout shell (authenticated route group)
+- [ ] `/login` and `/register` pages — connected to real API
+- [ ] `middleware.ts` — unauthenticated → redirect to `/login`
+
+### Phase B — Market Dashboard
+
+- [ ] `GET /api/market/summary`, `/movers`, `/heatmap` endpoints (Redis cached)
+- [ ] `/dashboard` page: IndexCards + MoverStrip + HeatmapGrid (SSR)
+- [ ] TopBar live DSEX strip via SSE
+- [ ] Landing page `/` — hero, features, pricing table, disclaimer footer
+
+### Phase C — Stock Pages
+
+- [ ] `GET /api/stocks`, `/api/stocks/{ticker}` (tier-gated via `check_feature`)
+- [ ] `GET /api/stocks/{ticker}/fundamentals?years=N` (free: max 3, pro: max 10)
+- [ ] `/stocks` screener: DataTable + sector/PE/rating/health_score filters
+- [ ] `/stocks/[ticker]`: PriceChart (TradingView) + HealthGauge + RatingBadge
+- [ ] FundamentalsChart (Recharts) — 3yr free / 10yr pro
+- [ ] PaywallOverlay on pro-only sections → links to `/settings#upgrade`
+- [ ] `/sectors` page: sector PE table + heatmap
+
+### Phase D — AI Chat
+
+- [ ] `POST /api/chat` SSE endpoint (wires to existing `chat/` Layer 4 agent)
+- [ ] `GET /api/chat/quota` endpoint
+- [ ] Chat quota enforced via `get_limit()` + Redis counter per user per day
+- [ ] `/chat` page: ChatWindow + ToolCallIndicator + QuickPrompts
+- [ ] QuotaChip in Sidebar — hard 429 block + reset time shown
+
+### Phase E — Predictions + Portfolio
+
+- [ ] `db/migrations/024_portfolio.sql` — portfolio_holdings (user_id, ticker, quantity, avg_cost)
+- [ ] `GET /api/stocks/{ticker}/predictions/{horizon}` (pro only via `check_feature`)
+- [ ] `/predict/[ticker]`: PredictionFanChart + Monte Carlo bands
+- [ ] Portfolio CRUD endpoints + `/api/portfolio/analysis` (pro only)
+- [ ] `/portfolio` page: holdings table, P&L, sector pie chart
+
+### Phase F — Reports + Polish
+
+- [ ] `POST /api/reports/generate` + download (pro only, WeasyPrint)
+- [ ] `/reports` page
+- [ ] `/settings` page: profile + tier info + upgrade CTA
+- [ ] Mobile responsive pass (all pages)
+- [ ] Error boundaries, loading skeletons, empty states
+- [ ] API integration tests (auth flow + tier gating + feature flags)
 
 ---
 
-## Layer 6 — Frontend (FUTURE)
+## Layer 6 — Frontend (ACTIVE)
 
-> Not started. Requires backend API.
+> Part of same spec as Layer 5. See phases A–F above.
+> Stack: Next.js 16.2.6, Tailwind v4, shadcn/ui dark, TanStack Query v5
+> Design tokens + component tree in spec doc.
 
-- [ ] Next.js 14 app setup (App Router, TypeScript, Tailwind)
-- [ ] `/dashboard` — market overview, DSEX live, movers, heatmap
-- [ ] `/stocks` — screener with filters
-- [ ] `/stocks/[ticker]` — deep dive: price chart + 10yr fundamentals + shareholding
-- [ ] `/predict/[ticker]` — ML fan chart + Monte Carlo scenarios
-- [ ] `/chat` — LLM analyst chat with streaming + tool indicators
-- [ ] `/portfolio` — holdings + P&L + risk metrics + rebalancing
-- [ ] `/sectors` — sector PE + performance comparison
-- [ ] `/reports` — generate + download PDF reports
-- [ ] TradingView Lightweight Charts integration
-- [ ] Recharts for fundamentals (EPS, revenue, PE history)
-- [ ] Stock Health Score gauge component (0–100)
-- [ ] Bengali language toggle
-- [ ] Mobile responsive
-- [ ] Disclaimer banner on all pages
+- [ ] All pages built (dashboard, stocks, predict, sectors, chat, portfolio, reports, settings)
+- [ ] TradingView Lightweight Charts v5 — PriceChart + PredictionFanChart
+- [ ] Recharts v2 — FundamentalsChart (EPS/revenue/PE/dividends)
+- [ ] HealthGauge SVG component (0–100, color-coded)
+- [ ] Dark terminal theme applied globally (#0a0a0f base)
+- [ ] Mobile responsive (all pages)
+- [ ] Disclaimer banner on every authenticated page
 
 ---
 
