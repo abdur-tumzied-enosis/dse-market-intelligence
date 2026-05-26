@@ -2,8 +2,11 @@
 from __future__ import annotations
 from typing import Any
 from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi.responses import StreamingResponse
 from api.deps import get_current_user, get_db
 from api.schemas.market import HeatmapItem, MarketSummary, TopMover, MarketIndices
+import asyncio
+import json as _json
 import httpx
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -176,3 +179,37 @@ async def market_heatmap(pool=Depends(get_db), _user=Depends(get_current_user)):
     result = [dict(r) for r in rows]
     await _cache_set(cache_key, result, ttl=300)
     return result
+
+
+async def _generate_market_events(get_indices_fn=None, interval: int = 30):
+    """Async generator that yields SSE-formatted market index events."""
+    if get_indices_fn is None:
+        async def get_indices_fn():
+            cache_key = "cache:api:market:indices"
+            cached = await _cache_get(cache_key)
+            if cached:
+                return cached
+            result = await _fetch_indices_from_amarstock()
+            await _cache_set(cache_key, result, ttl=60)
+            return result
+
+    while True:
+        try:
+            data = await get_indices_fn()
+            yield f"data: {_json.dumps(data)}\n\n"
+        except Exception:
+            yield f"data: {_json.dumps({'error': 'fetch_failed'})}\n\n"
+        if interval > 0:
+            await asyncio.sleep(interval)
+        else:
+            return  # test mode: yield once then stop
+
+
+@router.get("/stream")
+async def market_stream():
+    """SSE stream of market indices — no auth required (public data)."""
+    return StreamingResponse(
+        _generate_market_events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
