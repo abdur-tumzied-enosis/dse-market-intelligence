@@ -67,3 +67,106 @@ async def test_get_limit_returns_zero_when_no_row():
     result = await get_limit(pool, redis, "unknown_tier", "api_calls_per_day")
 
     assert result == 0
+
+
+@pytest.mark.asyncio
+async def test_check_feature_grant_override_wins():
+    from api.access import check_feature
+    import json
+
+    pool, conn = _make_pool([])
+    overrides_json = json.dumps({"predictions": {"override": "grant", "expires_at": None}})
+    redis = _make_redis(get_value=overrides_json)
+
+    result = await check_feature(pool, redis, user_id=1, tier="free", flag_key="predictions")
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_feature_revoke_override_wins():
+    from api.access import check_feature
+    import json
+
+    pool, conn = _make_pool([])
+    overrides_json = json.dumps({"predictions": {"override": "revoke", "expires_at": None}})
+    redis = _make_redis(get_value=overrides_json)
+
+    result = await check_feature(pool, redis, user_id=1, tier="pro", flag_key="predictions")
+
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_feature_expired_override_falls_back_to_flag():
+    from api.access import check_feature
+    import json
+
+    pool, conn = _make_pool([])
+    past = "2020-01-01T00:00:00+00:00"
+    overrides_json = json.dumps({"predictions": {"override": "grant", "expires_at": past}})
+
+    call_count = 0
+
+    async def _redis_get(key):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return overrides_json
+        return "true"
+
+    redis = AsyncMock()
+    redis.get = _redis_get
+    redis.set = AsyncMock()
+
+    result = await check_feature(pool, redis, user_id=1, tier="pro", flag_key="predictions")
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_feature_no_override_uses_flag():
+    from api.access import check_feature
+
+    pool, conn = _make_pool([])
+
+    call_count = 0
+
+    async def _redis_get(key):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return "{}"
+        return "true"
+
+    redis = AsyncMock()
+    redis.get = _redis_get
+    redis.set = AsyncMock()
+
+    result = await check_feature(pool, redis, user_id=2, tier="pro", flag_key="chat")
+
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_check_feature_flag_disabled_returns_false():
+    from api.access import check_feature
+
+    pool, conn = _make_pool([])
+
+    call_count = 0
+
+    async def _redis_get(key):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return "{}"
+        return "false"
+
+    redis = AsyncMock()
+    redis.get = _redis_get
+    redis.set = AsyncMock()
+
+    result = await check_feature(pool, redis, user_id=3, tier="free", flag_key="predictions")
+
+    assert result is False
