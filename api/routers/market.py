@@ -165,17 +165,35 @@ async def market_heatmap(pool=Depends(get_db), _user=Depends(get_current_user)):
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             """
-            WITH latest AS (
-                SELECT DISTINCT ON (sp.ticker) sp.ticker, sp.change_pct, sp.value_bdt
+            WITH ranked AS (
+                SELECT sp.ticker, sp.time, sp.close, sp.value_bdt,
+                       DENSE_RANK() OVER (
+                           PARTITION BY sp.ticker ORDER BY sp.time::date DESC
+                       ) AS day_rank
                 FROM stock_prices sp
                 JOIN companies c ON c.ticker = sp.ticker
                 WHERE c.is_active = true
-                ORDER BY sp.ticker, sp.time DESC
+            ),
+            today AS (
+                SELECT ticker, MAX(close) AS close, MAX(value_bdt) AS value_bdt
+                FROM ranked WHERE day_rank = 1
+                GROUP BY ticker
+            ),
+            yesterday AS (
+                SELECT ticker, MAX(close) AS close
+                FROM ranked WHERE day_rank = 2
+                GROUP BY ticker
             )
-            SELECT l.ticker, c.sector, l.change_pct, l.value_bdt
-            FROM latest l
-            JOIN companies c ON c.ticker = l.ticker
-            ORDER BY c.sector, l.value_bdt DESC NULLS LAST
+            SELECT t.ticker, c.sector,
+                CASE WHEN y.close IS NOT NULL AND y.close > 0
+                    THEN ROUND(((t.close - y.close) / y.close * 100)::numeric, 2)
+                    ELSE NULL
+                END AS change_pct,
+                t.value_bdt
+            FROM today t
+            JOIN companies c ON c.ticker = t.ticker
+            LEFT JOIN yesterday y ON y.ticker = t.ticker
+            ORDER BY c.sector, t.value_bdt DESC NULLS LAST
             """
         )
 
