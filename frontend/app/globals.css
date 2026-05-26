@@ -46,6 +46,17 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Design tokens from spec */
+  --color-base: #0a0a0f;
+  --color-surface: #111118;
+  --color-elevated: #1a1a24;
+  --color-border-custom: #2a2a3a;
+  --color-text-muted: #6b6b80;
+  --color-accent-green: #00d4a4;
+  --color-accent-red: #ff4d6a;
+  --color-accent-blue: #4d9eff;
+  --color-accent-gold: #f5c842;
 }
 
 :root {
@@ -115,6 +126,16 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #0a0a0f;
+  color: #e8e8f0;
+  font-family: var(--font-inter), system-ui, sans-serif;
 }
 
 @layer base {
