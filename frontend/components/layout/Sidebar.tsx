@@ -34,7 +34,7 @@ export default function Sidebar() {
             key={href}
             href={href}
             className={`flex items-center px-5 py-2.5 text-sm transition-colors ${
-              pathname.startsWith(href)
+              pathname === href || pathname.startsWith(href + '/')
                 ? 'bg-elevated text-white'
                 : 'text-muted hover:text-white hover:bg-elevated'
             }`}
