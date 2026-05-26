@@ -28,6 +28,7 @@ class HeatmapItem(BaseModel):
     change_pct: float | None
     ltp: float | None
     value_bdt: float | None
+    market_cap: float | None
 
 
 class MarketIndices(BaseModel):

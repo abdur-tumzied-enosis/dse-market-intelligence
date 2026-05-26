@@ -41,4 +41,5 @@ export interface HeatmapItem {
   change_pct: number | null
   ltp: number | null
   value_bdt: number | null
+  market_cap: number | null
 }

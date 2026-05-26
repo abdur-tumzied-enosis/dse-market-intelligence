@@ -177,6 +177,7 @@ async def market_heatmap(_user=Depends(get_current_user)):
     for item in raw:
         try:
             val = item.get("Value")
+            mc  = item.get("MarketCap")
             result.append({
                 "ticker": str(item["Scrip"]).strip(),
                 "name": str(item.get("FullName") or item["Scrip"]).strip(),
@@ -184,6 +185,7 @@ async def market_heatmap(_user=Depends(get_current_user)):
                 "change_pct": float(item["ChangePer"]),
                 "ltp": float(item["LTP"]),
                 "value_bdt": float(val) if val not in (None, "", "0", 0) else None,
+                "market_cap": float(mc) if mc not in (None, "", "0", 0) else None,
             })
         except (KeyError, TypeError, ValueError):
             continue
