@@ -29,6 +29,16 @@ async function put<T>(path: string, body?: unknown): Promise<T> {
   return res.json();
 }
 
+async function patch<T>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+  return res.json();
+}
+
 async function del<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
@@ -225,6 +235,10 @@ export const api = {
     features: () => get<FeatureFlag[]>("/access/features"),
     updateFeature: (flagKey: string, tier: string, enabled: boolean) =>
       put(`/access/features/${flagKey}/${tier}`, { enabled }),
+    listUsers: (limit = 500) =>
+      get<UserSummary[]>(`/access/users?limit=${limit}`),
+    updateUser: (userId: number, fields: { tier?: string; is_active?: boolean }) =>
+      patch<UserSummary>(`/access/users/${userId}`, fields),
     searchUsers: (email: string) =>
       get<UserSummary[]>(`/access/users?email=${encodeURIComponent(email)}`),
     userOverrides: (userId: number) =>

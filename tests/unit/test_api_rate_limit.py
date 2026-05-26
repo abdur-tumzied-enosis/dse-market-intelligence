@@ -3,7 +3,6 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
-import pytest
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 from fastapi import FastAPI
@@ -112,3 +111,4 @@ def test_limit_loaded_from_db_on_cache_miss():
     client = TestClient(app)
     resp = client.get("/api/stocks", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
+    redis_mock.set.assert_called()

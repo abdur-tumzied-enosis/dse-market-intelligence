@@ -20,7 +20,7 @@ export default async function AccessPage({
   const tabs = [
     { key: "limits", label: "Tier Limits" },
     { key: "flags",  label: "Feature Flags" },
-    { key: "users",  label: "User Overrides" },
+    { key: "users",  label: "Users" },
   ];
 
   return (

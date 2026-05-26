@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 import redis.asyncio as aioredis
@@ -35,7 +36,12 @@ async def cache_get(key: str) -> Any | None:
 
 async def cache_set(key: str, value: Any, ttl: int) -> None:
     r = await get_redis()
-    await r.set(key, json.dumps(value, default=str), ex=ttl)
+    def _default(obj: Any) -> Any:
+        if isinstance(obj, Decimal):
+            return float(obj)
+        return str(obj)
+
+    await r.set(key, json.dumps(value, default=_default), ex=ttl)
 
 
 async def cache_delete_pattern(pattern: str) -> int:

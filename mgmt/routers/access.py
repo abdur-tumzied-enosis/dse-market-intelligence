@@ -27,6 +27,11 @@ class OverrideCreate(BaseModel):
     note: str | None = None
 
 
+class UserUpdate(BaseModel):
+    tier: str | None = Field(default=None, pattern="^(free|pro|pro_plus|institution)$")
+    is_active: bool | None = None
+
+
 # ── Tier Limits ──────────────────────────────────────────────────────
 
 @router.get("/tier-limits")
@@ -104,6 +109,31 @@ async def search_users(email: str = "", limit: int = 20, pool=Depends(get_db)):
             limit,
         )
     return [dict(r) for r in rows]
+
+
+@router.patch("/users/{user_id}")
+async def update_user(user_id: int, body: UserUpdate, pool=Depends(get_db)):
+    from fastapi import HTTPException
+    if body.tier is None and body.is_active is None:
+        raise HTTPException(status_code=422, detail="Provide at least one field to update")
+    sets, args = [], [user_id]
+    if body.tier is not None:
+        args.append(body.tier)
+        sets.append(f"tier = ${len(args)}")
+    if body.is_active is not None:
+        args.append(body.is_active)
+        sets.append(f"is_active = ${len(args)}")
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE users SET {', '.join(sets)}, updated_at = NOW() WHERE id = $1 RETURNING id, email, tier, is_active",
+            *args,
+        )
+    if row is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    await cache_delete_pattern(f"access:limits:*")
+    await cache_delete_pattern(f"access:flags:*")
+    await cache_delete_pattern(f"access:overrides:{user_id}")
+    return dict(row)
 
 
 @router.get("/users/{user_id}/overrides")

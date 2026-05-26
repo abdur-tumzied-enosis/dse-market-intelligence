@@ -1,7 +1,7 @@
 // mgmt-ui/app/access/UserOverridesTab.tsx
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { UserSummary, UserOverride, api } from "@/lib/api";
 
 const FLAG_OPTIONS = [
@@ -12,40 +12,84 @@ const FLAG_OPTIONS = [
   "screener_health_score",
 ];
 
+const TIERS = ["free", "pro", "pro_plus", "institution"] as const;
+type Tier = typeof TIERS[number];
+
+const TIER_COLORS: Record<string, string> = {
+  free:        "bg-gray-800 text-gray-400",
+  pro:         "bg-blue-900 text-blue-300",
+  pro_plus:    "bg-purple-900 text-purple-300",
+  institution: "bg-yellow-900 text-yellow-300",
+};
+
 export default function UserOverridesTab() {
-  const [query, setQuery] = useState("");
-  const [users, setUsers] = useState<UserSummary[]>([]);
+  const [allUsers, setAllUsers]         = useState<UserSummary[]>([]);
+  const [query, setQuery]               = useState("");
+  const [loading, setLoading]           = useState(true);
+  const [error, setError]               = useState<string | null>(null);
+
   const [selectedUser, setSelectedUser] = useState<UserSummary | null>(null);
-  const [overrides, setOverrides] = useState<UserOverride[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [overrides, setOverrides]       = useState<UserOverride[]>([]);
+  const [loadingOverrides, setLoadingOverrides] = useState(false);
+  const [editingTierId, setEditingTierId] = useState<number | null>(null);
+  const [savingTier, setSavingTier]       = useState(false);
 
   // New override form
-  const [newFlag, setNewFlag] = useState(FLAG_OPTIONS[0]);
+  const [newFlag, setNewFlag]         = useState(FLAG_OPTIONS[0]);
   const [newOverride, setNewOverride] = useState<"grant" | "revoke">("grant");
-  const [newExpiry, setNewExpiry] = useState("");
-  const [newNote, setNewNote] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [newExpiry, setNewExpiry]     = useState("");
+  const [newNote, setNewNote]         = useState("");
+  const [adding, setAdding]           = useState(false);
 
-  async function search() {
-    if (!query.trim()) return;
-    setSearching(true);
+  useEffect(() => {
+    api.access.listUsers()
+      .then(setAllUsers)
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allUsers;
+    return allUsers.filter((u) => u.email.toLowerCase().includes(q));
+  }, [allUsers, query]);
+
+  async function changeTier(user: UserSummary, tier: Tier) {
+    setSavingTier(true);
     setError(null);
     try {
-      const results = await api.access.searchUsers(query);
-      setUsers(results);
+      const updated = await api.access.updateUser(user.id, { tier });
+      setAllUsers((prev) => prev.map((u) => u.id === updated.id ? updated : u));
+      if (selectedUser?.id === updated.id) setSelectedUser(updated);
     } catch (e) {
       setError(String(e));
     } finally {
-      setSearching(false);
+      setSavingTier(false);
+      setEditingTierId(null);
+    }
+  }
+
+  async function toggleActive(user: UserSummary) {
+    setError(null);
+    try {
+      const updated = await api.access.updateUser(user.id, { is_active: !user.is_active });
+      setAllUsers((prev) => prev.map((u) => u.id === updated.id ? updated : u));
+      if (selectedUser?.id === updated.id) setSelectedUser(updated);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
   async function selectUser(user: UserSummary) {
     setSelectedUser(user);
-    setError(null);
-    const data = await api.access.userOverrides(user.id);
-    setOverrides(data);
+    setOverrides([]);
+    setLoadingOverrides(true);
+    try {
+      const data = await api.access.userOverrides(user.id);
+      setOverrides(data);
+    } finally {
+      setLoadingOverrides(false);
+    }
   }
 
   async function addOverride() {
@@ -85,62 +129,111 @@ export default function UserOverridesTab() {
 
   return (
     <div className="space-y-6">
-      {/* Search */}
-      <div className="flex gap-2">
+      {/* Search / filter */}
+      <div className="flex gap-2 items-center">
         <input
           type="text"
-          placeholder="Search by email…"
+          placeholder="Filter by email…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && search()}
-          className="flex-1 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white text-sm"
+          className="w-72 bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white text-sm"
         />
-        <button
-          onClick={search}
-          disabled={searching}
-          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white text-sm rounded disabled:opacity-50"
-        >
-          {searching ? "…" : "Search"}
-        </button>
+        <span className="text-gray-500 text-xs">
+          {loading ? "Loading…" : `${filtered.length} user${filtered.length !== 1 ? "s" : ""}`}
+        </span>
       </div>
 
       {error && <p className="text-red-400 text-sm">{error}</p>}
 
-      {/* User list */}
-      {users.length > 0 && (
-        <div className="space-y-1">
-          {users.map((u) => (
-            <button
-              key={u.id}
-              onClick={() => selectUser(u)}
-              className={`w-full text-left flex items-center gap-3 px-4 py-2 rounded border text-sm transition-colors ${
-                selectedUser?.id === u.id
-                  ? "border-green-600 bg-green-950 text-white"
-                  : "border-gray-800 bg-gray-900 text-gray-300 hover:border-gray-600"
-              }`}
-            >
-              <span className="flex-1">{u.email}</span>
-              <span
-                className={`text-xs px-2 py-0.5 rounded ${
-                  u.tier === "pro" ? "bg-blue-900 text-blue-300" : "bg-gray-800 text-gray-400"
-                }`}
-              >
-                {u.tier}
-              </span>
-              {!u.is_active && <span className="text-xs text-red-400">inactive</span>}
-            </button>
-          ))}
+      {/* Users table */}
+      {!loading && (
+        <div className="overflow-x-auto rounded border border-gray-800">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-800 bg-gray-900/60">
+                <th className="text-left px-4 py-2 text-gray-400 font-medium">Email</th>
+                <th className="text-left px-4 py-2 text-gray-400 font-medium">Tier</th>
+                <th className="text-left px-4 py-2 text-gray-400 font-medium">Status</th>
+                <th className="text-left px-4 py-2 text-gray-400 font-medium">ID</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-4 py-6 text-center text-gray-600 text-sm">
+                    No users found
+                  </td>
+                </tr>
+              )}
+              {filtered.map((u) => (
+                <tr
+                  key={u.id}
+                  onClick={() => selectUser(u)}
+                  className={`border-b border-gray-800/50 cursor-pointer transition-colors ${
+                    selectedUser?.id === u.id
+                      ? "bg-green-950/60"
+                      : "hover:bg-gray-800/40"
+                  }`}
+                >
+                  <td className="px-4 py-3 text-white">{u.email}</td>
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    {editingTierId === u.id ? (
+                      <select
+                        autoFocus
+                        defaultValue={u.tier}
+                        disabled={savingTier}
+                        onChange={(e) => changeTier(u, e.target.value as Tier)}
+                        onBlur={() => setEditingTierId(null)}
+                        className="bg-gray-900 border border-gray-600 rounded px-1 py-0.5 text-white text-xs disabled:opacity-50"
+                      >
+                        {TIERS.map((t) => (
+                          <option key={t} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <button
+                        onClick={() => setEditingTierId(u.id)}
+                        title="Click to change tier"
+                        className={`text-xs px-2 py-0.5 rounded font-medium hover:ring-1 hover:ring-white/30 transition-all ${
+                          TIER_COLORS[u.tier] ?? "bg-gray-800 text-gray-400"
+                        }`}
+                      >
+                        {u.tier}
+                      </button>
+                    )}
+                  </td>
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => toggleActive(u)}
+                      title={u.is_active ? "Click to deactivate" : "Click to activate"}
+                      className={`text-xs hover:underline transition-colors ${
+                        u.is_active ? "text-green-400 hover:text-red-400" : "text-red-400 hover:text-green-400"
+                      }`}
+                    >
+                      {u.is_active ? "active" : "inactive"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 font-mono text-xs">{u.id}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
 
-      {/* Overrides for selected user */}
+      {/* Overrides panel for selected user */}
       {selectedUser && (
-        <div className="space-y-4">
+        <div className="border border-gray-800 rounded p-4 space-y-4">
           <h2 className="text-sm text-gray-400">
-            Overrides for <span className="text-white">{selectedUser.email}</span>
+            Overrides for{" "}
+            <span className="text-white font-medium">{selectedUser.email}</span>
           </h2>
 
-          {overrides.length === 0 && (
+          {loadingOverrides && (
+            <p className="text-gray-600 text-sm">Loading overrides…</p>
+          )}
+
+          {!loadingOverrides && overrides.length === 0 && (
             <p className="text-gray-600 text-sm">No overrides. Tier defaults apply.</p>
           )}
 
@@ -165,10 +258,14 @@ export default function UserOverridesTab() {
               </span>
               {o.expires_at && (
                 <span className="text-xs text-gray-500">
-                  {isExpired(o) ? "expired" : `until ${new Date(o.expires_at).toLocaleDateString()}`}
+                  {isExpired(o)
+                    ? "expired"
+                    : `until ${new Date(o.expires_at).toLocaleDateString()}`}
                 </span>
               )}
-              {o.note && <span className="text-xs text-gray-500 italic">{o.note}</span>}
+              {o.note && (
+                <span className="text-xs text-gray-500 italic">{o.note}</span>
+              )}
               <button
                 onClick={() => removeOverride(o.flag_key)}
                 className="text-gray-600 hover:text-red-400 text-xs ml-2"
@@ -179,7 +276,7 @@ export default function UserOverridesTab() {
           ))}
 
           {/* Add override form */}
-          <div className="border border-gray-800 rounded p-4 space-y-3">
+          <div className="border-t border-gray-800 pt-4 space-y-2">
             <p className="text-xs text-gray-400 font-medium">Add Override</p>
             <div className="flex gap-2 flex-wrap">
               <select
