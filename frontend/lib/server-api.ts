@@ -1,0 +1,28 @@
+// frontend/lib/server-api.ts
+import { cookies } from 'next/headers'
+import type { MarketIndices, MarketMovers, MarketSummary, HeatmapItem } from './types'
+
+const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000'
+
+export async function serverGet<T>(path: string): Promise<T> {
+  const cookieStore = await cookies()
+  const token = cookieStore.get('dse_access_token')?.value
+  const headers: Record<string, string> = {}
+  if (token) headers['Authorization'] = `Bearer ${token}`
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers,
+    next: { revalidate: 0 },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json() as Promise<T>
+}
+
+export const serverApi = {
+  market: {
+    indices: () => serverGet<MarketIndices>('/api/market/indices'),
+    movers: () => serverGet<MarketMovers>('/api/market/movers'),
+    heatmap: () => serverGet<HeatmapItem[]>('/api/market/heatmap'),
+    summary: () => serverGet<MarketSummary>('/api/market/summary'),
+  },
+}
