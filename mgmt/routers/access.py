@@ -125,8 +125,14 @@ async def list_user_overrides(user_id: int, pool=Depends(get_db)):
 async def create_user_override(user_id: int, body: OverrideCreate, pool=Depends(get_db)):
     expires = None
     if body.expires_at:
-        from datetime import datetime
-        expires = datetime.fromisoformat(body.expires_at)
+        from datetime import datetime, timezone
+        from fastapi import HTTPException
+        try:
+            expires = datetime.fromisoformat(body.expires_at)
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="expires_at must be a valid ISO 8601 datetime")
 
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
