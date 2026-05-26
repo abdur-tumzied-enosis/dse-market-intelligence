@@ -89,3 +89,6 @@ data/pdfs/
 
 # Playwright browsers (installed in Docker)
 playwright-browsers/
+
+data/amarstock_csv/*
+test-data/*

@@ -34,6 +34,7 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
         """
         SELECT f.ticker, f.fiscal_year,
                f.eps, f.nav, f.pe, f.cash_div_pct, f.stock_div_pct,
+               c.sector,
                (
                    SELECT sp3.close FROM stock_prices sp3
                    WHERE sp3.ticker = f.ticker
@@ -49,6 +50,7 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
                    ORDER BY sp4.time ASC LIMIT 1
                ) AS price_6m_later
         FROM fundamentals f
+        JOIN companies c ON c.ticker = f.ticker
         WHERE f.fiscal_year IS NOT NULL AND f.eps IS NOT NULL
         ORDER BY f.ticker, f.fiscal_year
         """
@@ -56,7 +58,7 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
 
     df = pd.DataFrame(list(rows), columns=[
         "ticker", "fiscal_year", "eps", "nav", "pe",
-        "cash_div_pct", "stock_div_pct",
+        "cash_div_pct", "stock_div_pct", "sector",
         "price_at_fy_end", "price_6m_later",
     ])
     for col in ["eps", "nav", "pe", "cash_div_pct", "stock_div_pct",
@@ -70,7 +72,8 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
         feats["pe_raw"] = grp["pe"].values
         feats["nav_raw"] = grp["nav"].astype(float).replace(0, np.nan).values
         feats["ticker"] = ticker
-        feats["fiscal_year"] = grp["fiscal_year"]
+        feats["fiscal_year"] = grp["fiscal_year"].values
+        feats["sector"] = grp["sector"].values
         feats["price_at_fy_end"] = grp["price_at_fy_end"].values
         feats["price_6m_later"] = grp["price_6m_later"].values
         feature_rows.append(feats)
@@ -78,9 +81,9 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.Series]:
     full_df = pd.concat(feature_rows, ignore_index=True)
     full_df = full_df.dropna(subset=["price_at_fy_end", "price_6m_later"])
 
-    # cross-sectional PE ratio (avoids dead sector_pe table)
-    fy_median_pe = full_df.groupby("fiscal_year")["pe_raw"].transform("median")
-    full_df["pe_vs_sector"] = (full_df["pe_raw"] / fy_median_pe.replace(0, np.nan)).clip(0, 10)
+    # sector-specific median PE: same fiscal year + same sector
+    sector_median_pe = full_df.groupby(["fiscal_year", "sector"])["pe_raw"].transform("median")
+    full_df["pe_vs_sector"] = (full_df["pe_raw"] / sector_median_pe.replace(0, np.nan)).clip(0, 10)
 
     # price-to-book
     full_df["pb_ratio"] = (full_df["price_at_fy_end"] / full_df["nav_raw"]).clip(0, 20)

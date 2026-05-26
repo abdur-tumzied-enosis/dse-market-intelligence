@@ -107,6 +107,9 @@ clean-volumes: ## WARNING: destroy Docker volumes (wipes DB data)
 seed-companies: ## Seed companies table from DSE company list
 	$(PYTHON) -m db.seeds.companies
 
+load-historical: ## Load data/amarstock_csv/ into stock_prices (~1.5M rows, idempotent)
+	$(PYTHON) scripts/load_amarstock_historical.py
+
 bulk-historical: ## Bulk download AmarStock CSVs (2012-present). Slow — run once.
 	$(PYTHON) -m extraction.bulk_load.amarstock_historical
 

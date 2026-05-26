@@ -66,13 +66,16 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
                      AND sp.time <= make_date(f.fiscal_year + 1, 1, 31)
                    ORDER BY sp.time DESC LIMIT 1
                ) AS price_at_fy_end,
-               -- cross-sectional median PE for this fiscal year across all tickers
+               -- sector-specific median PE for this fiscal year
                (
                    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY f2.pe)
                    FROM fundamentals f2
+                   JOIN companies c2 ON c2.ticker = f2.ticker
                    WHERE f2.fiscal_year = f.fiscal_year AND f2.pe > 0
+                     AND c2.sector = c.sector
                ) AS median_pe
         FROM fundamentals f
+        JOIN companies c ON c.ticker = f.ticker
         WHERE f.ticker = $1 AND f.fiscal_year IS NOT NULL
         ORDER BY f.fiscal_year
         """,
