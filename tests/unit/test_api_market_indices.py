@@ -42,6 +42,8 @@ async def test_fetch_indices_from_amarstock_maps_fields():
     assert result["advance"] == 271
     assert result["decline"] == 67
     assert result["unchanged"] == 68
+    assert result["ds30_change_pct"] == pytest.approx(1.43)
+    assert result["dses_change_pct"] == pytest.approx(0.84)
 
 
 @pytest.mark.asyncio
