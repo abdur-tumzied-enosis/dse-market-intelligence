@@ -32,7 +32,7 @@ function HeatmapCell({ item }: { item: HeatmapItem }) {
       title={`${item.ticker} — ${item.sector}`}
     >
       <span className="text-[10px] font-semibold text-white leading-none">{item.ticker}</span>
-      <span className="text-[10px] text-muted mt-0.5">
+      <span className="text-[10px] text-white/70 mt-0.5">
         {pct !== null ? `${pct > 0 ? '+' : ''}${pct.toFixed(1)}%` : '—'}
       </span>
     </div>
