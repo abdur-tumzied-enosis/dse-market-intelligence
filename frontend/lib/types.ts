@@ -43,3 +43,117 @@ export interface HeatmapItem {
   value_bdt: number | null
   market_cap: number | null
 }
+
+// ─── Stocks ──────────────────────────────────────────────────────────────────
+
+export interface StockListItem {
+  ticker: string
+  name: string
+  sector: string
+  category: string | null
+  market_cap_bdt: number | null
+  is_active: boolean
+}
+
+export interface PagedResponse<T> {
+  items: T[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface CompanyInfo {
+  ticker: string
+  name: string
+  sector: string
+  category: string | null
+  market_cap_bdt: number | null
+  is_active: boolean
+  listing_date: string | null
+  isin: string | null
+}
+
+export interface LatestPrice {
+  close: number
+  change_pct: number | null
+  volume: number | null
+  value_bdt: number | null
+  high: number | null
+  low: number | null
+  time: string
+}
+
+export interface LatestFundamentals {
+  eps: number | null
+  nav: number | null
+  pe: number | null
+  cash_div_pct: number | null
+  stock_div_pct: number | null
+  sponsor_pct: number | null
+  public_pct: number | null
+  fiscal_year: number | null
+}
+
+export interface HealthScore {
+  health_score: number | null
+  fundamental_score: number | null
+  momentum_score: number | null
+  scored_at: string
+}
+
+export interface StockDetail {
+  company: CompanyInfo
+  latest_price: LatestPrice | null
+  fundamentals: LatestFundamentals | null
+  health_score: HealthScore | null
+}
+
+export interface OHLCVPoint {
+  day: string
+  open: number | null
+  high: number | null
+  low: number | null
+  close: number
+  volume: number | null
+  value_bdt: number | null
+}
+
+export interface OHLCVResponse {
+  ticker: string
+  interval: string
+  items: OHLCVPoint[]
+}
+
+export interface FundamentalsRow {
+  fiscal_year: number | null
+  eps: number | null
+  nav: number | null
+  pe: number | null
+  cash_div_pct: number | null
+  stock_div_pct: number | null
+  sponsor_pct: number | null
+  public_pct: number | null
+  fetched_at: string
+}
+
+export interface FundamentalsResponse {
+  ticker: string
+  items: FundamentalsRow[]
+}
+
+export interface AnnouncementRow {
+  id: number
+  published_at: string
+  headline: string
+  announcement_type: string | null
+  eps_value: number | null
+  eps_period: string | null
+  dividend_cash_pct: number | null
+  dividend_stock_pct: number | null
+}
+
+export interface AnnouncementsResponse {
+  ticker: string
+  total: number
+  items: AnnouncementRow[]
+}

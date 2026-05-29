@@ -1,6 +1,10 @@
 // frontend/lib/server-api.ts
 import { cookies } from 'next/headers'
-import type { MarketIndices, MarketMovers, MarketSummary, HeatmapItem } from './types'
+import type {
+  MarketIndices, MarketMovers, MarketSummary, HeatmapItem,
+  StockDetail, FundamentalsResponse, PagedResponse, StockListItem,
+  AnnouncementsResponse,
+} from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000'
 
@@ -24,5 +28,17 @@ export const serverApi = {
     movers: () => serverGet<MarketMovers>('/api/market/movers'),
     heatmap: () => serverGet<HeatmapItem[]>('/api/market/heatmap'),
     summary: () => serverGet<MarketSummary>('/api/market/summary'),
+  },
+  stocks: {
+    list: (sector?: string, limit = 200, offset = 0) => {
+      const p = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      if (sector) p.set('sector', sector)
+      return serverGet<PagedResponse<StockListItem>>(`/api/stocks?${p}`)
+    },
+    detail: (ticker: string) => serverGet<StockDetail>(`/api/stocks/${ticker.toUpperCase()}`),
+    fundamentals: (ticker: string) =>
+      serverGet<FundamentalsResponse>(`/api/stocks/${ticker.toUpperCase()}/fundamentals`),
+    announcements: (ticker: string) =>
+      serverGet<AnnouncementsResponse>(`/api/stocks/${ticker.toUpperCase()}/announcements`),
   },
 }

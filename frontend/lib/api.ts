@@ -63,4 +63,10 @@ export const api = {
         { email, password, ...(fullName ? { full_name: fullName } : {}) },
       ),
   },
+  stocks: {
+    prices: (ticker: string, params: string) =>
+      get<import('./types').OHLCVResponse>(`/api/stocks/${ticker}/prices?${params}`),
+    announcements: (ticker: string) =>
+      get<import('./types').AnnouncementsResponse>(`/api/stocks/${ticker}/announcements`),
+  },
 }
