@@ -231,9 +231,44 @@ async def job_live_prices() -> None:
     logger.info("job_live_prices: complete")
 
 
+async def _persist_index_snapshot() -> None:
+    """Upsert today's DSEX/DS30/DSES values into index_daily (one row per trading
+    day). Source: the market_indices stream. Non-fatal — logs and returns on any
+    failure so the EOD job continues; the next trading day recovers."""
+    from db.pool import get_pool
+    from extraction.registry import STREAMS
+
+    try:
+        result = await STREAMS["market_indices"].fetch()
+    except Exception as exc:
+        logger.warning("index_snapshot: fetch failed error=%s", exc)
+        return
+
+    idx = {r["index_name"]: r for r in result.data.to_dict("records")}
+
+    def _val(name: str) -> float | None:
+        row = idx.get(name)
+        return _to_float(row["value"]) if row else None
+
+    today = datetime.now(BD_TZ).date()
+    pool = await get_pool()
+    await pool.execute(
+        """
+        INSERT INTO index_daily (date, dsex, ds30, dses, source)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (date) DO UPDATE SET
+            dsex = EXCLUDED.dsex, ds30 = EXCLUDED.ds30, dses = EXCLUDED.dses,
+            source = EXCLUDED.source, ingested_at = now()
+        """,
+        today, _val("DSEX"), _val("DS30"), _val("DSES"), result.source_name,
+    )
+    logger.info("index_snapshot: upserted date=%s dsex=%s", today, _val("DSEX"))
+
+
 async def job_eod_snapshot() -> None:
     """End-of-day snapshot and calculations."""
     logger.info("job_eod_snapshot: starting")
+    await _persist_index_snapshot()
     # TODO: implement ingest_eod_snapshot()
     # TODO: update_52week_ranges()
     # TODO: update_circuit_breakers()
