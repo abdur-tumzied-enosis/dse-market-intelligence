@@ -11,6 +11,7 @@ Terminology:
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timezone
 
 import pytz
@@ -20,6 +21,103 @@ from sqlalchemy import create_engine
 
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
+
+
+# ── Pure helpers (unit-testable, no DB dependency) ─────────────────────
+
+def _to_int(value: object) -> int | None:
+    """Coerce to int; None for missing/NaN/unparseable (pandas may emit NaN floats)."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f):
+        return None
+    return int(f)
+
+
+def _to_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+_LIVE_UPSERT_SQL = """
+    INSERT INTO stock_prices
+        (time, ticker, open, high, low, close, volume, trades,
+         value_bdt, prev_close, change_pct, source, quality_flag)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    ON CONFLICT (time, ticker) DO UPDATE SET
+        high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
+        volume=EXCLUDED.volume, trades=EXCLUDED.trades,
+        value_bdt=EXCLUDED.value_bdt, change_pct=EXCLUDED.change_pct,
+        prev_close=EXCLUDED.prev_close, source=EXCLUDED.source,
+        ingested_at=NOW(), quality_flag=EXCLUDED.quality_flag
+"""
+
+
+def _market_is_open(now: datetime) -> bool:
+    """DSE trades Sun–Thu, 10:00–14:30 Asia/Dhaka. `now` must be BD-tz-aware.
+    Mon=0..Sun=6; Fri=4, Sat=5 are closed."""
+    if now.weekday() in (4, 5):
+        return False
+    minutes = now.hour * 60 + now.minute
+    return 600 <= minutes <= 870
+
+
+def _live_records_to_rows(records, bucket_time, source):
+    """Map live_prices snapshot records to stock_prices INSERT tuples.
+
+    One tuple per ticker. close = ltp (live feeds) or close. Skips rows with no
+    ticker or no close. Computes change_pct from prev_close when the feed omits
+    it. Falls back value_mn*1e6 → value_bdt. `open` is None (live feeds carry no
+    open). quality_flag='live'.
+    """
+    rows = []
+    for rec in records:
+        ticker = str(rec.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        close = rec.get("ltp")
+        if close is None:
+            close = rec.get("close")
+        close = _to_float(close)
+        if close is None:
+            continue
+
+        prev_close = _to_float(rec.get("prev_close"))
+        change_pct = _to_float(rec.get("change_pct"))
+        if change_pct is None and prev_close not in (None, 0):
+            change_pct = (close - prev_close) / prev_close * 100.0
+
+        value_bdt = _to_float(rec.get("value_bdt"))
+        if value_bdt is None:
+            value_mn = _to_float(rec.get("value_mn"))
+            if value_mn is not None:
+                value_bdt = value_mn * 1_000_000
+
+        rows.append((
+            bucket_time,                    # $1  time (trading-day bucket)
+            ticker,                         # $2  ticker
+            None,                           # $3  open (not in live feeds)
+            _to_float(rec.get("high")),     # $4  high
+            _to_float(rec.get("low")),      # $5  low
+            close,                          # $6  close (= ltp)
+            _to_int(rec.get("volume")),     # $7  volume
+            _to_int(rec.get("trades")),     # $8  trades
+            value_bdt,                      # $9  value_bdt
+            prev_close,                     # $10 prev_close
+            change_pct,                     # $11 change_pct
+            source,                         # $12 source
+            "live",                         # $13 quality_flag
+        ))
+    return rows
 
 
 def get_scheduler(database_url: str) -> AsyncIOScheduler:
