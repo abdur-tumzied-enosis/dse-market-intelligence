@@ -240,29 +240,28 @@ async def _persist_index_snapshot() -> None:
 
     try:
         result = await STREAMS["market_indices"].fetch()
+        idx = {r["index_name"]: r for r in result.data.to_dict("records")}
+
+        def _val(name: str) -> float | None:
+            row = idx.get(name)
+            return _to_float(row.get("value")) if row else None
+
+        today = datetime.now(BD_TZ).date()
+        dsex, ds30, dses = _val("DSEX"), _val("DS30"), _val("DSES")
+        pool = await get_pool()
+        await pool.execute(
+            """
+            INSERT INTO index_daily (date, dsex, ds30, dses, source)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (date) DO UPDATE SET
+                dsex = EXCLUDED.dsex, ds30 = EXCLUDED.ds30, dses = EXCLUDED.dses,
+                source = EXCLUDED.source, ingested_at = now()
+            """,
+            today, dsex, ds30, dses, result.source_name,
+        )
+        logger.info("index_snapshot: upserted date=%s dsex=%s", today, dsex)
     except Exception as exc:
-        logger.warning("index_snapshot: fetch failed error=%s", exc)
-        return
-
-    idx = {r["index_name"]: r for r in result.data.to_dict("records")}
-
-    def _val(name: str) -> float | None:
-        row = idx.get(name)
-        return _to_float(row["value"]) if row else None
-
-    today = datetime.now(BD_TZ).date()
-    pool = await get_pool()
-    await pool.execute(
-        """
-        INSERT INTO index_daily (date, dsex, ds30, dses, source)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (date) DO UPDATE SET
-            dsex = EXCLUDED.dsex, ds30 = EXCLUDED.ds30, dses = EXCLUDED.dses,
-            source = EXCLUDED.source, ingested_at = now()
-        """,
-        today, _val("DSEX"), _val("DS30"), _val("DSES"), result.source_name,
-    )
-    logger.info("index_snapshot: upserted date=%s dsex=%s", today, _val("DSEX"))
+        logger.warning("index_snapshot: failed error=%s", exc)
 
 
 async def job_eod_snapshot() -> None:
