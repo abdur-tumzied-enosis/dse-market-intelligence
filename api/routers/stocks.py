@@ -86,7 +86,7 @@ async def list_stocks(
     pool=Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    q = q.strip() if q else None
+    q = q.strip().lower() if q else None
     cache_key = f"cache:api:stocks:list:{q}:{sector}:{category}:{limit}:{offset}"
     cached = await _cache_get(cache_key)
     if cached:

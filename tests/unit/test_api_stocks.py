@@ -1,15 +1,18 @@
 # tests/unit/test_api_stocks.py
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from api.routers.stocks import router
+
 from api import deps
+from api.routers.stocks import router
 
 
 def _make_app(pool_mock):
@@ -73,7 +76,7 @@ def test_get_stock_returns_detail():
          "market_cap_bdt": Decimal("100000"), "is_active": True, "listing_date": None, "isin": None},
         {"close": Decimal("400"), "change_pct": Decimal("1.5"), "volume": 100000,
          "value_bdt": Decimal("40000000"), "high": Decimal("405"), "low": Decimal("395"),
-         "time": datetime(2026, 1, 1, tzinfo=timezone.utc)},
+         "time": datetime(2026, 1, 1, tzinfo=UTC)},
         None,  # no fundamentals
         None,  # no health score
     ])
@@ -157,3 +160,18 @@ def test_list_stocks_q_too_long_returns_422():
         client = TestClient(_make_app(pool))
         resp = client.get("/api/stocks?q=" + "a" * 65)
     assert resp.status_code == 422
+
+
+def test_list_stocks_q_and_sector_combine():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=GP&sector=Telecom")
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    sql = conn.fetch.call_args.args[0]
+    args = conn.fetch.call_args.args
+    assert "ILIKE" in sql and "sector = $2" in sql
+    assert args[1] == "%gp%"   # q lowercased
+    assert args[2] == "Telecom"
