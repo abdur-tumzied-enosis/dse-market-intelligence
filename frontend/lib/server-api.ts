@@ -1,7 +1,7 @@
 // frontend/lib/server-api.ts
 import { cookies } from 'next/headers'
 import type {
-  MarketIndices, MarketMovers, MarketSummary, HeatmapItem,
+  MarketIndices, MarketRegime, MarketMovers, MarketSummary, HeatmapItem,
   StockDetail, FundamentalsResponse, PagedResponse, StockListItem,
   AnnouncementsResponse,
 } from './types'
@@ -25,6 +25,7 @@ export async function serverGet<T>(path: string): Promise<T> {
 export const serverApi = {
   market: {
     indices: () => serverGet<MarketIndices>('/api/market/indices'),
+    regime: () => serverGet<MarketRegime>('/api/market/regime'),
     movers: () => serverGet<MarketMovers>('/api/market/movers'),
     heatmap: () => serverGet<HeatmapItem[]>('/api/market/heatmap'),
     summary: () => serverGet<MarketSummary>('/api/market/summary'),
