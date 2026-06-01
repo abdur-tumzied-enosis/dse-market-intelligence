@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.deps import get_current_user, get_db
-from api.schemas.market import HeatmapItem, MarketIndices, MarketSummary
+from api.schemas.market import HeatmapItem, MarketIndices, MarketRegime, MarketSummary
 from extraction.base import AllAdaptersFailedError
 from extraction.normalizers import DHAKA_TZ
 from extraction.registry import STREAMS
@@ -156,6 +156,31 @@ async def market_indices(_user=Depends(get_current_user)):
         return cached
     result = await _build_indices()
     await _cache_set(cache_key, result, ttl=60)
+    return result
+
+
+@router.get("/regime", response_model=MarketRegime)
+async def market_regime(pool=Depends(get_db), _user=Depends(get_current_user)):
+    cache_key = "cache:api:market:regime"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return cached
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT date, dsex FROM index_daily
+            WHERE dsex IS NOT NULL
+            ORDER BY date DESC
+            LIMIT $1
+            """,
+            _MA_WINDOW,
+        )
+
+    series = [float(r["dsex"]) for r in rows]
+    as_of = rows[0]["date"].isoformat() if rows else None
+    result = compute_regime(series, as_of)
+    await _cache_set(cache_key, result, ttl=300)
     return result
 
 
