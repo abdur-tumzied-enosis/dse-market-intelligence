@@ -2,7 +2,13 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { get } from '@/lib/api'
-import type { OHLCVResponse, LivePrice } from '@/lib/types'
+import type {
+  OHLCVResponse,
+  LivePrice,
+  WyckoffResponse,
+  WyckoffRange,
+  WyckoffEventType,
+} from '@/lib/types'
 
 const RANGES = [
   { label: '1M', days: 30 },
@@ -13,6 +19,29 @@ const RANGES = [
   { label: 'ALL', days: 0 },
 ]
 
+// Palette (mirrors candle colors)
+const UP = '#00d4a4'
+const DOWN = '#ff4d6a'
+const NEUTRAL = '#a78bfa'
+
+// Per-event-type marker styling. Spring is bullish (up), Upthrust bearish (down),
+// SC bullish bottom (up), BC bearish top (down).
+const EVENT_STYLE: Record<
+  WyckoffEventType,
+  { color: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown' | 'circle' }
+> = {
+  SC:       { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  BC:       { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  SPRING:   { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  UPTHRUST: { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+}
+
+const PHASE_COLOR: Record<string, string> = {
+  accumulation: UP,
+  distribution: DOWN,
+  undetermined: NEUTRAL,
+}
+
 interface HoveredCandle {
   time: string
   open: number
@@ -20,6 +49,19 @@ interface HoveredCandle {
   low: number
   close: number
   volume: number
+}
+
+// A small floating tooltip describing the Wyckoff event under the crosshair.
+interface EventTip {
+  label: string
+  help: string
+}
+
+function fmtShortDate(iso: string): string {
+  // "2026-03-12" → "12 Mar"
+  const d = new Date(iso + 'T00:00:00')
+  if (Number.isNaN(d.getTime())) return iso
+  return new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short' }).format(d)
 }
 
 export default function PriceChart({ ticker }: { ticker: string }) {
@@ -31,10 +73,145 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const volRef    = useRef<any>(null)
 
-  const [activeRange, setActiveRange] = useState('1Y')
-  const [loading, setLoading]         = useState(false)
-  const [error, setError]             = useState<string | null>(null)
-  const [hovered, setHovered]         = useState<HoveredCandle | null>(null)
+  // Wyckoff overlay handles, kept in refs so cleanup is independent of React state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markersRef   = useRef<any>(null)              // ISeriesMarkersPluginApi
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const priceLinesRef = useRef<any[]>([])             // IPriceLine[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const primitivesRef = useRef<any[]>([])             // PhaseBoxPrimitive[]
+  // help text per ISO day, for the crosshair tooltip
+  const eventHelpRef  = useRef<Record<string, EventTip>>({})
+
+  const [activeRange, setActiveRange]   = useState('1Y')
+  const [loading, setLoading]           = useState(false)
+  const [error, setError]               = useState<string | null>(null)
+  const [hovered, setHovered]           = useState<HoveredCandle | null>(null)
+  const [eventTip, setEventTip]         = useState<EventTip | null>(null)
+
+  // Wyckoff state
+  const [wyckoffOn, setWyckoffOn]       = useState(false)
+  const wyckoffOnRef                    = useRef(false)
+  const [wyckoffRanges, setWyckoffRanges] = useState<WyckoffRange[]>([])
+  const [wyckoffBusy, setWyckoffBusy]   = useState(false)
+
+  // Compute the same `from` date the chart uses for a given range label.
+  const fromForRange = useCallback((range: string): string | null => {
+    const r = RANGES.find(x => x.label === range)!
+    if (r.days <= 0) return null
+    return new Date(Date.now() - r.days * 86400000).toISOString().slice(0, 10)
+  }, [])
+
+  // Remove every Wyckoff overlay (markers, price lines, phase boxes) and reset
+  // the help lookup. Safe to call when nothing is drawn.
+  const clearWyckoff = useCallback(() => {
+    if (markersRef.current) {
+      try { markersRef.current.setMarkers([]) } catch { /* detached */ }
+    }
+    if (candleRef.current) {
+      for (const pl of priceLinesRef.current) {
+        try { candleRef.current.removePriceLine(pl) } catch { /* gone */ }
+      }
+      for (const prim of primitivesRef.current) {
+        try { candleRef.current.detachPrimitive(prim) } catch { /* gone */ }
+      }
+    }
+    priceLinesRef.current = []
+    primitivesRef.current = []
+    eventHelpRef.current = {}
+    setWyckoffRanges([])
+    setEventTip(null)
+  }, [])
+
+  // Draw all overlays for the supplied ranges onto the candle series.
+  const drawWyckoff = useCallback((ranges: WyckoffRange[]) => {
+    const candle = candleRef.current
+    const lc = lcModRef.current
+    if (!candle || !lc) return
+
+    clearWyckoff()
+
+    // 1) Event markers + hover help index
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const markers: any[] = []
+    const help: Record<string, EventTip> = {}
+    for (const rg of ranges) {
+      for (const ev of rg.events) {
+        const style = EVENT_STYLE[ev.type as WyckoffEventType] ?? {
+          color: NEUTRAL, position: 'aboveBar' as const, shape: 'circle' as const,
+        }
+        markers.push({
+          time: ev.day,
+          position: style.position,
+          color: style.color,
+          shape: style.shape,
+          text: ev.label,
+        })
+        help[ev.day] = { label: ev.label, help: ev.help }
+      }
+    }
+    markers.sort((a, b) => (a.time < b.time ? -1 : a.time > b.time ? 1 : 0))
+    eventHelpRef.current = help
+    if (markersRef.current) {
+      markersRef.current.setMarkers(markers)
+    } else {
+      markersRef.current = lc.createSeriesMarkers(candle, markers)
+    }
+
+    // 2) Support / Resistance horizontal lines (per range)
+    for (const rg of ranges) {
+      const phaseColor = PHASE_COLOR[rg.phase] ?? NEUTRAL
+      priceLinesRef.current.push(candle.createPriceLine({
+        price: Number(rg.support),
+        color: '#00d4a4',
+        lineWidth: 1,
+        lineStyle: lc.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: 'S',
+      }))
+      priceLinesRef.current.push(candle.createPriceLine({
+        price: Number(rg.resistance),
+        color: '#ff4d6a',
+        lineWidth: 1,
+        lineStyle: lc.LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: 'R',
+      }))
+
+      // 3) Phase box primitive
+      const prim = new PhaseBoxPrimitive({
+        startDay: rg.start_day,
+        endDay: rg.end_day,
+        support: Number(rg.support),
+        resistance: Number(rg.resistance),
+        color: phaseColor,
+        label: rg.phase,
+      })
+      candle.attachPrimitive(prim)
+      primitivesRef.current.push(prim)
+    }
+
+    setWyckoffRanges(ranges)
+  }, [clearWyckoff])
+
+  // Fetch Wyckoff analysis for the active range and draw it.
+  const loadWyckoff = useCallback(async (range: string) => {
+    if (!candleRef.current || !lcModRef.current) return
+    setWyckoffBusy(true)
+    setError(null)
+    try {
+      let qs = 'interval=daily'
+      const from = fromForRange(range)
+      if (from) qs += `&from=${from}`
+      const resp = await get<WyckoffResponse>(`/api/stocks/${ticker}/wyckoff?${qs}`)
+      // Only draw if still toggled on (avoids a late response re-adding overlays).
+      if (wyckoffOnRef.current) drawWyckoff(resp.ranges ?? [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load Wyckoff analysis')
+    } finally {
+      setWyckoffBusy(false)
+    }
+  }, [ticker, fromForRange, drawWyckoff])
 
   // Append/refresh today's candle from the live endpoint. daily_ohlcv lags
   // (hourly continuous-aggregate + EOD), so today's bar is sourced live here.
@@ -101,6 +278,11 @@ export default function PriceChart({ ticker }: { ticker: string }) {
     }
   }, [ticker, appendLiveBar])
 
+  // Module handle so overlay helpers can use lc.* (LineStyle, createSeriesMarkers)
+  // outside the import().then closure.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const lcModRef = useRef<any>(null)
+
   // Init chart — recreate when ticker changes
   useEffect(() => {
     if (!containerRef.current) return
@@ -109,6 +291,7 @@ export default function PriceChart({ ticker }: { ticker: string }) {
 
     import('lightweight-charts').then(lc => {
       if (destroyed || !containerRef.current) return
+      lcModRef.current = lc
 
       const chart = lc.createChart(containerRef.current, {
         autoSize: true,
@@ -161,9 +344,10 @@ export default function PriceChart({ ticker }: { ticker: string }) {
         scaleMargins: { top: 0.8, bottom: 0 },
       })
 
-      // OHLCV hover strip
+      // OHLCV hover strip + Wyckoff event tooltip
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       chart.subscribeCrosshairMove((param: any) => {
-        if (!param.time || !param.point) { setHovered(null); return }
+        if (!param.time || !param.point) { setHovered(null); setEventTip(null); return }
         const c = param.seriesData?.get(candleSeries)
         const v = param.seriesData?.get(volSeries)
         if (c) {
@@ -178,6 +362,8 @@ export default function PriceChart({ ticker }: { ticker: string }) {
         } else {
           setHovered(null)
         }
+        const tip = eventHelpRef.current[String(param.time)]
+        setEventTip(tip ?? null)
       })
 
       chartRef.current  = chart
@@ -189,19 +375,45 @@ export default function PriceChart({ ticker }: { ticker: string }) {
 
     return () => {
       destroyed = true
+      clearWyckoff()
+      markersRef.current = null
       chartRef.current?.remove()
       chartRef.current  = null
       candleRef.current = null
       volRef.current    = null
+      lcModRef.current  = null
       setActiveRange('1Y')
       setHovered(null)
+      setEventTip(null)
+      setWyckoffOn(false)
+      wyckoffOnRef.current = false
     }
-  }, [ticker, loadData])
+  }, [ticker, loadData, clearWyckoff])
 
-  // Range button → reload data
+  // Range button → reload data. Also refresh Wyckoff overlays for the new range
+  // (clear first, then refetch if still on). This effect synchronizes the
+  // external chart (lightweight-charts) + overlays with the active range, which
+  // is the documented escape hatch for setState-in-effect here.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData(activeRange)
-  }, [activeRange, loadData])
+    clearWyckoff()
+    if (wyckoffOnRef.current) loadWyckoff(activeRange)
+  }, [activeRange, loadData, clearWyckoff, loadWyckoff])
+
+  // Toggle handler — flips the overlay on/off.
+  const toggleWyckoff = useCallback(() => {
+    setWyckoffOn(prev => {
+      const next = !prev
+      wyckoffOnRef.current = next
+      if (next) {
+        loadWyckoff(activeRange)
+      } else {
+        clearWyckoff()
+      }
+      return next
+    })
+  }, [activeRange, loadWyckoff, clearWyckoff])
 
   // Refresh today's live candle every 2 min while the market is open
   useEffect(() => {
@@ -226,7 +438,7 @@ export default function PriceChart({ ticker }: { ticker: string }) {
     <div className="flex flex-col gap-3 h-full">
       {/* Controls row */}
       <div className="flex items-center justify-between min-h-[26px]">
-        <div className="flex gap-1">
+        <div className="flex gap-1 items-center">
           {RANGES.map(r => (
             <button
               key={r.label}
@@ -240,6 +452,21 @@ export default function PriceChart({ ticker }: { ticker: string }) {
               {r.label}
             </button>
           ))}
+          {/* Wyckoff toggle — same styling language as the range buttons */}
+          <button
+            onClick={toggleWyckoff}
+            title="Overlay Wyckoff Method analysis (trading ranges, phases, climaxes)"
+            className={`ml-2 px-2.5 py-0.5 text-[11px] font-mono rounded transition-all flex items-center gap-1 ${
+              wyckoffOn
+                ? 'bg-[#a78bfa]/15 text-[#a78bfa] border border-[#a78bfa]/30'
+                : 'text-[#6b6b80] hover:text-[#e8e8f0] border border-transparent hover:border-[#2a2a3a]'
+            }`}
+          >
+            {wyckoffBusy && (
+              <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa] animate-pulse" />
+            )}
+            Wyckoff
+          </button>
         </div>
 
         {hovered ? (
@@ -266,6 +493,31 @@ export default function PriceChart({ ticker }: { ticker: string }) {
         ) : null}
       </div>
 
+      {/* Wyckoff legend chips — phase · confidence · dates, help on hover */}
+      {wyckoffOn && wyckoffRanges.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 min-h-[20px]">
+          {wyckoffRanges.map((rg, i) => {
+            const color = PHASE_COLOR[rg.phase] ?? NEUTRAL
+            const phaseLabel = rg.phase.charAt(0).toUpperCase() + rg.phase.slice(1)
+            return (
+              <span
+                key={`${rg.start_day}-${i}`}
+                title={rg.phase_help}
+                className="px-2 py-0.5 text-[10px] font-mono rounded border cursor-help"
+                style={{
+                  color,
+                  borderColor: `${color}55`,
+                  backgroundColor: `${color}14`,
+                }}
+              >
+                {phaseLabel} · {Math.round(rg.confidence * 100)}% ·{' '}
+                {fmtShortDate(rg.start_day)}–{fmtShortDate(rg.end_day)}
+              </span>
+            )
+          })}
+        </div>
+      )}
+
       {/* Chart container — lightweight-charts mounts here */}
       <div ref={containerRef} className="flex-1 relative">
         {loading && (
@@ -279,7 +531,140 @@ export default function PriceChart({ ticker }: { ticker: string }) {
             <span className="text-sm font-mono text-[#ff4d6a]">{error}</span>
           </div>
         )}
+        {/* Wyckoff event tooltip — floating box near the top-left of the chart */}
+        {eventTip && (
+          <div className="absolute top-2 left-2 z-10 max-w-[280px] pointer-events-none rounded border border-[#2a2a3a] bg-[#161620]/95 px-2.5 py-1.5 shadow-lg">
+            <div className="text-[11px] font-mono text-[#a78bfa] mb-0.5">{eventTip.label}</div>
+            <div className="text-[10px] font-mono leading-snug text-[#b8b8c8]">{eventTip.help}</div>
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+// ─── Phase box primitive ─────────────────────────────────────────────────────
+// lightweight-charts v5 has no native rectangle. This is a minimal
+// ISeriesPrimitive that draws a translucent shaded box spanning the range's
+// time width (start_day → end_day) and price height (support → resistance),
+// plus a phase label in the top-left corner of the box.
+
+interface PhaseBoxProps {
+  startDay: string
+  endDay: string
+  support: number
+  resistance: number
+  color: string
+  label: string
+}
+
+// hex (#rrggbb) → rgba string with the given alpha
+function withAlpha(hex: string, alpha: number): string {
+  const h = hex.replace('#', '')
+  const r = parseInt(h.slice(0, 2), 16)
+  const g = parseInt(h.slice(2, 4), 16)
+  const b = parseInt(h.slice(4, 6), 16)
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+class PhaseBoxPaneRenderer {
+  constructor(
+    private p: PhaseBoxProps,
+    private coords: () => { x1: number | null; x2: number | null; y1: number | null; y2: number | null } | null,
+  ) {}
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  draw(target: any) {
+    const get = this.coords()
+    if (!get) return
+    const { x1, x2, y1, y2 } = get
+    if (x1 == null || x2 == null || y1 == null || y2 == null) return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    target.useBitmapCoordinateSpace((scope: any) => {
+      const ctx = scope.context as CanvasRenderingContext2D
+      const hr = scope.horizontalPixelRatio
+      const vr = scope.verticalPixelRatio
+      const left = Math.min(x1, x2) * hr
+      const right = Math.max(x1, x2) * hr
+      const top = Math.min(y1, y2) * vr
+      const bottom = Math.max(y1, y2) * vr
+      const w = right - left
+      const h = bottom - top
+
+      ctx.fillStyle = withAlpha(this.p.color, 0.1)
+      ctx.fillRect(left, top, w, h)
+      ctx.strokeStyle = withAlpha(this.p.color, 0.5)
+      ctx.lineWidth = 1 * Math.min(hr, vr)
+      ctx.strokeRect(left, top, w, h)
+
+      // Phase label, top-left inside the box
+      const label = this.p.label.charAt(0).toUpperCase() + this.p.label.slice(1)
+      ctx.font = `${10 * vr}px Menlo, Consolas, monospace`
+      ctx.fillStyle = withAlpha(this.p.color, 0.95)
+      ctx.textBaseline = 'top'
+      ctx.fillText(label, left + 4 * hr, top + 3 * vr)
+    })
+  }
+}
+
+class PhaseBoxPaneView {
+  private _renderer: PhaseBoxPaneRenderer
+  constructor(
+    p: PhaseBoxProps,
+    coords: () => { x1: number | null; x2: number | null; y1: number | null; y2: number | null } | null,
+  ) {
+    this._renderer = new PhaseBoxPaneRenderer(p, coords)
+  }
+  zOrder() {
+    return 'bottom' as const
+  }
+  renderer() {
+    return this._renderer
+  }
+}
+
+class PhaseBoxPrimitive {
+  private p: PhaseBoxProps
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private chart: any = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private series: any = null
+  private requestUpdate: (() => void) | null = null
+  private views: PhaseBoxPaneView[]
+
+  constructor(p: PhaseBoxProps) {
+    this.p = p
+    this.views = [new PhaseBoxPaneView(p, () => this.computeCoords())]
+  }
+
+  private computeCoords() {
+    if (!this.chart || !this.series) return null
+    const ts = this.chart.timeScale()
+    const x1 = ts.timeToCoordinate(this.p.startDay)
+    const x2 = ts.timeToCoordinate(this.p.endDay)
+    const y1 = this.series.priceToCoordinate(this.p.resistance)
+    const y2 = this.series.priceToCoordinate(this.p.support)
+    return { x1, x2, y1, y2 }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attached(param: any) {
+    this.chart = param.chart
+    this.series = param.series
+    this.requestUpdate = param.requestUpdate
+  }
+
+  detached() {
+    this.chart = null
+    this.series = null
+    this.requestUpdate = null
+  }
+
+  updateAllViews() {
+    // coordinates are computed lazily in draw(); nothing to cache here
+  }
+
+  paneViews() {
+    return this.views
+  }
 }

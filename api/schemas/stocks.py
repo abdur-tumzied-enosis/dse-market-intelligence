@@ -1,7 +1,9 @@
 # api/schemas/stocks.py
 from __future__ import annotations
-from datetime import datetime, date
+
+from datetime import date, datetime
 from decimal import Decimal
+
 from pydantic import BaseModel
 
 
@@ -111,6 +113,31 @@ class AnnouncementsResponse(BaseModel):
     ticker: str
     total: int
     items: list[AnnouncementRow]
+
+
+class WyckoffEvent(BaseModel):
+    day: date
+    type: str  # "SC" | "BC" | "SPRING" | "UPTHRUST"
+    price: Decimal
+    label: str
+    help: str
+
+
+class WyckoffRange(BaseModel):
+    start_day: date
+    end_day: date
+    phase: str  # "accumulation" | "distribution" | "undetermined"
+    phase_help: str
+    confidence: float  # 0..1
+    support: Decimal
+    resistance: Decimal
+    events: list[WyckoffEvent]
+
+
+class WyckoffResponse(BaseModel):
+    ticker: str
+    interval: str
+    ranges: list[WyckoffRange]
 
 
 class LivePrice(BaseModel):

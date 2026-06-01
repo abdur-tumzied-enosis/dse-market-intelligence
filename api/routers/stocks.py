@@ -7,6 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from api.analysis.wyckoff import detect_wyckoff
 from api.deps import get_current_user, get_db
 from api.routers.market import _market_status
 from api.schemas.common import PagedResponse
@@ -18,6 +19,7 @@ from api.schemas.stocks import (
     OHLCVResponse,
     PredictionsResponse,
     StockDetail,
+    WyckoffResponse,
 )
 from extraction.base import AllAdaptersFailedError
 from extraction.registry import STREAMS
@@ -207,6 +209,84 @@ async def get_prices(
         )
 
     result = {"ticker": ticker, "interval": interval, "items": [dict(r) for r in rows]}
+    await _cache_set(cache_key, result, ttl=3600)
+    return result
+
+
+@router.get("/{ticker}/wyckoff", response_model=WyckoffResponse)
+async def get_wyckoff(
+    ticker: str,
+    from_date: date | None = Query(None, alias="from"),
+    to_date: date | None = Query(None, alias="to"),
+    interval: str = Query("daily", pattern="^(daily|weekly|monthly)$"),
+    pool=Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    ticker = ticker.upper()
+    cache_key = f"cache:api:stocks:wyckoff:{ticker}:{from_date}:{to_date}:{interval}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return cached
+
+    table = _INTERVAL_TABLE[interval]
+    where_parts = ["ticker = $1"]
+    params: list = [ticker]
+    if from_date:
+        params.append(from_date)
+        where_parts.append(f"day >= ${len(params)}")
+    if to_date:
+        params.append(to_date)
+        where_parts.append(f"day <= ${len(params)}")
+    where = " AND ".join(where_parts)
+
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow("SELECT 1 FROM companies WHERE ticker = $1", ticker)
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+        rows = await conn.fetch(
+            f"SELECT day, open, high, low, close, volume FROM {table} WHERE {where} ORDER BY day",
+            *params,
+        )
+
+    bars = [
+        {
+            "day": r["day"],
+            "open": _f(r["open"]) or 0.0,
+            "high": _f(r["high"]) or 0.0,
+            "low": _f(r["low"]) or 0.0,
+            "close": _f(r["close"]) or 0.0,
+            "volume": _f(r["volume"]) or 0.0,
+        }
+        for r in rows
+    ]
+    detected = detect_wyckoff(bars)
+
+    result = {
+        "ticker": ticker,
+        "interval": interval,
+        "ranges": [
+            {
+                "start_day": rng.start_day,
+                "end_day": rng.end_day,
+                "phase": rng.phase,
+                "phase_help": rng.phase_help,
+                "confidence": rng.confidence,
+                "support": rng.support,
+                "resistance": rng.resistance,
+                "events": [
+                    {
+                        "day": ev.day,
+                        "type": ev.type,
+                        "price": ev.price,
+                        "label": ev.label,
+                        "help": ev.help,
+                    }
+                    for ev in rng.events
+                ],
+            }
+            for rng in detected
+        ],
+    }
     await _cache_set(cache_key, result, ttl=3600)
     return result
 

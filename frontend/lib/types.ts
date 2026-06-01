@@ -171,3 +171,35 @@ export interface AnnouncementsResponse {
   total: number
   items: AnnouncementRow[]
 }
+
+// ─── Wyckoff overlay ─────────────────────────────────────────────────────────
+// Field names + literals mirror the backend schema in
+// docs/superpowers/specs/2026-06-01-wyckoff-overlay-design.md ("Response schema").
+
+export type WyckoffEventType = 'SC' | 'BC' | 'SPRING' | 'UPTHRUST'
+export type WyckoffPhase = 'accumulation' | 'distribution' | 'undetermined'
+
+export interface WyckoffEvent {
+  day: string                 // backend `date` serialized as ISO YYYY-MM-DD
+  type: WyckoffEventType
+  price: number               // backend `Decimal` serialized as number/string
+  label: string               // short marker label, e.g. "SC"
+  help: string                // plain-language definition
+}
+
+export interface WyckoffRange {
+  start_day: string
+  end_day: string
+  phase: WyckoffPhase
+  phase_help: string
+  confidence: number          // 0..1
+  support: number
+  resistance: number
+  events: WyckoffEvent[]
+}
+
+export interface WyckoffResponse {
+  ticker: string
+  interval: string
+  ranges: WyckoffRange[]
+}
