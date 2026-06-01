@@ -7,7 +7,7 @@ class APISettings(BaseSettings):
     database_url: str
     redis_url: str = "redis://localhost:6379/0"
     jwt_secret_key: str
-    access_token_expire_minutes: int = 30
+    access_token_expire_minutes: int = 300
     refresh_token_expire_days: int = 7
     api_host: str = "0.0.0.0"
     api_port: int = 8000
