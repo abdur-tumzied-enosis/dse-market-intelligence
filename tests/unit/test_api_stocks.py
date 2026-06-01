@@ -251,3 +251,62 @@ def test_fundamentals_free_tier_not_truncated_when_fewer_rows():
     body = resp.json()
     assert len(body["items"]) == 2
     assert body["is_truncated"] is False
+
+
+def test_list_stocks_q_filters_by_ticker_or_name():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=gp")
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    sql = conn.fetch.call_args.args[0]
+    assert "ILIKE" in sql
+    assert conn.fetch.call_args.args[1] == "%gp%"
+
+
+def test_list_stocks_q_escapes_like_wildcards():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=50%25")  # %25 == literal '%'
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    assert conn.fetch.call_args.args[1] == "%50\\%%"
+
+
+def test_list_stocks_blank_q_applies_no_filter():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=%20%20")  # two spaces
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    assert "ILIKE" not in conn.fetch.call_args.args[0]
+
+
+def test_list_stocks_q_too_long_returns_422():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=" + "a" * 65)
+    assert resp.status_code == 422
+
+
+def test_list_stocks_q_and_sector_combine():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=GP&sector=Telecom")
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    sql = conn.fetch.call_args.args[0]
+    args = conn.fetch.call_args.args
+    assert "ILIKE" in sql and "sector = $2" in sql
+    assert args[1] == "%gp%"   # q lowercased
+    assert args[2] == "Telecom"
