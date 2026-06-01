@@ -105,14 +105,14 @@ async def list_stocks(
     if cached:
         return cached
 
-    where = "WHERE is_active = true"
+    where = "WHERE c.is_active = true"
     params: list = []
     if sector:
         params.append(sector)
-        where += f" AND sector = ${len(params)}"
+        where += f" AND c.sector = ${len(params)}"
     if category:
         params.append(category)
-        where += f" AND category = ${len(params)}"
+        where += f" AND c.category = ${len(params)}"
 
     async with pool.acquire() as conn:
         rows = await conn.fetch(
@@ -135,13 +135,15 @@ async def list_stocks(
                 SELECT close, change_pct FROM stock_prices WHERE ticker = c.ticker
                 ORDER BY time DESC LIMIT 1
             ) p ON true
-            {where.replace("is_active", "c.is_active").replace("sector", "c.sector").replace("category", "c.category")}
+            {where}
             ORDER BY c.market_cap_bdt DESC NULLS LAST
             LIMIT {limit} OFFSET {offset}
             """,
             *params,
         )
-        total = await conn.fetchval(f"SELECT COUNT(*) FROM companies {where}", *params)
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM companies c {where}", *params
+        )
 
     items = []
     for r in rows:
