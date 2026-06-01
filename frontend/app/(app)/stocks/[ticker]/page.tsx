@@ -5,6 +5,7 @@ import PriceChart from '@/components/stocks/PriceChart'
 import HealthGauge from '@/components/stocks/HealthGauge'
 import RatingBadge from '@/components/stocks/RatingBadge'
 import FundamentalsCharts from '@/components/stocks/FundamentalsCharts'
+import LivePrice from '@/components/stocks/LivePrice'
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -53,10 +54,6 @@ export default async function StockDetailPage({
   const { company, latest_price, health_score, fundamentals: lf } = detailResult.value
   const fundsData = fundsResult.status === 'fulfilled' ? fundsResult.value : null
 
-  const price = Number(latest_price?.close)
-  const changePct = Number(latest_price?.change_pct ?? 0)
-  const isUp = changePct >= 0
-
   const scoreNum = health_score?.health_score != null ? Number(health_score.health_score) : null
 
   const metrics = [
@@ -101,41 +98,10 @@ export default async function StockDetailPage({
                 </span>
               )}
             </div>
-            {/* Price */}
-            <div className="flex items-baseline gap-3 mt-2">
-              <span className="text-[42px] font-mono font-bold tabular-nums leading-none text-white">
-                {latest_price ? `৳${price.toFixed(2)}` : '—'}
-              </span>
-              {latest_price && (
-                <span
-                  className="text-[18px] font-mono font-semibold tabular-nums"
-                  style={{ color: isUp ? '#00d4a4' : '#ff4d6a' }}
-                >
-                  {isUp ? '+' : ''}{changePct.toFixed(2)}%
-                </span>
-              )}
-            </div>
           </div>
 
-          {/* OHLV strip */}
-          {latest_price && (
-            <div className="flex gap-5 self-end pb-1">
-              {[
-                { l: 'HIGH',   v: fmtBDT(latest_price.high),   c: '#00d4a4' },
-                { l: 'LOW',    v: fmtBDT(latest_price.low),    c: '#ff4d6a' },
-                { l: 'VOLUME', v: fmtVol(latest_price.volume), c: null },
-                { l: 'VALUE',  v: fmtCap(latest_price.value_bdt != null ? Number(latest_price.value_bdt) * 10_000_000 : null), c: null },
-              ].map(({ l, v, c }) => (
-                <div key={l} className="text-center">
-                  <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#6b6b80] mb-0.5">{l}</div>
-                  <div className="text-sm font-mono font-medium tabular-nums"
-                    style={{ color: c ?? '#e8e8f0' }}>
-                    {v}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Live price + OHLV — client component polls every 2 min */}
+          <LivePrice ticker={company.ticker} initial={latest_price} />
         </div>
       </div>
 
