@@ -7,7 +7,11 @@ from datetime import datetime
 
 import pytz
 
-from extraction.scheduler import _live_records_to_rows, _market_is_open
+from extraction.scheduler import (
+    _live_records_to_rows,
+    _market_is_open,
+    _split_known_tickers,
+)
 
 BD = pytz.timezone("Asia/Dhaka")
 BUCKET = BD.localize(datetime(2026, 6, 1, 0, 0, 0))
@@ -52,6 +56,38 @@ def test_rows_without_close_are_skipped():
         BUCKET, "x",
     )
     assert rows == []
+
+
+def test_split_known_tickers_drops_unknown():
+    rows = _live_records_to_rows(
+        [{"ticker": "CITYBANK", "close": 23.4}, {"ticker": "BDSERVICE", "close": 1.0},
+         {"ticker": "GP", "close": 110.0}],
+        BUCKET, "x",
+    )
+    kept, dropped = _split_known_tickers(rows, {"CITYBANK", "GP"})
+    assert [r[1] for r in kept] == ["CITYBANK", "GP"]
+    assert dropped == ["BDSERVICE"]
+
+
+def test_split_known_tickers_all_known_drops_nothing():
+    rows = _live_records_to_rows(
+        [{"ticker": "CITYBANK", "close": 23.4}, {"ticker": "GP", "close": 110.0}],
+        BUCKET, "x",
+    )
+    kept, dropped = _split_known_tickers(rows, {"CITYBANK", "GP"})
+    assert len(kept) == 2
+    assert dropped == []
+
+
+def test_split_known_tickers_dedupes_and_sorts_dropped():
+    rows = _live_records_to_rows(
+        [{"ticker": "ZEAL", "close": 1.0}, {"ticker": "ACME", "close": 2.0},
+         {"ticker": "ZEAL", "close": 1.5}],
+        BUCKET, "x",
+    )
+    kept, dropped = _split_known_tickers(rows, set())
+    assert kept == []
+    assert dropped == ["ACME", "ZEAL"]
 
 
 def test_market_is_open_weekday_and_hours():

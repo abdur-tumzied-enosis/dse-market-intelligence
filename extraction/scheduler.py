@@ -123,6 +123,23 @@ def _live_records_to_rows(
     return rows
 
 
+def _split_known_tickers(
+    rows: list[tuple[object, ...]], known: set[str]
+) -> tuple[list[tuple[object, ...]], list[str]]:
+    """Partition live rows into (kept, dropped-tickers) by membership in `known`.
+
+    stock_prices.ticker is FK → companies.ticker and the live UPSERT runs as one
+    executemany batch, so a single ticker absent from companies fails the whole
+    batch (one bad row → zero inserts). Live feeds occasionally carry tickers the
+    company seed lacks (new listings, trading resumed after a halt), so the caller
+    drops the unknowns (logging them for seeding) instead of losing the snapshot.
+    `dropped` is the sorted, de-duplicated list of unknown tickers.
+    """
+    kept = [row for row in rows if row[1] in known]
+    dropped = sorted({str(row[1]) for row in rows if row[1] not in known})
+    return kept, dropped
+
+
 def get_scheduler(database_url: str) -> AsyncIOScheduler:
     """Create and configure APScheduler with PostgreSQL job store."""
     engine = create_engine(database_url, echo=False)
@@ -221,11 +238,20 @@ async def job_live_prices() -> None:
         bucket_time = datetime(d.year, d.month, d.day, tzinfo=UTC)
         rows = _live_records_to_rows(records, bucket_time, result.source_name)
 
+        kept = rows
         if rows:
             pool = await get_pool()
-            await pool.executemany(_LIVE_UPSERT_SQL, rows)
-        ctx["records_inserted"] = len(rows)
-        logger.info("job_live_prices: upserted=%d source=%s", len(rows), result.source_name)
+            known = {r["ticker"] for r in await pool.fetch("SELECT ticker FROM companies")}
+            kept, dropped = _split_known_tickers(rows, known)
+            if dropped:
+                logger.warning(
+                    "job_live_prices: dropped %d unknown ticker(s) absent from companies: %s",
+                    len(dropped), ", ".join(dropped),
+                )
+            if kept:
+                await pool.executemany(_LIVE_UPSERT_SQL, kept)
+        ctx["records_inserted"] = len(kept)
+        logger.info("job_live_prices: upserted=%d source=%s", len(kept), result.source_name)
 
     await _invalidate_live_caches()
     logger.info("job_live_prices: complete")
