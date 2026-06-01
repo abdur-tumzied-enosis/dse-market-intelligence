@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     live_prices_market_days: str = "mon,tue,wed,thu,sun"
     live_prices_market_open_hour: int = 10
     live_prices_market_close_hour: int = 14
-    live_prices_minutes: str = "0,15,30,45"
+    live_prices_minutes: str = "*/2"
 
     # eod_snapshot: cron at HH:MM on market days
     eod_snapshot_hour: int = 14
