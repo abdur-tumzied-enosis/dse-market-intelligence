@@ -64,6 +64,11 @@ export interface StockListItem {
   category: string | null
   market_cap_bdt: number | null
   is_active: boolean
+  pe: number | null
+  health_score: number | null
+  last_close: number | null
+  change_pct: number | null
+  rating: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL' | 'N/A'
 }
 
 export interface PagedResponse<T> {
@@ -164,6 +169,8 @@ export interface FundamentalsRow {
 export interface FundamentalsResponse {
   ticker: string
   items: FundamentalsRow[]
+  max_years: number
+  is_truncated: boolean
 }
 
 export interface AnnouncementRow {
@@ -227,4 +234,20 @@ export interface WyckoffResponse {
   ticker: string
   interval: string
   ranges: WyckoffRange[]
+}
+
+// ─── Sectors ───────────────────────────────────────────────────────────────
+export interface SectorRow {
+  sector: string
+  pe: number | null
+  change_pct: number | null
+  market_cap_bdt: number | null
+  fetched_at: string | null
+}
+
+export interface SectorDetail {
+  sector: string
+  latest_pe: SectorRow | null
+  pe_history: SectorRow[]
+  companies: string[]
 }

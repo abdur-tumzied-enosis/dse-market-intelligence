@@ -1,4 +1,5 @@
 import { clearTokens, getAccessToken, getRefreshToken, setTokens } from '@/lib/auth'
+import type { SectorRow } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000'
 
@@ -49,6 +50,8 @@ export function get<T>(path: string): Promise<T> {
 export function post<T>(path: string, body: unknown, retryOn401 = false): Promise<T> {
   return request<T>(path, { method: 'POST', body: JSON.stringify(body) }, retryOn401)
 }
+
+export const fetchSectors = () => get<SectorRow[]>('/api/sectors')
 
 export const api = {
   auth: {
