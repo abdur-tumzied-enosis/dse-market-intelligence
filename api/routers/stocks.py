@@ -347,9 +347,10 @@ async def get_wyckoff(
 
 
 @router.get("/{ticker}/fundamentals", response_model=FundamentalsResponse)
-async def get_fundamentals(ticker: str, pool=Depends(get_db), _user=Depends(get_current_user)):
+async def get_fundamentals(ticker: str, pool=Depends(get_db), user=Depends(get_current_user)):
     ticker = ticker.upper()
-    cache_key = f"cache:api:stocks:fundamentals:{ticker}"
+    max_years = 10 if user["tier"] == "pro" else 3
+    cache_key = f"cache:api:stocks:fundamentals:{ticker}:{max_years}"
     cached = await _cache_get(cache_key)
     if cached:
         return cached
@@ -364,12 +365,18 @@ async def get_fundamentals(ticker: str, pool=Depends(get_db), _user=Depends(get_
                    sponsor_pct, public_pct, fetched_at
             FROM fundamentals WHERE ticker = $1
             ORDER BY fiscal_year DESC NULLS LAST, fetched_at DESC
-            LIMIT 15
+            LIMIT $2
             """,
             ticker,
+            max_years,
         )
 
-    result = {"ticker": ticker, "items": [dict(r) for r in rows]}
+    result = {
+        "ticker": ticker,
+        "items": [dict(r) for r in rows],
+        "max_years": max_years,
+        "is_truncated": max_years < 10,
+    }
     await _cache_set(cache_key, result, ttl=86400)
     return result
 

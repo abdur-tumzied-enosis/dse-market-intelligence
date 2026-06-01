@@ -150,3 +150,69 @@ def test_get_prices_returns_ohlcv():
     assert body["ticker"] == "GP"
     assert body["interval"] == "daily"
     assert len(body["items"]) == 1
+
+
+def _make_app_tier(pool_mock, tier="free"):
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+
+    async def _get_db():
+        return pool_mock
+
+    async def _get_user():
+        return {"id": 1, "email": "a@b.com", "tier": tier, "is_active": True}
+
+    app.dependency_overrides[deps.get_db] = _get_db
+    app.dependency_overrides[deps.get_current_user] = _get_user
+    return app
+
+
+def _client(pool, tier="free"):
+    return TestClient(_make_app_tier(pool, tier=tier))
+
+
+def _fund_rows(n):
+    import datetime
+    return [{
+        "fiscal_year": 2020 - i, "eps": Decimal("1"), "nav": Decimal("10"),
+        "pe": Decimal("12"), "cash_div_pct": None, "stock_div_pct": None,
+        "sponsor_pct": None, "public_pct": None,
+        "fetched_at": datetime.datetime(2026, 1, 1),
+    } for i in range(n)]
+
+
+def test_fundamentals_free_tier_capped_at_3_years():
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"?column?": 1})   # company exists
+    conn.fetch = AsyncMock(return_value=_fund_rows(3))         # query already LIMIT-ed
+    acquire = MagicMock()
+    acquire.__aenter__ = AsyncMock(return_value=conn)
+    acquire.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=acquire)
+    with patch("api.routers.stocks._cache_get", new=AsyncMock(return_value=None)), \
+         patch("api.routers.stocks._cache_set", new=AsyncMock()):
+        resp = _client(pool, tier="free").get("/api/stocks/GP/fundamentals")
+    body = resp.json()
+    assert len(body["items"]) == 3
+    assert body["max_years"] == 3
+    assert body["is_truncated"] is True
+    assert conn.fetch.await_args.args[-1] == 3   # LIMIT param passed to SQL was 3
+
+
+def test_fundamentals_pro_tier_allows_10_years():
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"?column?": 1})
+    conn.fetch = AsyncMock(return_value=_fund_rows(10))
+    acquire = MagicMock()
+    acquire.__aenter__ = AsyncMock(return_value=conn)
+    acquire.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=acquire)
+    with patch("api.routers.stocks._cache_get", new=AsyncMock(return_value=None)), \
+         patch("api.routers.stocks._cache_set", new=AsyncMock()):
+        resp = _client(pool, tier="pro").get("/api/stocks/GP/fundamentals")
+    body = resp.json()
+    assert body["max_years"] == 10
+    assert body["is_truncated"] is False
+    assert conn.fetch.await_args.args[-1] == 10

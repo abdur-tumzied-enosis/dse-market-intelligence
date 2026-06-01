@@ -87,6 +87,8 @@ class FundamentalsRow(BaseModel):
 class FundamentalsResponse(BaseModel):
     ticker: str
     items: list[FundamentalsRow]
+    max_years: int
+    is_truncated: bool
 
 
 class PredictionRow(BaseModel):
