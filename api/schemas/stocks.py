@@ -111,3 +111,17 @@ class AnnouncementsResponse(BaseModel):
     ticker: str
     total: int
     items: list[AnnouncementRow]
+
+
+class LivePrice(BaseModel):
+    ticker: str
+    available: bool
+    ltp: float | None = None
+    high: float | None = None
+    low: float | None = None
+    prev_close: float | None = None
+    change_pct: float | None = None
+    volume: float | None = None
+    value_bdt: float | None = None
+    market_status: str
+    as_of: datetime
