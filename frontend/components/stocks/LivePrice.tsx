@@ -89,10 +89,11 @@ export default function LivePrice({
   const asOf = new Date(data.as_of).toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Dhaka',
   })
 
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 w-full">
+    <div className="flex flex-wrap items-start justify-between gap-4 flex-1 min-w-0">
       <div>
         <div className="flex items-baseline gap-3">
           <span className="text-[42px] font-mono font-bold tabular-nums leading-none text-white">
