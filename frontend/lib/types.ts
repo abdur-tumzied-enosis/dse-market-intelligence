@@ -34,6 +34,17 @@ export interface MarketSummary {
   avg_change_pct: number | null
 }
 
+export interface MarketRegime {
+  regime: 'Bull' | 'Bear' | 'Unknown'
+  dsex: number | null
+  ma: number | null
+  window: number
+  provisional: boolean
+  distance_pct: number | null
+  as_of: string | null
+  data_status: 'ok' | 'provisional' | 'insufficient'
+}
+
 export interface HeatmapItem {
   ticker: string
   name: string
