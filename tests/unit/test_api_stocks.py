@@ -216,3 +216,38 @@ def test_fundamentals_pro_tier_allows_10_years():
     assert body["max_years"] == 10
     assert body["is_truncated"] is False
     assert conn.fetch.await_args.args[-1] == 10
+
+
+def test_fundamentals_institution_tier_allows_10_years():
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"?column?": 1})
+    conn.fetch = AsyncMock(return_value=_fund_rows(10))
+    acquire = MagicMock()
+    acquire.__aenter__ = AsyncMock(return_value=conn)
+    acquire.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=acquire)
+    with patch("api.routers.stocks._cache_get", new=AsyncMock(return_value=None)), \
+         patch("api.routers.stocks._cache_set", new=AsyncMock()):
+        resp = _client(pool, tier="institution").get("/api/stocks/GP/fundamentals")
+    body = resp.json()
+    assert body["max_years"] == 10
+    assert body["is_truncated"] is False
+    assert conn.fetch.await_args.args[-1] == 10
+
+
+def test_fundamentals_free_tier_not_truncated_when_fewer_rows():
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"?column?": 1})
+    conn.fetch = AsyncMock(return_value=_fund_rows(2))  # only 2 years exist
+    acquire = MagicMock()
+    acquire.__aenter__ = AsyncMock(return_value=conn)
+    acquire.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=acquire)
+    with patch("api.routers.stocks._cache_get", new=AsyncMock(return_value=None)), \
+         patch("api.routers.stocks._cache_set", new=AsyncMock()):
+        resp = _client(pool, tier="free").get("/api/stocks/GP/fundamentals")
+    body = resp.json()
+    assert len(body["items"]) == 2
+    assert body["is_truncated"] is False

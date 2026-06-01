@@ -32,6 +32,9 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 _INTERVAL_TABLE = {"daily": "daily_ohlcv", "weekly": "weekly_ohlcv", "monthly": "monthly_ohlcv"}
 
+FREE_FUNDAMENTALS_YEARS = 3
+PRO_FUNDAMENTALS_YEARS = 10
+
 
 async def _cache_get(key: str) -> Any | None:
     try:
@@ -349,7 +352,9 @@ async def get_wyckoff(
 @router.get("/{ticker}/fundamentals", response_model=FundamentalsResponse)
 async def get_fundamentals(ticker: str, pool=Depends(get_db), user=Depends(get_current_user)):
     ticker = ticker.upper()
-    max_years = 10 if user["tier"] == "pro" else 3
+    max_years = (
+        FREE_FUNDAMENTALS_YEARS if user["tier"] == "free" else PRO_FUNDAMENTALS_YEARS
+    )
     cache_key = f"cache:api:stocks:fundamentals:{ticker}:{max_years}"
     cached = await _cache_get(cache_key)
     if cached:
@@ -371,11 +376,12 @@ async def get_fundamentals(ticker: str, pool=Depends(get_db), user=Depends(get_c
             max_years,
         )
 
+    items = [dict(r) for r in rows]
     result = {
         "ticker": ticker,
-        "items": [dict(r) for r in rows],
+        "items": items,
         "max_years": max_years,
-        "is_truncated": max_years < 10,
+        "is_truncated": user["tier"] == "free" and len(items) >= max_years,
     }
     await _cache_set(cache_key, result, ttl=86400)
     return result
