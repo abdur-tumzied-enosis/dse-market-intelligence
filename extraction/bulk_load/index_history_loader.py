@@ -41,7 +41,8 @@ async def backfill_index_history() -> dict:
     pool = await get_pool()
     inserted = 0
     for _, row in df.iterrows():
-        dt = pd.to_datetime(row.get("DATE"), errors="coerce")
+        # bdshare emits DATE as DD-MM-YYYY; dayfirst avoids month/day swap.
+        dt = pd.to_datetime(row.get("DATE"), errors="coerce", dayfirst=True)
         if pd.isna(dt):
             logger.warning("index_backfill: unparseable DATE=%r — skipping", row.get("DATE"))
             continue
