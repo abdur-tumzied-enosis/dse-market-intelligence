@@ -352,7 +352,13 @@ async def get_live_price(ticker: str, pool=Depends(get_db), _user=Depends(get_cu
     for rec in await _live_snapshot():
         if str(rec.get("ticker") or "").strip().upper() != ticker:
             continue
-        ltp = rec.get("ltp") if rec.get("ltp") is not None else rec.get("close")
+        ltp = _f(rec.get("ltp") if rec.get("ltp") is not None else rec.get("close"))
+        prev_close = _f(rec.get("prev_close"))
+        # dse_direct feed carries no %CHANGE column → compute from prev_close
+        # (same fallback the ingest path uses in _live_records_to_rows).
+        change_pct = _f(rec.get("change_pct"))
+        if change_pct is None and ltp is not None and prev_close not in (None, 0):
+            change_pct = (ltp - prev_close) / prev_close * 100.0
         value = rec.get("value_bdt")
         if value is None and rec.get("value_mn") is not None:
             value = _f(rec.get("value_mn"))
@@ -360,11 +366,11 @@ async def get_live_price(ticker: str, pool=Depends(get_db), _user=Depends(get_cu
         return {
             "ticker": ticker,
             "available": True,
-            "ltp": _f(ltp),
+            "ltp": ltp,
             "high": _f(rec.get("high")),
             "low": _f(rec.get("low")),
-            "prev_close": _f(rec.get("prev_close")),
-            "change_pct": _f(rec.get("change_pct")),
+            "prev_close": prev_close,
+            "change_pct": _f(change_pct),
             "volume": _f(rec.get("volume")),
             "value_bdt": _f(value),
             "market_status": status,
