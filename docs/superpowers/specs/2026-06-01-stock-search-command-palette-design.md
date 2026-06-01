@@ -83,7 +83,8 @@ list: (params: { q?: string; sector?: string; limit?: number; offset?: number })
 
 - Build the query string from defined params only (skip undefined/empty).
 - `URLSearchParams` for encoding (ticker/name are ASCII but encode anyway).
-- Palette calls `api.stocks.list({ q, limit: 8 })`.
+- Palette calls `api.stocks.list({ q, limit: 5 })` — top 5 matches by market
+  cap (endpoint already orders `market_cap_bdt DESC`).
 - The existing `stocks/page.tsx` may optionally be refactored to use this
   method later; **out of scope** for this change (avoid touching the screener).
 
@@ -118,7 +119,7 @@ Responsibilities:
   `open-command-palette` → set open `true`. Lets the TopBar (a separate
   component) open the palette without a shared store or context.
 - **Search.** Controlled input value; debounced ~200ms; on change call
-  `api.stocks.list({ q, limit: 8 })`. Track `loading` and `results`.
+  `api.stocks.list({ q, limit: 5 })`. Track `loading` and `results`.
   Ignore stale responses (guard with a request sequence/ref so a slow earlier
   request can't overwrite a newer one).
 - **Render.** shadcn `CommandDialog` containing `CommandInput`,
@@ -145,7 +146,7 @@ User: Ctrl+K  ──► CommandPalette opens
 User: types "gp" ──► debounce ──► api.stocks.list({q:"gp",limit:8})
                                         │
                                         ▼
-                 GET /api/stocks?q=gp&limit=8 ──► ILIKE ticker/name ──► rows
+                 GET /api/stocks?q=gp&limit=5 ──► ILIKE ticker/name ──► rows
                                         │
                                         ▼
               CommandList renders results ──► Enter/click ──► router.push(/stocks/GP)
