@@ -1,13 +1,16 @@
 # tests/unit/test_api_market.py
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from api import deps
 
 
@@ -116,6 +119,19 @@ def test_market_movers_drops_non_finite_floats():
     assert tickers == {"GP"}  # NANCO and INFCO dropped
 
 
+def test_rec_change_pct_derives_from_prev_close_when_absent():
+    """dse_direct rows omit change_pct — helper derives it from ltp/prev_close."""
+    from api.routers.market import _rec_change_pct
+    # present → passthrough
+    assert _rec_change_pct({"change_pct": 2.5}) == 2.5
+    # absent → computed from ltp + prev_close
+    cp = _rec_change_pct({"change_pct": None, "ltp": 29.5, "prev_close": 28.7})
+    assert abs(cp - (29.5 - 28.7) / 28.7 * 100.0) < 1e-9
+    # no basis → None
+    assert _rec_change_pct({"change_pct": None, "ltp": 29.5}) is None
+    assert _rec_change_pct({"change_pct": None, "ltp": 29.5, "prev_close": 0}) is None
+
+
 # ---- Sector tests ----
 
 def test_list_sectors_returns_rows():
@@ -123,7 +139,7 @@ def test_list_sectors_returns_rows():
     mock_conn = AsyncMock()
     mock_conn.fetch = AsyncMock(return_value=[
         {"sector": "Telecom", "pe": Decimal("15.5"), "change_pct": Decimal("1.2"),
-         "market_cap_bdt": Decimal("1000000000"), "fetched_at": datetime.now(timezone.utc)}
+         "market_cap_bdt": Decimal("1000000000"), "fetched_at": datetime.now(UTC)}
     ])
     mock_pool = MagicMock()
     mock_pool.acquire.return_value.__aenter__ = AsyncMock(return_value=mock_conn)

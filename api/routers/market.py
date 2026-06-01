@@ -84,6 +84,19 @@ def _rec_value(rec: dict) -> float | None:
     return _f(v)
 
 
+def _rec_change_pct(rec: dict) -> float | None:
+    """Percent change. dse_direct's feed has no %CHANGE column — derive it from
+    prev_close when the source omits it (same fallback as the ingest path)."""
+    cp = _f(rec.get("change_pct"))
+    if cp is not None:
+        return cp
+    ltp = _rec_ltp(rec)
+    prev = _f(rec.get("prev_close"))
+    if ltp is not None and prev not in (None, 0):
+        return (ltp - prev) / prev * 100.0
+    return None
+
+
 def _market_status(now: datetime | None = None) -> str:
     """DSE trades Sun–Thu, 10:00–14:30 Asia/Dhaka. Derived from the clock since
     bdshare market_info carries no status flag."""
@@ -122,7 +135,7 @@ async def _build_indices() -> dict:
     advance = decline = unchanged = 0
     try:
         for rec in await _fetch_live_records():
-            cp = _f(rec.get("change_pct"))
+            cp = _rec_change_pct(rec)
             if cp is None:
                 continue
             if cp > 0:
@@ -218,7 +231,7 @@ async def market_movers(
     movers: list[dict] = []
     for rec in records:
         ticker = str(rec.get("ticker") or "").strip()
-        change_pct = _f(rec.get("change_pct"))
+        change_pct = _rec_change_pct(rec)
         close = _f(rec.get("close") if rec.get("close") is not None else rec.get("ltp"))
         if not ticker or change_pct is None or close is None:
             continue
@@ -261,7 +274,7 @@ async def market_heatmap(pool=Depends(get_db), _user=Depends(get_current_user)):
             "ticker": ticker,
             "name": info.get("name") or rec.get("full_name") or ticker,
             "sector": info.get("sector") or rec.get("sector") or "Other",
-            "change_pct": _f(rec.get("change_pct")),
+            "change_pct": _rec_change_pct(rec),
             "ltp": _rec_ltp(rec),
             "value_bdt": _rec_value(rec),
             "market_cap": _f(mc),
