@@ -172,16 +172,56 @@ async def _upsert_macro_df(pool, df) -> int:
 # ── Job Functions ──────────────────────────────────────────────────────
 
 
-async def job_live_prices() -> None:
-    """Fetch live prices every 15 min during market hours."""
-    logger.info("job_live_prices: starting")
-    # TODO: implement ingest_live_prices()
+async def _invalidate_live_caches() -> None:
+    """Drop caches that depend on live prices so the next request rebuilds."""
     try:
         from mgmt.cache import cache_delete_pattern
         await cache_delete_pattern("cache:pipeline_status:*")
         await cache_delete_pattern("cache:live_prices*")
+        await cache_delete_pattern("cache:live_snapshot")
+        await cache_delete_pattern("cache:api:stocks:detail:*")
+        await cache_delete_pattern("cache:api:market:*")
     except Exception as exc:
         logger.warning("job_live_prices: cache invalidation failed error=%s", exc)
+
+
+async def job_live_prices() -> None:
+    """Fetch live prices during market hours and UPSERT one row per ticker per
+    trading day into stock_prices. Live feeds report cumulative volume/value, so
+    appending a fresh row each run would inflate daily_ohlcv's SUM(volume); the
+    per-day bucket + ON CONFLICT DO UPDATE keeps a single converging bar."""
+    from db.pool import get_pool
+    from extraction.base import AllAdaptersFailedError
+    from extraction.jobs import job_run
+    from extraction.registry import STREAMS
+
+    logger.info("job_live_prices: starting")
+    now = datetime.now(BD_TZ)
+    if not _market_is_open(now):
+        logger.info("job_live_prices: market closed — skipping write")
+        await _invalidate_live_caches()
+        return
+
+    async with job_run("live_price_pull", stream_name="live_prices") as ctx:
+        try:
+            result = await STREAMS["live_prices"].fetch()
+        except AllAdaptersFailedError as exc:
+            logger.error("job_live_prices: all adapters failed error=%s", exc)
+            raise
+
+        records = result.data.to_dict("records")
+        ctx["records_fetched"] = len(records)
+
+        bucket_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        rows = _live_records_to_rows(records, bucket_time, result.source_name)
+
+        if rows:
+            pool = await get_pool()
+            await pool.executemany(_LIVE_UPSERT_SQL, rows)
+        ctx["records_inserted"] = len(rows)
+        logger.info("job_live_prices: upserted=%d source=%s", len(rows), result.source_name)
+
+    await _invalidate_live_caches()
     logger.info("job_live_prices: complete")
 
 
