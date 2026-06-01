@@ -145,7 +145,7 @@ export default async function StockDetailPage({
         {/* Chart */}
         <div className="bg-[#111118] border border-[#2a2a3a] rounded-xl p-4 h-[536px]">
           <PriceChart ticker={company.ticker} />
-        </div>
+        </div> 
 
         {/* Sidebar */}
         <div className="space-y-3">

@@ -11,7 +11,7 @@ from extraction.normalizers import normalize_ticker, to_decimal
 
 class BDShareLivePricesAdapter(BaseAdapter):
     name = "bdshare_live_prices"
-    priority = 1
+    priority = 2
     timeout_seconds = 20
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:

@@ -57,7 +57,7 @@ class DSEDirectLivePricesAdapter(BaseAdapter):
     Note: No OPEN price, no %CHANGE in this feed.
     """
     name = "dse_direct_live_prices"
-    priority = 3
+    priority = 1
     timeout_seconds = 30
 
     def __init__(self, url: str = LIVE_PRICE_URL) -> None:

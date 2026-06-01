@@ -14,8 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import sys
 from datetime import datetime, timezone
+from typing import Any
 
 from db.pool import get_pool
 from extraction.adapters.dse_direct.company_info import DSEDirectCompanyInfoAdapter
@@ -25,6 +27,23 @@ logger = logging.getLogger(__name__)
 
 _CONCURRENCY = 3
 _DELAY_S = 1.5
+
+
+def _num(value: Any) -> float | None:
+    """Coerce pandas/numpy NaN to None so NUMERIC columns never store 'NaN'.
+
+    Missing dividends/EPS arrive as None but pandas turns them into float NaN in
+    the DataFrame; asyncpg writes that straight into NUMERIC as 'NaN', which then
+    fails Pydantic finite_number validation on read.
+    """
+    if value is None:
+        return None
+    try:
+        if math.isnan(value):
+            return None
+    except (TypeError, ValueError):
+        return value
+    return value
 
 
 async def _load_one(
@@ -61,12 +80,12 @@ async def _load_one(
             """,
             row["ticker"],
             int(row["fiscal_year"]),
-            row.get("eps"),
-            row.get("eps_diluted"),
-            row.get("nav"),
-            row.get("pe"),
-            row.get("cash_div_pct"),
-            row.get("stock_div_pct"),
+            _num(row.get("eps")),
+            _num(row.get("eps_diluted")),
+            _num(row.get("nav")),
+            _num(row.get("pe")),
+            _num(row.get("cash_div_pct")),
+            _num(row.get("stock_div_pct")),
             row["fetched_at"],
             row["source"],
             job_id,

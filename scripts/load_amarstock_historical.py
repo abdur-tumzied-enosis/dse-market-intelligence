@@ -52,6 +52,12 @@ def _float_or_none(val: str) -> float | None:
     return float(v) if v else None
 
 
+def _price_or_none(val: str) -> float | None:
+    """OHLC price, treating 0/blank as missing — a traded price is never literally 0."""
+    f = _float_or_none(val)
+    return f if f else None
+
+
 def _int_or_none(val: str) -> int | None:
     v = val.strip()
     return int(float(v)) if v else None
@@ -81,9 +87,9 @@ async def main() -> None:
                     rows.append((
                         _parse_date(row["Date"]),
                         ticker,
-                        _float_or_none(row["Open"]),
-                        _float_or_none(row["High"]),
-                        _float_or_none(row["Low"]),
+                        _price_or_none(row["Open"]),
+                        _price_or_none(row["High"]),
+                        _price_or_none(row["Low"]),
                         float(close_raw),
                         _int_or_none(row["Volume"]),
                     ))

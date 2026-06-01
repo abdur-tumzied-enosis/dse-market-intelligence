@@ -163,9 +163,12 @@ class TestBDShareMarketInfoNormalize:
     def test_source(self, df: pd.DataFrame):
         assert (df["source"] == "bdshare_market_info").all()
 
-    def test_change_pct_none(self, df: pd.DataFrame):
-        # change_pct not available from bdshare market_info endpoint
-        assert df["change_pct"].isna().all()
+    def test_change_pct_derived(self, df: pd.DataFrame):
+        # change_pct derived from row0 vs row1 of the 30-day history
+        vals = df["change_pct"].dropna()
+        assert len(vals) == 3
+        for v in vals:
+            assert isinstance(v, Decimal), f"expected Decimal, got {type(v)}"
 
     def test_fetched_at_utc(self, df: pd.DataFrame):
         ts = df["fetched_at"].iloc[0]

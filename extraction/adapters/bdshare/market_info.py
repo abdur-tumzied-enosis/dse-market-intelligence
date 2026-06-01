@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import pandas as pd
@@ -15,11 +16,12 @@ class BDShareMarketInfoAdapter(BaseAdapter):
 
     Actual columns (verified 2026-05-21): Date, Total Trade, Total Volume,
     Total Value (mn), Total Market Cap. (mn), DSEX Index, DSES Index, DS30 Index, DGEN Index
-    Returns 30-day history; we take row 0 (most recent trading day).
-    No change_pct column — not available from this endpoint.
+    Returns 30-day history; we take row 0 (most recent trading day) and derive
+    change_pct from row 1 (previous trading day) — the endpoint has no change_pct
+    column of its own.
     """
     name = "bdshare_market_info"
-    priority = 1
+    priority = 2
     timeout_seconds = 15
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -27,6 +29,7 @@ class BDShareMarketInfoAdapter(BaseAdapter):
         df.columns = [c.strip().upper() for c in df.columns]
 
         latest = df.iloc[0]
+        prev = df.iloc[1] if len(df) > 1 else None
         fetched = datetime.now(timezone.utc)
 
         index_col_map = {
@@ -38,10 +41,16 @@ class BDShareMarketInfoAdapter(BaseAdapter):
         for idx_name, col in index_col_map.items():
             if col not in df.columns:
                 continue
+            cur = to_decimal(latest[col])
+            change_pct = None
+            if prev is not None and cur is not None:
+                prior = to_decimal(prev[col])
+                if prior and prior != 0:
+                    change_pct = round((cur - prior) / prior * Decimal(100), 4)
             rows.append({
                 "index_name": idx_name,
-                "value":      to_decimal(latest[col]),
-                "change_pct": None,
+                "value":      cur,
+                "change_pct": change_pct,
                 "fetched_at": fetched,
                 "source":     self.name,
             })

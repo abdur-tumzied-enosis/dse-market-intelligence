@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
-from extraction.normalizers import normalize_ticker, to_decimal, to_utc
+from extraction.normalizers import normalize_ticker, to_decimal
 
 
 class BDShareHistoricalAdapter(BaseAdapter):
@@ -27,12 +27,18 @@ class BDShareHistoricalAdapter(BaseAdapter):
         df.columns = [c.strip().upper() for c in df.columns]
 
         def parse_date(val: Any) -> datetime | None:
+            # Daily bars carry a pure trading date with no intraday time. Store it at
+            # midnight UTC so the calendar date == trading date and rows align with the
+            # amarstock_csv convention. assume_dhaka here would shift midnight back 6h
+            # into the previous UTC day, splitting one session across two daily buckets.
             if isinstance(val, (datetime, pd.Timestamp)):
-                return to_utc(pd.Timestamp(val).to_pydatetime(), assume_dhaka=True)
-            try:
-                return to_utc(datetime.strptime(str(val).strip(), "%Y-%m-%d"), assume_dhaka=True)
-            except (ValueError, TypeError):
-                return None
+                d = pd.Timestamp(val).date()
+            else:
+                try:
+                    d = datetime.strptime(str(val).strip(), "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    return None
+            return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
         out = pd.DataFrame()
         out["ticker"]     = df["SYMBOL"].apply(normalize_ticker)
@@ -45,7 +51,14 @@ class BDShareHistoricalAdapter(BaseAdapter):
         out["trades"]     = pd.to_numeric(df.get("TRADE", pd.Series()), errors="coerce")
         out["value_bdt"]  = df.get("VALUE", pd.Series(dtype=object)).apply(to_decimal)
         out["source"]     = self.name
-        return out.dropna(subset=["date", "close"])
+        out = out.dropna(subset=["date", "close"])
+
+        # Drop no-trade placeholder bars. For illiquid scrips (mostly bonds) bdshare emits
+        # a flat row with open=high=low=0, volume=0 and close carried from the prior day.
+        # amarstock omits these days entirely; keeping them injects zero-price bars that
+        # corrupt OHLC charts and indicators.
+        out = out[(out["high"] > 0) & (out["open"] > 0) & (out["low"] > 0)]
+        return out
 
     async def fetch(self, ticker: str, start: str, end: str, **kwargs: Any) -> AdapterResult:
         """

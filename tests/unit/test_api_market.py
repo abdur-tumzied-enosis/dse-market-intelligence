@@ -67,22 +67,53 @@ def test_market_summary_returns_aggregates():
 
 
 def test_market_movers_returns_gainers_and_losers():
+    """Movers come from the live_prices stream; names are enriched from companies."""
     from api.routers.market import router as market_router
+    # single conn.fetch → companies map (ticker → name/sector)
     pool = _pool_with_fetch([
-        [{"ticker": "GP", "name": "Grameenphone", "close": Decimal("400"), "change_pct": Decimal("5.0")}],
-        [{"ticker": "SQURPHARMA", "name": "Square Pharma", "close": Decimal("200"), "change_pct": Decimal("-3.0")}],
+        [{"ticker": "GP", "name": "Grameenphone", "sector": "Telecom"},
+         {"ticker": "SQURPHARMA", "name": "Square Pharma", "sector": "Pharma"}],
     ])
     app = _make_app([market_router])
     app.dependency_overrides[deps.get_db] = lambda: pool
 
+    live = [
+        {"ticker": "GP", "close": 400.0, "change_pct": 5.0},
+        {"ticker": "SQURPHARMA", "close": 200.0, "change_pct": -3.0},
+    ]
     with patch("api.routers.market._cache_get", return_value=None), \
-         patch("api.routers.market._cache_set"):
+         patch("api.routers.market._cache_set"), \
+         patch("api.routers.market._fetch_live_records", return_value=live):
         client = TestClient(app)
         resp = client.get("/api/market/movers")
     assert resp.status_code == 200
     body = resp.json()
-    assert len(body["gainers"]) == 1
-    assert len(body["losers"]) == 1
+    assert body["gainers"][0]["ticker"] == "GP"
+    assert body["gainers"][0]["name"] == "Grameenphone"
+    assert body["losers"][0]["ticker"] == "SQURPHARMA"
+
+
+def test_market_movers_drops_non_finite_floats():
+    """NaN/Infinity from a source must not reach the response — Starlette renders
+    with allow_nan=False, so one bad float 500s the whole request."""
+    from api.routers.market import router as market_router
+    pool = _pool_with_fetch([[{"ticker": "GP", "name": "Grameenphone", "sector": "Telecom"}]])
+    app = _make_app([market_router])
+    app.dependency_overrides[deps.get_db] = lambda: pool
+
+    live = [
+        {"ticker": "GP", "close": 400.0, "change_pct": 5.0},
+        {"ticker": "NANCO", "close": 100.0, "change_pct": float("nan")},
+        {"ticker": "INFCO", "close": float("inf"), "change_pct": 2.0},
+    ]
+    with patch("api.routers.market._cache_get", return_value=None), \
+         patch("api.routers.market._cache_set"), \
+         patch("api.routers.market._fetch_live_records", return_value=live):
+        client = TestClient(app, raise_server_exceptions=True)
+        resp = client.get("/api/market/movers")
+    assert resp.status_code == 200  # would be 500 if NaN/inf leaked through
+    tickers = {m["ticker"] for m in resp.json()["gainers"]}
+    assert tickers == {"GP"}  # NANCO and INFCO dropped
 
 
 # ---- Sector tests ----

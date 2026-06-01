@@ -22,6 +22,7 @@ from extraction.adapters.dse_direct.company_info import DSEDirectCompanyInfoAdap
 from extraction.adapters.dse_direct.depth import DSEDirectDepthPlaywrightAdapter
 from extraction.adapters.dse_direct.gainers_losers import DSEDirectGainersAdapter, DSEDirectLosersAdapter
 from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
+from extraction.adapters.dse_direct.market_info import DSEDirectMarketInfoAdapter
 from extraction.adapters.dse_direct.pdf_reports import DSEDirectPDFAdapter
 from extraction.adapters.dse_direct.sector_pe import DSEDirectSectorPEAdapter
 from extraction.adapters.bsec.ipo_scraper import BsecIPOAdapter
@@ -41,9 +42,9 @@ def _build_registry() -> dict[str, DataStream]:
     # Fallback: amarstock API, dse_direct scrape
     # ------------------------------------------------------------------
     streams["live_prices"] = DataStream(name="live_prices", adapters=[
+        DSEDirectLivePricesAdapter(),
         BDShareLivePricesAdapter(),
         AmarStockLivePricesAdapter(),
-        DSEDirectLivePricesAdapter(),
     ])
 
     # ------------------------------------------------------------------
@@ -57,11 +58,12 @@ def _build_registry() -> dict[str, DataStream]:
 
     # ------------------------------------------------------------------
     # Stream: market_indices
-    # Primary: bdshare (get_market_info) — DSEX, DS30, DSES
+    # Primary: dse_direct homepage box — carries change_pct directly, reliable
+    # Fallback: bdshare (get_market_info) — DSEX, DS30, DSES (change_pct derived)
     # ------------------------------------------------------------------
     streams["market_indices"] = DataStream(name="market_indices", adapters=[
+        DSEDirectMarketInfoAdapter(),
         BDShareMarketInfoAdapter(),
-        # DSEDirectLivePricesAdapter(priority=2),  # Phase 1E
     ])
 
     # ------------------------------------------------------------------

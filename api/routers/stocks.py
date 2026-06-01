@@ -164,7 +164,7 @@ async def get_prices(
         if not exists:
             raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
         rows = await conn.fetch(
-            f"SELECT day, open, high, low, close, volume, value_bdt FROM {table} WHERE {where} ORDER BY day DESC LIMIT 500",
+            f"SELECT day, open, high, low, close, volume, value_bdt FROM {table} WHERE {where} ORDER BY day DESC LIMIT 800",
             *params,
         )
 
