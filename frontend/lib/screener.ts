@@ -1,5 +1,6 @@
 // frontend/lib/screener.ts
 import type { StockListItem } from './types'
+import { getRating } from './rating'
 
 export interface ScreenerFilters {
   sector: string          // 'All' or a sector name
@@ -10,7 +11,7 @@ export interface ScreenerFilters {
 
 export function matchesFilters(s: StockListItem, f: ScreenerFilters): boolean {
   if (f.sector !== 'All' && s.sector !== f.sector) return false
-  if (f.rating !== 'All' && s.rating !== f.rating) return false
+  if (f.rating !== 'All' && getRating(s.health_score) !== f.rating) return false
   if (f.maxPe !== null) {
     if (s.pe === null) return false
     if (Number(s.pe) > f.maxPe) return false

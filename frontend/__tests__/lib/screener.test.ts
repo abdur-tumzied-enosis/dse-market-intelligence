@@ -23,6 +23,12 @@ describe('matchesFilters', () => {
     expect(matchesFilters(base, { sector: 'All', search: '', maxPe: null, rating: 'BUY' })).toBe(false)
     expect(matchesFilters(base, { sector: 'All', search: '', maxPe: null, rating: 'STRONG_BUY' })).toBe(true)
   })
+  it('derives rating from health_score, not s.rating', () => {
+    // Deliberately divergent: backend rating says HOLD but score 82 => STRONG_BUY
+    const divergent = { ...base, health_score: 82, rating: 'HOLD' as const }
+    expect(matchesFilters(divergent, { sector: 'All', search: '', maxPe: null, rating: 'STRONG_BUY' })).toBe(true)
+    expect(matchesFilters(divergent, { sector: 'All', search: '', maxPe: null, rating: 'HOLD' })).toBe(false)
+  })
   it('matches search against ticker and name, case-insensitively', () => {
     expect(matchesFilters(base, { sector: 'All', search: 'grameen', maxPe: null, rating: 'All' })).toBe(true)
     expect(matchesFilters(base, { sector: 'All', search: 'xyz', maxPe: null, rating: 'All' })).toBe(false)

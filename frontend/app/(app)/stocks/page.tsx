@@ -15,6 +15,8 @@ const SECTORS = [
   'Ceramics', 'Tannery', 'Travel & Leisure', 'Corporate Bond',
 ]
 
+const RATINGS = ['All', 'STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL']
+
 function fmtCap(bdt: number | null): string {
   if (!bdt) return '—'
   const cr = bdt / 10_000_000
@@ -32,7 +34,6 @@ export default function StocksPage() {
   const [sector, setSector] = useState('All')
   const [maxPe, setMaxPe] = useState<number | null>(null)
   const [rating, setRating] = useState('All')
-  const RATINGS = ['All', 'STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL']
   const [sortKey, setSortKey] = useState<SortKey>('market_cap_bdt')
   const [sortAsc, setSortAsc] = useState(false)
 
