@@ -2,16 +2,19 @@ import { serverApi } from '@/lib/server-api'
 import IndexCard from '@/components/market/IndexCard'
 import MoverStrip from '@/components/market/MoverStrip'
 import HeatmapGrid from '@/components/market/HeatmapGrid'
+import RegimeCard from '@/components/market/RegimeCard'
 
 export default async function DashboardPage() {
-  const [indices, movers, heatmap] = await Promise.allSettled([
+  const [indices, regime, movers, heatmap] = await Promise.allSettled([
     serverApi.market.indices(),
+    serverApi.market.regime(),
     serverApi.market.movers(),
     serverApi.market.heatmap(),
   ])
 
   const idx = indices.status === 'fulfilled' ? indices.value : null
-  const mv  = movers.status === 'fulfilled'  ? movers.value  : null
+  const rg  = regime.status  === 'fulfilled' ? regime.value  : null
+  const mv  = movers.status  === 'fulfilled' ? movers.value  : null
   const hm  = heatmap.status === 'fulfilled' ? heatmap.value : []
 
   return (
@@ -41,6 +44,7 @@ export default async function DashboardPage() {
             </p>
             <p className="text-xs text-muted mt-0.5">{idx.unchanged} unchanged</p>
           </div>
+          {rg && <RegimeCard data={rg} />}
         </div>
       ) : (
         <p className="text-muted text-sm mb-6">Market data unavailable.</p>
