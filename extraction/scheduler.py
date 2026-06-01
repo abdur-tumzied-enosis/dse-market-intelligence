@@ -528,6 +528,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         minute=cfg.live_prices_minutes,
         id="live_price_pull",
         replace_existing=True,
+        misfire_grace_time=300,
     )
 
     scheduler.add_job(
@@ -538,6 +539,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         minute=cfg.eod_snapshot_minute,
         id="eod_snapshot",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.add_job(
@@ -555,6 +557,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         minute=cfg.daily_macro_minute,
         id="daily_macro",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.add_job(
@@ -565,6 +568,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         minute=cfg.weekly_fundamentals_minute,
         id="weekly_fundamentals",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.add_job(
@@ -575,6 +579,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         minute=cfg.monthly_minute,
         id="monthly",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.add_job(
@@ -586,6 +591,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         minute=cfg.quarterly_minute,
         id="quarterly_retrain",
         replace_existing=True,
+        misfire_grace_time=3600,
     )
 
     scheduler.add_job(
