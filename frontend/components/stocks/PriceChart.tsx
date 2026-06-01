@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { get } from '@/lib/api'
-import type { OHLCVResponse } from '@/lib/types'
+import type { OHLCVResponse, LivePrice } from '@/lib/types'
 
 const RANGES = [
   { label: '1M', days: 30 },
@@ -36,6 +36,32 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   const [error, setError]             = useState<string | null>(null)
   const [hovered, setHovered]         = useState<HoveredCandle | null>(null)
 
+  // Append/refresh today's candle from the live endpoint. daily_ohlcv lags
+  // (hourly continuous-aggregate + EOD), so today's bar is sourced live here.
+  // Live feed has no open → use prev_close (change-since-prev-close candle).
+  // Returns the market_status so the caller can stop polling when closed.
+  const appendLiveBar = useCallback(async (): Promise<string | null> => {
+    if (!candleRef.current || !volRef.current) return null
+    try {
+      const live = await get<LivePrice>(`/api/stocks/${ticker}/live`)
+      if (!live.available || live.ltp == null) return live.market_status
+      const close = live.ltp
+      const open = live.prev_close ?? close
+      const high = live.high ?? Math.max(open, close)
+      const low = live.low ?? Math.min(open, close)
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dhaka' }).format(new Date())
+      candleRef.current.update({ time: today, open, high, low, close })
+      volRef.current.update({
+        time: today,
+        value: Number(live.volume ?? 0),
+        color: close >= open ? 'rgba(0,212,164,0.22)' : 'rgba(255,77,106,0.22)',
+      })
+      return live.market_status
+    } catch {
+      return null  // chart still shows historical data if live fetch fails
+    }
+  }, [ticker])
+
   const loadData = useCallback(async (range: string) => {
     if (!candleRef.current || !volRef.current) return
     setLoading(true)
@@ -67,12 +93,13 @@ export default function PriceChart({ ticker }: { ticker: string }) {
       })))
 
       chartRef.current?.timeScale().fitContent()
+      await appendLiveBar()  // overlay today's live candle on the historical data
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
       setLoading(false)
     }
-  }, [ticker])
+  }, [ticker, appendLiveBar])
 
   // Init chart — recreate when ticker changes
   useEffect(() => {
@@ -175,6 +202,25 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   useEffect(() => {
     loadData(activeRange)
   }, [activeRange, loadData])
+
+  // Refresh today's live candle every 2 min while the market is open
+  useEffect(() => {
+    let alive = true
+    let timer: ReturnType<typeof setInterval> | null = null
+    async function tick() {
+      const status = await appendLiveBar()
+      if (!alive) return
+      if (status && status !== 'Open' && timer) {
+        clearInterval(timer)
+        timer = null
+      }
+    }
+    timer = setInterval(tick, 120_000)
+    return () => {
+      alive = false
+      if (timer) clearInterval(timer)
+    }
+  }, [appendLiveBar])
 
   return (
     <div className="flex flex-col gap-3 h-full">
