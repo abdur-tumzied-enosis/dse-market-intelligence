@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytz
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -212,7 +212,13 @@ async def job_live_prices() -> None:
         records = result.data.to_dict("records")
         ctx["records_fetched"] = len(records)
 
-        bucket_time = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Bucket to 00:00 UTC of the Dhaka trading date so the row shares its
+        # (time, ticker) key — and its daily_ohlcv UTC time_bucket — with the
+        # historical/EOD bars (AmarStock stamps daily bars at 00:00:00 UTC).
+        # During trading hours (04:00–08:30 UTC) the Dhaka date equals the UTC
+        # date, so there is no day-boundary ambiguity.
+        d = now.date()
+        bucket_time = datetime(d.year, d.month, d.day, tzinfo=UTC)
         rows = _live_records_to_rows(records, bucket_time, result.source_name)
 
         if rows:
