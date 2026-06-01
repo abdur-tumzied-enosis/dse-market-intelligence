@@ -117,7 +117,9 @@ class AnnouncementsResponse(BaseModel):
 
 class WyckoffEvent(BaseModel):
     day: date
-    type: str  # "SC" | "BC" | "SPRING" | "UPTHRUST"
+    # One of: SC | BC | SPRING | PS | AR | ST | TEST | SOS | LPS
+    #         | PSY | UT | UTAD | SOW | LPSY
+    type: str
     price: Decimal
     label: str
     help: str

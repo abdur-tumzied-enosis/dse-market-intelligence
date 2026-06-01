@@ -20,7 +20,32 @@ from datetime import date, timedelta
 
 import pytest
 
-from api.analysis.wyckoff import Bar, detect_wyckoff
+from api.analysis.wyckoff import (
+    EVENT_HELP,
+    EVENT_LABEL,
+    Bar,
+    detect_wyckoff,
+)
+
+#: The full 14-value Wyckoff event union the detector may emit (UPTHRUST was
+#: split into UT / UTAD and removed). Every emitted event's ``type`` must be a
+#: member of this set.
+WYCKOFF_EVENT_TYPES = {
+    "SC",
+    "BC",
+    "SPRING",
+    "PS",
+    "AR",
+    "ST",
+    "TEST",
+    "SOS",
+    "LPS",
+    "PSY",
+    "UT",
+    "UTAD",
+    "SOW",
+    "LPSY",
+}
 
 # ---------------------------------------------------------------------------
 # Builders
@@ -142,6 +167,169 @@ def _pure_trend_series() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Full-schematic builders — engineered to surface the entire event sequence.
+#
+# These series are hand-tuned against the detector's named thresholds so the
+# state machine fires every optional event in chronological order:
+#   ACCUMULATION:  PS -> SC -> AR -> ST -> Spring -> Test -> SOS -> LPS
+#   DISTRIBUTION:  PSY -> BC -> AR -> ST -> UT -> UTAD -> SOW -> LPSY
+#
+# Key tuning notes (so the asserts below stay legible):
+#   - The flat band is built with asymmetric wicks: low-bars wick down to the
+#     support anchor, high-bars wick up to the resistance anchor, so the 10th /
+#     90th-percentile S/R cluster locks onto stable levels. This keeps the ST
+#     (which returns *near* but not *through* the climax extreme) from drifting
+#     the percentile onto itself and being mis-read as a Spring / UT.
+#   - The climax bar carries ~3x volume and a spread >= CLIMAX_MIN_SPREAD.
+#   - PS / PSY are pre-climax bars carrying >= PRELIM_VOLUME_MULT volume.
+#   - In distribution, an early in-range upthrust (before UTAD_LATE_FRAC of the
+#     range) is labeled UT; a later terminal one (after the ST, past the late
+#     mark) is promoted to UTAD — hence the long mid-range consolidation.
+# ---------------------------------------------------------------------------
+
+
+def _accum_flat(i: int, bars: list[dict], n: int, vol: float = 600.0) -> int:
+    """Append `n` flat accumulation band bars (closes 69<->71); low-bars wick
+    down to the 68.0 support anchor, high-bars up to the 71.4 resistance."""
+    for k in range(n):
+        if k % 2:
+            bars.append(_bar(i, 71.0, 71.4, 70.6, 71.0, vol))  # high bar
+        else:
+            bars.append(_bar(i, 69.0, 69.4, 68.0, 69.0, vol))  # low bar -> support
+        i += 1
+    return i
+
+
+def _full_accumulation_series() -> list[dict]:
+    """Downtrend -> wide flat range carrying the full accumulation schematic:
+    PS -> SC -> AR -> ST -> Spring -> Test -> SOS -> LPS."""
+    bars: list[dict] = []
+    i = 0
+
+    # Prior downtrend (normal volume) -> classifies the range as accumulation.
+    for k in range(30):
+        p = 120.0 - k * 1.6
+        bars.append(_bar(i, p, p + 0.3, p - 0.3, p - 0.5, 1000))
+        i += 1
+
+    # Long flat lead-in so the range span opens well before the climax,
+    # leaving room for a Preliminary Support bar inside the span.
+    i = _accum_flat(i, bars, 25)
+
+    # PS — preliminary support: elevated-volume bar before the climax.
+    bars.append(_bar(i, 70.5, 70.7, 68.4, 68.7, 1600))
+    i += 1
+    i = _accum_flat(i, bars, 4)
+
+    # SC — selling climax: wide down-bar near support on ~3x volume.
+    bars.append(_bar(i, 70.0, 70.2, 66.8, 67.4, 2200))
+    i += 1
+
+    # AR — automatic rally: sharp bounce to the top of the band (its low sits
+    # well above support so it does not pre-empt the ST as the nearest-low bar).
+    bars.append(_bar(i, 68.6, 72.0, 68.5, 71.8, 800))
+    i += 1
+    i = _accum_flat(i, bars, 3)
+
+    # ST — secondary test: returns near (but above) support on light volume.
+    bars.append(_bar(i, 68.9, 69.2, 68.4, 68.6, 900))
+    i += 1
+    i = _accum_flat(i, bars, 3)
+
+    # Spring — deep false breakdown below support, closes back inside.
+    bars.append(_bar(i, 68.5, 69.0, 65.0, 69.0, 700))
+    i += 1
+
+    # Test — low-volume retest of the low after the spring.
+    bars.append(_bar(i, 68.0, 68.4, 66.9, 67.6, 400))
+    i += 1
+    i = _accum_flat(i, bars, 2)
+
+    # SOS — sign of strength: wide up-bar on heavy volume breaking resistance.
+    bars.append(_bar(i, 69.5, 74.5, 69.3, 74.0, 1200))
+    i += 1
+
+    # LPS — last point of support: pullback holding near old resistance.
+    bars.append(_bar(i, 72.0, 72.5, 70.8, 71.6, 700))
+    i += 1
+    i = _accum_flat(i, bars, 3)
+
+    return bars
+
+
+def _dist_flat(i: int, bars: list[dict], n: int, vol: float = 600.0) -> int:
+    """Append `n` flat distribution band bars (closes 129<->131); high-bars
+    wick up to the 132.0 resistance anchor, low-bars down to 128.6."""
+    for k in range(n):
+        if k % 2:
+            bars.append(_bar(i, 131.0, 132.0, 130.6, 131.0, vol))  # high -> res
+        else:
+            bars.append(_bar(i, 129.0, 129.4, 128.6, 129.0, vol))  # low bar
+        i += 1
+    return i
+
+
+def _full_distribution_series() -> list[dict]:
+    """Uptrend -> wide flat range carrying the full distribution schematic:
+    PSY -> BC -> AR -> ST -> UT -> UTAD -> SOW -> LPSY (mirror of accumulation).
+    """
+    bars: list[dict] = []
+    i = 0
+
+    # Prior uptrend -> classifies the range as distribution.
+    for k in range(30):
+        p = 80.0 + k * 1.6
+        bars.append(_bar(i, p, p + 0.3, p - 0.3, p + 0.5, 1000))
+        i += 1
+
+    i = _dist_flat(i, bars, 25)
+
+    # PSY — preliminary supply: elevated-volume up-ish bar before the climax.
+    bars.append(_bar(i, 129.5, 131.6, 129.3, 131.3, 1600))
+    i += 1
+    i = _dist_flat(i, bars, 4)
+
+    # BC — buying climax: wide up-bar near resistance on ~3x volume
+    # (spread >= CLIMAX_MIN_SPREAD = 0.04).
+    bars.append(_bar(i, 129.2, 134.0, 128.5, 133.2, 2200))
+    i += 1
+
+    # AR — automatic reaction: sharp drop to the bottom of the band (its high
+    # sits well below resistance so it does not pre-empt the ST).
+    bars.append(_bar(i, 131.4, 131.5, 128.0, 128.2, 800))
+    i += 1
+    i = _dist_flat(i, bars, 3)
+
+    # ST — secondary test: returns near (but below) resistance on light volume.
+    bars.append(_bar(i, 131.1, 131.6, 131.0, 131.4, 900))
+    i += 1
+    i = _dist_flat(i, bars, 2)
+
+    # UT — early in-range upthrust: pierces above resistance, closes inside.
+    bars.append(_bar(i, 131.0, 135.0, 131.0, 131.0, 700))
+    i += 1
+
+    # Long mid-range consolidation so the next upthrust falls past the
+    # UTAD_LATE_FRAC mark and is promoted to the terminal UTAD.
+    i = _dist_flat(i, bars, 14)
+
+    # UTAD — terminal (late) upthrust above resistance after the ST.
+    bars.append(_bar(i, 131.5, 135.5, 131.4, 131.5, 650))
+    i += 1
+
+    # SOW — sign of weakness: wide down-bar on heavy volume breaking support.
+    bars.append(_bar(i, 130.5, 131.0, 126.0, 126.5, 1200))
+    i += 1
+
+    # LPSY — last point of supply: weak rally failing at old support.
+    bars.append(_bar(i, 128.0, 129.2, 127.5, 128.4, 700))
+    i += 1
+    i = _dist_flat(i, bars, 2)
+
+    return bars
+
+
+# ---------------------------------------------------------------------------
 # Accumulation
 # ---------------------------------------------------------------------------
 
@@ -211,8 +399,10 @@ class TestDistribution:
         assert "BC" in types
 
     def test_upthrust_present(self, ranges):
+        # UPTHRUST was split into UT (in-range false break) and UTAD (terminal,
+        # late upthrust). Either flavour satisfies "an upthrust was detected".
         types = [e.type for e in ranges[0].events]
-        assert "UPTHRUST" in types
+        assert "UT" in types or "UTAD" in types
 
     def test_bc_label_and_price(self, ranges):
         bc = next(e for e in ranges[0].events if e.type == "BC")
@@ -221,10 +411,155 @@ class TestDistribution:
         assert bc.price == pytest.approx(112.4, abs=0.5)
 
     def test_upthrust_label(self, ranges):
-        ut = next(e for e in ranges[0].events if e.type == "UPTHRUST")
-        assert ut.label == "Upthrust"
+        ut = next(e for e in ranges[0].events if e.type in ("UT", "UTAD"))
+        assert ut.label in ("UT", "UTAD")
         # Pierced above resistance.
         assert ut.price > ranges[0].resistance
+
+
+# ---------------------------------------------------------------------------
+# Full accumulation schematic — PS, SC, AR, ST, Spring, Test, SOS, LPS
+# ---------------------------------------------------------------------------
+
+class TestFullAccumulationSchematic:
+    @pytest.fixture(scope="class")
+    def ranges(self):
+        return detect_wyckoff(_full_accumulation_series())
+
+    @pytest.fixture(scope="class")
+    def events(self, ranges):
+        assert len(ranges) == 1
+        return ranges[0].events
+
+    def test_phase_is_accumulation(self, ranges):
+        assert ranges[0].phase == "accumulation"
+
+    def test_full_event_set_detected(self, events):
+        # The detector should surface (close to) the entire accumulation
+        # schematic for this purpose-built series.
+        types = {e.type for e in events}
+        expected = {"PS", "SC", "AR", "ST", "SPRING", "TEST", "SOS", "LPS"}
+        missing = expected - types
+        assert not missing, f"missing accumulation events: {sorted(missing)}"
+
+    def test_spring_still_detected(self, events):
+        # Regression guard: the headline accumulation signal must survive.
+        assert "SPRING" in {e.type for e in events}
+
+    def test_events_in_chronological_order(self, events):
+        days = [e.day for e in events]
+        assert days == sorted(days), "events must be emitted in day order"
+
+    def test_sc_precedes_ar_precedes_sos(self, events):
+        day_of = {e.type: e.day for e in events}
+        assert day_of["SC"] < day_of["AR"], "SC must precede AR"
+        assert day_of["AR"] < day_of["SOS"], "AR must precede SOS"
+
+    def test_ps_precedes_sc(self, events):
+        # PS is optional, but when emitted it must come before the climax.
+        types = {e.type for e in events}
+        if "PS" in types:
+            day_of = {e.type: e.day for e in events}
+            assert day_of["PS"] < day_of["SC"], "PS must precede SC"
+
+    def test_no_upthrust_type_in_accumulation(self, events):
+        # UPTHRUST was removed entirely; an accumulation range never carries it.
+        types = {e.type for e in events}
+        assert "UPTHRUST" not in types
+        assert types.isdisjoint({"UT", "UTAD"})
+
+
+# ---------------------------------------------------------------------------
+# Full distribution schematic — PSY, BC, AR, ST, UT, UTAD, SOW, LPSY
+# ---------------------------------------------------------------------------
+
+class TestFullDistributionSchematic:
+    @pytest.fixture(scope="class")
+    def ranges(self):
+        return detect_wyckoff(_full_distribution_series())
+
+    @pytest.fixture(scope="class")
+    def events(self, ranges):
+        assert len(ranges) == 1
+        return ranges[0].events
+
+    def test_phase_is_distribution(self, ranges):
+        assert ranges[0].phase == "distribution"
+
+    def test_full_event_set_detected(self, events):
+        types = {e.type for e in events}
+        expected = {"PSY", "BC", "AR", "ST", "UT", "UTAD", "SOW", "LPSY"}
+        missing = expected - types
+        assert not missing, f"missing distribution events: {sorted(missing)}"
+
+    def test_events_in_chronological_order(self, events):
+        days = [e.day for e in events]
+        assert days == sorted(days), "events must be emitted in day order"
+
+    def test_bc_precedes_ar(self, events):
+        day_of = {e.type: e.day for e in events}
+        assert day_of["BC"] < day_of["AR"], "BC must precede AR"
+
+    def test_utad_after_st(self, events):
+        # UTAD is the terminal upthrust — when emitted it must follow the ST.
+        types = {e.type for e in events}
+        if "UTAD" in types:
+            day_of = {e.type: e.day for e in events}
+            assert "ST" in types, "UTAD without a preceding ST is inconsistent"
+            assert day_of["UTAD"] > day_of["ST"], "UTAD must occur after the ST"
+
+    def test_ut_precedes_utad(self, events):
+        # When both flavours are present the in-range UT precedes the terminal
+        # UTAD.
+        types = {e.type for e in events}
+        if "UT" in types and "UTAD" in types:
+            day_of = {e.type: e.day for e in events}
+            assert day_of["UT"] < day_of["UTAD"]
+
+    def test_no_upthrust_type_ever_emitted(self, events):
+        # The generic UPTHRUST type was intentionally removed (split into
+        # UT / UTAD). It must never appear.
+        types = [e.type for e in events]
+        assert "UPTHRUST" not in types
+
+
+# ---------------------------------------------------------------------------
+# Global event invariants — across every schematic series
+# ---------------------------------------------------------------------------
+
+class TestEventInvariants:
+    @pytest.fixture(scope="class")
+    def all_events(self):
+        ranges = (
+            detect_wyckoff(_accumulation_series())
+            + detect_wyckoff(_distribution_series())
+            + detect_wyckoff(_full_accumulation_series())
+            + detect_wyckoff(_full_distribution_series())
+        )
+        return [e for r in ranges for e in r.events]
+
+    def test_we_have_events_to_check(self, all_events):
+        assert all_events
+
+    def test_every_type_within_union(self, all_events):
+        for e in all_events:
+            assert e.type in WYCKOFF_EVENT_TYPES, f"unknown event type {e.type!r}"
+
+    def test_no_upthrust_anywhere(self, all_events):
+        assert all(e.type != "UPTHRUST" for e in all_events)
+
+    def test_every_event_has_nonempty_help(self, all_events):
+        for e in all_events:
+            assert isinstance(e.help, str)
+            assert e.help.strip(), f"empty help for {e.type}"
+            # Help must match the canonical text for that type.
+            assert e.help == EVENT_HELP[e.type]
+
+    def test_every_event_has_nonempty_label(self, all_events):
+        for e in all_events:
+            assert isinstance(e.label, str)
+            assert e.label.strip(), f"empty label for {e.type}"
+            assert e.label == EVENT_LABEL[e.type]
 
 
 # ---------------------------------------------------------------------------

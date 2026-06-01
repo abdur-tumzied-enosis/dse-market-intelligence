@@ -176,7 +176,21 @@ export interface AnnouncementsResponse {
 // Field names + literals mirror the backend schema in
 // docs/superpowers/specs/2026-06-01-wyckoff-overlay-design.md ("Response schema").
 
-export type WyckoffEventType = 'SC' | 'BC' | 'SPRING' | 'UPTHRUST'
+export type WyckoffEventType =
+  | 'SC'
+  | 'BC'
+  | 'SPRING'
+  | 'PS'
+  | 'AR'
+  | 'ST'
+  | 'TEST'
+  | 'SOS'
+  | 'LPS'
+  | 'PSY'
+  | 'UT'
+  | 'UTAD'
+  | 'SOW'
+  | 'LPSY'
 export type WyckoffPhase = 'accumulation' | 'distribution' | 'undetermined'
 
 export interface WyckoffEvent {

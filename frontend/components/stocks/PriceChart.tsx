@@ -24,16 +24,31 @@ const UP = '#00d4a4'
 const DOWN = '#ff4d6a'
 const NEUTRAL = '#a78bfa'
 
-// Per-event-type marker styling. Spring is bullish (up), Upthrust bearish (down),
-// SC bullish bottom (up), BC bearish top (down).
+// Per-event-type marker styling, grouped by Wyckoff side:
+//  • Markup / bullish (PS, SC, SPRING, TEST, SOS, LPS): green, arrow below the bar.
+//  • Markdown / bearish (PSY, BC, UT, UTAD, SOW, LPSY): red, arrow above the bar.
+//  • Neutral structural (AR, ST): violet circle.
 const EVENT_STYLE: Record<
   WyckoffEventType,
   { color: string; position: 'aboveBar' | 'belowBar'; shape: 'arrowUp' | 'arrowDown' | 'circle' }
 > = {
-  SC:       { color: UP,      position: 'belowBar', shape: 'arrowUp' },
-  BC:       { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
-  SPRING:   { color: UP,      position: 'belowBar', shape: 'arrowUp' },
-  UPTHRUST: { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  // Markup / bullish side — green, arrow below the bar
+  PS:     { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  SC:     { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  SPRING: { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  TEST:   { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  SOS:    { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  LPS:    { color: UP,      position: 'belowBar', shape: 'arrowUp' },
+  // Markdown / bearish side — red, arrow above the bar
+  PSY:    { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  BC:     { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  UT:     { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  UTAD:   { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  SOW:    { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  LPSY:   { color: DOWN,    position: 'aboveBar', shape: 'arrowDown' },
+  // Neutral structural — violet circle
+  AR:     { color: NEUTRAL, position: 'aboveBar', shape: 'circle' },
+  ST:     { color: NEUTRAL, position: 'aboveBar', shape: 'circle' },
 }
 
 const PHASE_COLOR: Record<string, string> = {
