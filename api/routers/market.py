@@ -135,7 +135,7 @@ def compute_regime(dsex_series: list[float], as_of: str | None) -> dict:
     dsex = dsex_series[0]
     ma = sum(dsex_series[:window]) / window
     provisional = window < _MA_WINDOW
-    distance_pct = (dsex - ma) / ma * 100.0 if ma else None
+    distance_pct = (dsex - ma) / ma * 100.0 if ma != 0.0 else None
     return {
         "regime": "Bull" if dsex >= ma else "Bear",
         "dsex": dsex,

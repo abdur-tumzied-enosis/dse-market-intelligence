@@ -22,6 +22,14 @@ def test_bull_when_dsex_at_or_above_ma():
     assert r["as_of"] == "2026-06-01"
 
 
+def test_bull_on_exact_tie():
+    # dsex exactly equals the MA → Bull (>= tie-break)
+    series = [5000.0] * 50
+    r = compute_regime(series, as_of="2026-06-01")
+    assert r["regime"] == "Bull"
+    assert r["dsex"] == pytest.approx(r["ma"])
+
+
 def test_bear_when_dsex_below_ma():
     series = [4800.0] + [5000.0] * 49
     r = compute_regime(series, as_of="2026-06-01")
