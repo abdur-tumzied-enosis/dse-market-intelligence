@@ -80,3 +80,20 @@ test('blank query does not call the API', async () => {
   await act(async () => { jest.advanceTimersByTime(250) })
   expect(api.stocks.list).not.toHaveBeenCalled()
 })
+
+test('clearing the query before the response resolves does not show stale results', async () => {
+  let resolveFn: (v: unknown) => void = () => {}
+  ;(api.stocks.list as jest.Mock).mockReturnValue(
+    new Promise((resolve) => { resolveFn = resolve }),
+  )
+  render(<CommandPalette />)
+  fireEvent.keyDown(window, { key: 'k', ctrlKey: true })
+  fireEvent.change(screen.getByLabelText('search'), { target: { value: 'gp' } })
+  await act(async () => { jest.advanceTimersByTime(250) }) // fire fetch (now in-flight)
+  fireEvent.change(screen.getByLabelText('search'), { target: { value: '' } }) // clear
+  await act(async () => { jest.advanceTimersByTime(10) })  // empty-branch 0ms timer
+  await act(async () => {
+    resolveFn({ items: [{ ticker: 'GP', name: 'Grameenphone', sector: 'Telecom', category: 'A', market_cap_bdt: 1, is_active: true }], total: 1, limit: 5, offset: 0 })
+  })
+  expect(screen.queryByText('GP')).not.toBeInTheDocument()
+})

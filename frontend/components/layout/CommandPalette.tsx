@@ -45,6 +45,7 @@ export default function CommandPalette() {
   useEffect(() => {
     const q = query.trim()
     if (!q) {
+      ++seq.current
       const id = setTimeout(() => {
         setResults([])
         setLoading(false)
@@ -52,8 +53,8 @@ export default function CommandPalette() {
       return () => clearTimeout(id)
     }
     const mySeq = ++seq.current
+    const loadingId = setTimeout(() => setLoading(true), 0)
     const t = setTimeout(() => {
-      setLoading(true)
       api.stocks
         .list({ q, limit: 5 })
         .then((res) => {
@@ -66,7 +67,10 @@ export default function CommandPalette() {
           if (mySeq === seq.current) setLoading(false)
         })
     }, 200)
-    return () => clearTimeout(t)
+    return () => {
+      clearTimeout(loadingId)
+      clearTimeout(t)
+    }
   }, [query])
 
   const onSelect = useCallback(
@@ -74,6 +78,7 @@ export default function CommandPalette() {
       setOpen(false)
       setQuery('')
       setResults([])
+      setLoading(false)
       router.push(`/stocks/${ticker}`)
     },
     [router],
@@ -98,7 +103,7 @@ export default function CommandPalette() {
         {trimmed && !loading && results.length === 0 && (
           <div className="py-6 text-center text-sm text-[#6b6b80]">No stocks match.</div>
         )}
-        {results.length > 0 && (
+        {trimmed && results.length > 0 && (
           <CommandGroup heading="Stocks">
             {results.map((s) => (
               <CommandItem key={s.ticker} value={s.ticker} onSelect={() => onSelect(s.ticker)}>
