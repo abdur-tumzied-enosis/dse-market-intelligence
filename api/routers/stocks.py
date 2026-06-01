@@ -61,6 +61,21 @@ def _f(value: Any) -> float | None:
     return f if math.isfinite(f) else None
 
 
+def _rating(score: Any) -> str:
+    if score is None:
+        return "N/A"
+    s = float(score)
+    if s >= 80:
+        return "STRONG_BUY"
+    if s >= 60:
+        return "BUY"
+    if s >= 40:
+        return "HOLD"
+    if s >= 20:
+        return "SELL"
+    return "STRONG_SELL"
+
+
 async def _live_snapshot() -> list[dict]:
     """All-stock live snapshot from the live_prices stream, cached 75s and shared
     across per-ticker requests. 502 if every adapter in the chain fails."""
@@ -102,21 +117,38 @@ async def list_stocks(
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             f"""
-            SELECT ticker, name, sector, category, market_cap_bdt, is_active
-            FROM companies {where}
-            ORDER BY market_cap_bdt DESC NULLS LAST
+            SELECT c.ticker, c.name, c.sector, c.category, c.market_cap_bdt, c.is_active,
+                   f.pe,
+                   s.health_score,
+                   p.close AS last_close,
+                   p.change_pct
+            FROM companies c
+            LEFT JOIN LATERAL (
+                SELECT pe FROM fundamentals WHERE ticker = c.ticker
+                ORDER BY fetched_at DESC LIMIT 1
+            ) f ON true
+            LEFT JOIN LATERAL (
+                SELECT health_score FROM stock_scores WHERE ticker = c.ticker
+                ORDER BY scored_at DESC LIMIT 1
+            ) s ON true
+            LEFT JOIN LATERAL (
+                SELECT close, change_pct FROM stock_prices WHERE ticker = c.ticker
+                ORDER BY time DESC LIMIT 1
+            ) p ON true
+            {where.replace("is_active", "c.is_active").replace("sector", "c.sector").replace("category", "c.category")}
+            ORDER BY c.market_cap_bdt DESC NULLS LAST
             LIMIT {limit} OFFSET {offset}
             """,
             *params,
         )
         total = await conn.fetchval(f"SELECT COUNT(*) FROM companies {where}", *params)
 
-    result = {
-        "items": [dict(r) for r in rows],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+    items = []
+    for r in rows:
+        d = dict(r)
+        d["rating"] = _rating(d.get("health_score"))
+        items.append(d)
+    result = {"items": items, "total": total, "limit": limit, "offset": offset}
     await _cache_set(cache_key, result, ttl=300)
     return result
 

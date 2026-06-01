@@ -14,6 +14,11 @@ class CompanyRow(BaseModel):
     category: str | None
     market_cap_bdt: Decimal | None
     is_active: bool
+    pe: Decimal | None = None
+    health_score: Decimal | None = None
+    last_close: Decimal | None = None
+    change_pct: Decimal | None = None
+    rating: str = "N/A"
 
 
 class LatestPrice(BaseModel):

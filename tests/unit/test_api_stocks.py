@@ -1,15 +1,18 @@
 # tests/unit/test_api_stocks.py
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from api.routers.stocks import router
+
 from api import deps
+from api.routers.stocks import router
 
 
 def _make_app(pool_mock):
@@ -73,7 +76,7 @@ def test_get_stock_returns_detail():
          "market_cap_bdt": Decimal("100000"), "is_active": True, "listing_date": None, "isin": None},
         {"close": Decimal("400"), "change_pct": Decimal("1.5"), "volume": 100000,
          "value_bdt": Decimal("40000000"), "high": Decimal("405"), "low": Decimal("395"),
-         "time": datetime(2026, 1, 1, tzinfo=timezone.utc)},
+         "time": datetime(2026, 1, 1, tzinfo=UTC)},
         None,  # no fundamentals
         None,  # no health score
     ])
@@ -90,6 +93,40 @@ def test_get_stock_returns_detail():
     assert body["company"]["ticker"] == "GP"
     assert body["latest_price"]["close"] == "400"
     assert body["fundamentals"] is None
+
+
+def test_list_stocks_includes_pe_health_and_rating():
+    rows = [{
+        "ticker": "GP", "name": "Grameenphone", "sector": "Telecom",
+        "category": "A", "market_cap_bdt": Decimal("1000"), "is_active": True,
+        "pe": Decimal("12.5"), "health_score": Decimal("82"),
+        "last_close": Decimal("300.5"), "change_pct": Decimal("1.2"),
+    }]
+    pool = _pool_with(fetch_return=rows, fetchval_return=1)
+    with patch("api.routers.stocks._cache_get", new=AsyncMock(return_value=None)), \
+         patch("api.routers.stocks._cache_set", new=AsyncMock()):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?limit=50&offset=0")
+    assert resp.status_code == 200
+    item = resp.json()["items"][0]
+    assert item["ticker"] == "GP"
+    assert item["pe"] == "12.5"
+    assert item["health_score"] == "82"
+    assert item["rating"] == "STRONG_BUY"  # health 82 >= 80
+
+
+def test_list_stocks_rating_null_when_no_score():
+    rows = [{
+        "ticker": "XX", "name": "X Co", "sector": "Misc",
+        "category": None, "market_cap_bdt": None, "is_active": True,
+        "pe": None, "health_score": None, "last_close": None, "change_pct": None,
+    }]
+    pool = _pool_with(fetch_return=rows, fetchval_return=1)
+    with patch("api.routers.stocks._cache_get", new=AsyncMock(return_value=None)), \
+         patch("api.routers.stocks._cache_set", new=AsyncMock()):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks")
+    assert resp.json()["items"][0]["rating"] == "N/A"
 
 
 def test_get_prices_returns_ohlcv():
