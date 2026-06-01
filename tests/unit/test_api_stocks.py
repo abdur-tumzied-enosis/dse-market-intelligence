@@ -1,15 +1,18 @@
 # tests/unit/test_api_stocks.py
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
+from datetime import UTC, datetime
 from decimal import Decimal
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from api.routers.stocks import router
+
 from api import deps
+from api.routers.stocks import router
 
 
 def _make_app(pool_mock):
@@ -73,7 +76,7 @@ def test_get_stock_returns_detail():
          "market_cap_bdt": Decimal("100000"), "is_active": True, "listing_date": None, "isin": None},
         {"close": Decimal("400"), "change_pct": Decimal("1.5"), "volume": 100000,
          "value_bdt": Decimal("40000000"), "high": Decimal("405"), "low": Decimal("395"),
-         "time": datetime(2026, 1, 1, tzinfo=timezone.utc)},
+         "time": datetime(2026, 1, 1, tzinfo=UTC)},
         None,  # no fundamentals
         None,  # no health score
     ])
@@ -113,3 +116,62 @@ def test_get_prices_returns_ohlcv():
     assert body["ticker"] == "GP"
     assert body["interval"] == "daily"
     assert len(body["items"]) == 1
+
+
+def test_list_stocks_q_filters_by_ticker_or_name():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=gp")
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    sql = conn.fetch.call_args.args[0]
+    assert "ILIKE" in sql
+    assert conn.fetch.call_args.args[1] == "%gp%"
+
+
+def test_list_stocks_q_escapes_like_wildcards():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=50%25")  # %25 == literal '%'
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    assert conn.fetch.call_args.args[1] == "%50\\%%"
+
+
+def test_list_stocks_blank_q_applies_no_filter():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=%20%20")  # two spaces
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    assert "ILIKE" not in conn.fetch.call_args.args[0]
+
+
+def test_list_stocks_q_too_long_returns_422():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=" + "a" * 65)
+    assert resp.status_code == 422
+
+
+def test_list_stocks_q_and_sector_combine():
+    pool = _pool_with(fetch_return=[], fetchval_return=0)
+    with patch("api.routers.stocks._cache_get", return_value=None), \
+         patch("api.routers.stocks._cache_set"):
+        client = TestClient(_make_app(pool))
+        resp = client.get("/api/stocks?q=GP&sector=Telecom")
+    assert resp.status_code == 200
+    conn = pool.acquire.return_value.__aenter__.return_value
+    sql = conn.fetch.call_args.args[0]
+    args = conn.fetch.call_args.args
+    assert "ILIKE" in sql and "sector = $2" in sql
+    assert args[1] == "%gp%"   # q lowercased
+    assert args[2] == "Telecom"

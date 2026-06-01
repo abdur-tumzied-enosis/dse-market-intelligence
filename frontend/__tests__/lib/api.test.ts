@@ -90,3 +90,29 @@ describe('get — 401 auto-refresh', () => {
     expect(clearSpy).toHaveBeenCalled()
   })
 })
+
+describe('api.stocks.list', () => {
+  it('builds query string and GETs stocks', async () => {
+    const mock = { items: [], total: 0, limit: 5, offset: 0 }
+    ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => mock,
+    })
+    const result = await api.stocks.list({ q: 'gp', limit: 5 })
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/stocks?q=gp&limit=5',
+      expect.objectContaining({}),
+    )
+    expect(result).toEqual(mock)
+  })
+
+  it('omits empty params', async () => {
+    ;(global.fetch as jest.Mock).mockResolvedValueOnce({
+      ok: true, status: 200, json: async () => ({ items: [], total: 0, limit: 50, offset: 0 }),
+    })
+    await api.stocks.list({})
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://localhost:8000/api/stocks',
+      expect.anything(),
+    )
+  })
+})

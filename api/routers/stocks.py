@@ -78,6 +78,7 @@ async def _live_snapshot() -> list[dict]:
 
 @router.get("", response_model=PagedResponse[CompanyRow])
 async def list_stocks(
+    q: str | None = Query(None, max_length=64),
     sector: str | None = None,
     category: str | None = None,
     limit: int = Query(50, ge=1, le=200),
@@ -85,13 +86,19 @@ async def list_stocks(
     pool=Depends(get_db),
     _user=Depends(get_current_user),
 ):
-    cache_key = f"cache:api:stocks:list:{sector}:{category}:{limit}:{offset}"
+    q = q.strip().lower() if q else None
+    cache_key = f"cache:api:stocks:list:{q}:{sector}:{category}:{limit}:{offset}"
     cached = await _cache_get(cache_key)
     if cached:
         return cached
 
     where = "WHERE is_active = true"
     params: list = []
+    if q:
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params.append(f"%{escaped}%")
+        n = len(params)
+        where += f" AND (ticker ILIKE ${n} ESCAPE '\\' OR name ILIKE ${n} ESCAPE '\\')"
     if sector:
         params.append(sector)
         where += f" AND sector = ${len(params)}"

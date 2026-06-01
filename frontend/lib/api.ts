@@ -64,6 +64,17 @@ export const api = {
       ),
   },
   stocks: {
+    list: (params: { q?: string; sector?: string; limit?: number; offset?: number } = {}) => {
+      const qs = new URLSearchParams()
+      if (params.q) qs.set('q', params.q)
+      if (params.sector) qs.set('sector', params.sector)
+      if (params.limit != null) qs.set('limit', String(params.limit))
+      if (params.offset != null) qs.set('offset', String(params.offset))
+      const suffix = qs.toString()
+      return get<import('./types').PagedResponse<import('./types').StockListItem>>(
+        `/api/stocks${suffix ? `?${suffix}` : ''}`,
+      )
+    },
     prices: (ticker: string, params: string) =>
       get<import('./types').OHLCVResponse>(`/api/stocks/${ticker}/prices?${params}`),
     announcements: (ticker: string) =>
