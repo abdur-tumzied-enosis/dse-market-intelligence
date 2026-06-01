@@ -16,7 +16,7 @@ The synthetic series are tuned against the detector's named thresholds:
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -719,3 +719,35 @@ class TestClipRangesToWindow:
         assert bare == []  # bare short window starves
         assert buffered  # lead-in buffer recovers detection
         assert all(r.end_day >= from_date for r in buffered)
+
+    def test_timestamptz_day_normalized_to_date(self):
+        # DB `day` is timestamptz -> bars arrive as datetime. Detection must
+        # emit `date` boundaries so clip_ranges_to_window can compare against a
+        # `date` window bound without raising (regression: datetime vs date).
+        bars: list[dict[str, object]] = []
+        dt = datetime(2025, 1, 1, tzinfo=UTC)
+        px = 160.0
+        for _ in range(40):  # downtrend lead-in
+            px -= 1.0
+            bars.append(
+                dict(day=dt, open=px + 0.5, high=px + 1.0, low=px - 1.0, close=px, volume=100000)
+            )
+            dt += timedelta(days=1)
+        for i in range(40):  # flat consolidation
+            c = 100.0 + ((-1) ** i) * 1.5
+            bars.append(
+                dict(day=dt, open=c, high=c + 2.0, low=c - 2.0, close=c, volume=80000)
+            )
+            dt += timedelta(days=1)
+
+        ranges = detect_wyckoff(bars)
+        assert ranges
+        for r in ranges:
+            assert type(r.start_day) is date  # not datetime
+            assert type(r.end_day) is date
+            for e in r.events:
+                assert type(e.day) is date
+
+        # Must not raise comparing date boundaries to a date window bound.
+        clipped = clip_ranges_to_window(ranges, date(2025, 2, 15))
+        assert all(r.end_day >= date(2025, 2, 15) for r in clipped)

@@ -24,7 +24,7 @@ The router maps the returned dataclasses to pydantic response models.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 
 # --------------------------------------------------------------------------
 # Tunable thresholds (named constants)
@@ -875,9 +875,13 @@ def _coerce_bars(bars: list[Bar] | list[dict[str, object]]) -> list[Bar]:
         if isinstance(b, Bar):
             out.append(b)
             continue
+        # DB `day` is timestamptz (datetime); normalize to a plain date so
+        # range/event days compare cleanly against a `date` window bound.
+        raw_day = b["day"]
+        day = raw_day.date() if isinstance(raw_day, datetime) else raw_day
         out.append(
             Bar(
-                day=b["day"],  # type: ignore[arg-type]
+                day=day,  # type: ignore[arg-type]
                 open=float(b["open"]),  # type: ignore[arg-type]
                 high=float(b["high"]),  # type: ignore[arg-type]
                 low=float(b["low"]),  # type: ignore[arg-type]
