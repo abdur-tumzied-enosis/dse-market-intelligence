@@ -13,6 +13,7 @@ import type {
 const RANGES = [
   { label: '1M', days: 30 },
   { label: '3M', days: 90 },
+  { label: '4M', days: 120 },
   { label: '6M', days: 180 },
   { label: '1Y', days: 365 },
   { label: '3Y', days: 1095 },
