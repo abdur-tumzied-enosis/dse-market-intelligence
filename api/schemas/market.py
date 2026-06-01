@@ -42,3 +42,14 @@ class MarketIndices(BaseModel):
     advance: int
     decline: int
     unchanged: int
+
+
+class MarketRegime(BaseModel):
+    regime: str                  # "Bull" | "Bear" | "Unknown"
+    dsex: float | None
+    ma: float | None
+    window: int
+    provisional: bool
+    distance_pct: float | None
+    as_of: str | None
+    data_status: str             # "ok" | "provisional" | "insufficient"
