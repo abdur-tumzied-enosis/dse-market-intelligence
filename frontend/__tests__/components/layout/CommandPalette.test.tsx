@@ -9,6 +9,7 @@ jest.mock('@/lib/api', () => ({
   api: { stocks: { list: jest.fn() } },
 }))
 jest.mock('@/components/ui/command', () => ({
+  Command: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   CommandDialog: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
     open ? <div role="dialog">{children}</div> : null,
   CommandInput: ({ value, onValueChange, placeholder }: {
