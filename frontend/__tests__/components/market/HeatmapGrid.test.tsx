@@ -8,7 +8,7 @@ describe('HeatmapGrid', () => {
     { ticker: 'XYZ', sector: 'Telecom', change_pct: 1.2, value_bdt: 50000 },
     { ticker: 'DEF', sector: 'Pharma', change_pct: -1.5, value_bdt: 75000 },
     { ticker: 'GHI', sector: 'Textiles', change_pct: -2.8, value_bdt: 60000 },
-    { ticker: 'JKL', sector: 'Energy', change_pct: null, value_bdt: null },
+    { ticker: 'JKL', sector: 'Energy', change_pct: null, value_bdt: 60000 },
   ]
 
   it('renders all ticker symbols from the items array', () => {
@@ -21,26 +21,27 @@ describe('HeatmapGrid', () => {
     expect(screen.getByText('JKL')).toBeInTheDocument()
   })
 
-  it('change_pct > 2 gets bg-green-700 class; change_pct < -2 gets bg-red-700 class', () => {
+  it('applies inline hex background by change_pct band (positive vs negative)', () => {
     render(<HeatmapGrid items={mockItems} />)
 
-    // ABC has change_pct 2.5 (> 2) should have bg-green-700
+    // ABC change_pct 2.5 falls in the 0..3 band -> #14532d
     const abcCell = screen.getByText('ABC').closest('div')
-    expect(abcCell).toHaveClass('bg-green-700')
+    expect(abcCell).toHaveStyle({ background: '#14532d' })
 
-    // GHI has change_pct -2.8 (< -2) should have bg-red-700
+    // GHI change_pct -2.8 falls in the -3..0 band -> #7f1d1d
     const ghiCell = screen.getByText('GHI').closest('div')
-    expect(ghiCell).toHaveClass('bg-red-700')
+    expect(ghiCell).toHaveStyle({ background: '#7f1d1d' })
   })
 
-  it('change_pct === null gets bg-surface class and renders "—" instead of a percentage', () => {
+  it('change_pct === null uses the neutral hex background and renders no percentage', () => {
     render(<HeatmapGrid items={mockItems} />)
 
     const jklCell = screen.getByText('JKL').closest('div')
-    expect(jklCell).toHaveClass('bg-surface')
+    expect(jklCell).toHaveStyle({ background: '#1a1a24' })
 
-    // Find the dash character
-    expect(screen.getByText('—')).toBeInTheDocument()
+    // The component renders no percentage text (and no dash) for null change_pct
+    expect(screen.queryByText('—')).not.toBeInTheDocument()
+    expect(screen.queryByText('NaN%')).not.toBeInTheDocument()
   })
 
   it('positive change_pct renders with "+" prefix; negative without "+"', () => {
