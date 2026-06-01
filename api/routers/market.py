@@ -180,7 +180,10 @@ async def market_regime(pool=Depends(get_db), _user=Depends(get_current_user)):
     series = [float(r["dsex"]) for r in rows]
     as_of = rows[0]["date"].isoformat() if rows else None
     result = compute_regime(series, as_of)
-    await _cache_set(cache_key, result, ttl=300)
+    # Short TTL while the series is empty/too-thin so a fresh environment (table
+    # not yet backfilled) isn't pinned to "Unknown" for the full 5 minutes.
+    ttl = 300 if result["data_status"] != "insufficient" else 30
+    await _cache_set(cache_key, result, ttl=ttl)
     return result
 
 
