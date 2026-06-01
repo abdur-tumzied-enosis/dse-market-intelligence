@@ -6,6 +6,7 @@ import HealthGauge from '@/components/stocks/HealthGauge'
 import RatingBadge from '@/components/stocks/RatingBadge'
 import FundamentalsCharts from '@/components/stocks/FundamentalsCharts'
 import LivePrice from '@/components/stocks/LivePrice'
+import PaywallOverlay from '@/components/ui/PaywallOverlay'
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -187,7 +188,13 @@ export default async function StockDetailPage({
           <p className="text-[10px] font-mono uppercase tracking-[0.18em] text-[#6b6b80] mb-4">
             Historical Fundamentals
           </p>
-          <FundamentalsCharts items={fundsData.items} />
+          {fundsData.is_truncated ? (
+            <PaywallOverlay feature="Unlock 10 years of fundamentals with Pro">
+              <FundamentalsCharts items={fundsData.items} />
+            </PaywallOverlay>
+          ) : (
+            <FundamentalsCharts items={fundsData.items} />
+          )}
         </div>
       )}
 
