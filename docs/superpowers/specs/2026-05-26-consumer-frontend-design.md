@@ -297,12 +297,12 @@ Six phases, each a self-contained PR. No phase merges until all items complete.
 - [ ] Landing page `/` — hero, features, pricing table, disclaimer footer
 
 ### Phase C — Stock Pages
-- [ ] `GET /api/stocks`, `/api/stocks/{ticker}` (tier-gated)
-- [ ] `/stocks` screener: DataTable + sector/PE/rating filters
-- [ ] `/stocks/[ticker]`: PriceChart + HealthGauge + RatingBadge
-- [ ] FundamentalsChart (3yr free / 10yr pro)
-- [ ] PaywallOverlay on pro-only sections
-- [ ] `/sectors` page: sector PE table + heatmap
+- [x] `GET /api/stocks`, `/api/stocks/{ticker}` (tier-gated)
+- [x] `/stocks` screener: DataTable + sector/PE/rating filters
+- [x] `/stocks/[ticker]`: PriceChart + HealthGauge + RatingBadge
+- [x] FundamentalsChart (3yr free / 10yr pro)
+- [x] PaywallOverlay on pro-only sections
+- [x] `/sectors` page: sector PE table + heatmap
 
 ### Phase D — AI Chat
 - [ ] `POST /api/chat` SSE + `GET /api/chat/quota` endpoints
