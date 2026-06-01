@@ -108,6 +108,46 @@ def _market_status(now: datetime | None = None) -> str:
     return "Open" if 600 <= minutes <= 870 else "Closed"
 
 
+_MA_WINDOW = 50   # target moving-average window (trading days)
+_MIN_DAYS = 5     # below this, refuse to call a regime
+
+
+def compute_regime(dsex_series: list[float], as_of: str | None) -> dict:
+    """Bull/Bear regime from a DSEX series ordered most-recent-first.
+
+    Bull when the latest DSEX value is >= the mean of the last `window` values
+    (window = min(50, len)). Marked provisional while the window is short, and
+    Unknown/insufficient below _MIN_DAYS so a thin series never forces a call.
+    """
+    n = len(dsex_series)
+    if n < _MIN_DAYS:
+        return {
+            "regime": "Unknown",
+            "dsex": dsex_series[0] if n else None,
+            "ma": None,
+            "window": n,
+            "provisional": True,
+            "distance_pct": None,
+            "as_of": as_of,
+            "data_status": "insufficient",
+        }
+    window = min(_MA_WINDOW, n)
+    dsex = dsex_series[0]
+    ma = sum(dsex_series[:window]) / window
+    provisional = window < _MA_WINDOW
+    distance_pct = (dsex - ma) / ma * 100.0 if ma else None
+    return {
+        "regime": "Bull" if dsex >= ma else "Bear",
+        "dsex": dsex,
+        "ma": ma,
+        "window": window,
+        "provisional": provisional,
+        "distance_pct": distance_pct,
+        "as_of": as_of,
+        "data_status": "provisional" if provisional else "ok",
+    }
+
+
 @router.get("/indices", response_model=MarketIndices)
 async def market_indices(_user=Depends(get_current_user)):
     cache_key = "cache:api:market:indices"
