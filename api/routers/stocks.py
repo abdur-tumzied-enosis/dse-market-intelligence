@@ -1,15 +1,26 @@
 # api/routers/stocks.py
 from __future__ import annotations
-from datetime import date
+
+import math
+from datetime import UTC, date, datetime
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+
 from api.deps import get_current_user, get_db
+from api.routers.market import _market_status
 from api.schemas.common import PagedResponse
 from api.schemas.stocks import (
-    AnnouncementsResponse, AnnouncementRow, CompanyRow, FundamentalsResponse,
-    FundamentalsRow, HealthScoreRow, LatestFundamentals, LatestPrice,
-    OHLCVResponse, PredictionRow, PredictionsResponse, StockDetail,
+    AnnouncementsResponse,
+    CompanyRow,
+    FundamentalsResponse,
+    LivePrice,
+    OHLCVResponse,
+    PredictionsResponse,
+    StockDetail,
 )
+from extraction.base import AllAdaptersFailedError
+from extraction.registry import STREAMS
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -30,6 +41,33 @@ async def _cache_set(key: str, value: Any, ttl: int) -> None:
         await cache_set(key, value, ttl)
     except Exception:
         pass
+
+
+def _f(value: Any) -> float | None:
+    """JSON-safe float; None for unparseable or non-finite (Starlette uses
+    allow_nan=False, so one NaN/inf 500s the whole response)."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+async def _live_snapshot() -> list[dict]:
+    """All-stock live snapshot from the live_prices stream, cached 75s and shared
+    across per-ticker requests. 502 if every adapter in the chain fails."""
+    cached = await _cache_get("cache:live_snapshot")
+    if cached is not None:
+        return cached
+    try:
+        result = await STREAMS["live_prices"].fetch()
+    except AllAdaptersFailedError as exc:
+        raise HTTPException(status_code=502, detail=f"live_prices unavailable: {exc}") from exc
+    records = result.data.to_dict("records")
+    await _cache_set("cache:live_snapshot", records, ttl=75)
+    return records
 
 
 @router.get("", response_model=PagedResponse[CompanyRow])
@@ -298,3 +336,46 @@ async def get_health_score(ticker: str, pool=Depends(get_db), _user=Depends(get_
     result = dict(row) if row else {"ticker": ticker, "health_score": None}
     await _cache_set(cache_key, result, ttl=14400)
     return result
+
+
+@router.get("/{ticker}/live", response_model=LivePrice)
+async def get_live_price(ticker: str, pool=Depends(get_db), _user=Depends(get_current_user)):
+    ticker = ticker.upper()
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow("SELECT 1 FROM companies WHERE ticker = $1", ticker)
+    if not exists:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+
+    status = _market_status()
+    as_of = datetime.now(UTC)
+
+    for rec in await _live_snapshot():
+        if str(rec.get("ticker") or "").strip().upper() != ticker:
+            continue
+        ltp = rec.get("ltp") if rec.get("ltp") is not None else rec.get("close")
+        value = rec.get("value_bdt")
+        if value is None and rec.get("value_mn") is not None:
+            value = _f(rec.get("value_mn"))
+            value = value * 1_000_000 if value is not None else None
+        return {
+            "ticker": ticker,
+            "available": True,
+            "ltp": _f(ltp),
+            "high": _f(rec.get("high")),
+            "low": _f(rec.get("low")),
+            "prev_close": _f(rec.get("prev_close")),
+            "change_pct": _f(rec.get("change_pct")),
+            "volume": _f(rec.get("volume")),
+            "value_bdt": _f(value),
+            "market_status": status,
+            "as_of": as_of,
+        }
+
+    return {
+        "ticker": ticker,
+        "available": False,
+        "ltp": None, "high": None, "low": None, "prev_close": None,
+        "change_pct": None, "volume": None, "value_bdt": None,
+        "market_status": status,
+        "as_of": as_of,
+    }

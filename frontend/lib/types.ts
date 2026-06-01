@@ -83,6 +83,20 @@ export interface LatestPrice {
   time: string
 }
 
+export interface LivePrice {
+  ticker: string
+  available: boolean
+  ltp: number | null
+  high: number | null
+  low: number | null
+  prev_close: number | null
+  change_pct: number | null
+  volume: number | null
+  value_bdt: number | null
+  market_status: string
+  as_of: string
+}
+
 export interface LatestFundamentals {
   eps: number | null
   nav: number | null

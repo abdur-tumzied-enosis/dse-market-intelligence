@@ -35,11 +35,17 @@ Therefore we MUST NOT append a fresh `stock_prices` row every 2 minutes — doin
 so would sum cumulative snapshots and inflate daily volume ~135×.
 
 **Solution:** UPSERT exactly **one row per ticker per trading day**. The row's
-`time` is the trading-day bucket (today at 00:00 Asia/Dhaka, stored as
-TIMESTAMPTZ). Each run does `ON CONFLICT (time, ticker) DO UPDATE`, so the row
-converges to the latest snapshot. `daily_ohlcv`'s `SUM(volume)` over a single
-row equals that day's cumulative volume — correct. `latest_price` stays fresh.
-The EOD snapshot job can later overwrite the same bucket with the official close.
+`time` is the trading-day bucket at **00:00 UTC of the Dhaka trading date**
+(NOT Dhaka midnight — Dhaka 00:00 = 18:00 UTC the prior day, which `daily_ohlcv`'s
+UTC `time_bucket` would mis-attribute to the previous day and merge with the
+prior historical bar). AmarStock historical bars are stamped 00:00:00 UTC, so
+this key aligns live, historical, and (future) EOD writes. During trading hours
+(04:00–08:30 UTC) the Dhaka calendar date equals the UTC date, so there is no
+day-boundary ambiguity. Each run does `ON CONFLICT (time, ticker) DO UPDATE`, so
+the row converges to the latest snapshot. `daily_ohlcv`'s `SUM(volume)` over a
+single row equals that day's cumulative volume — correct. `latest_price` stays
+fresh. The EOD snapshot job can later overwrite the same bucket with the
+official close.
 
 The unique index `idx_stock_prices_time_ticker_unique ON stock_prices (time,
 ticker)` (migration 008) provides the conflict target.

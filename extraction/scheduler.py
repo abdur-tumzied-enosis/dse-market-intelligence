@@ -11,15 +11,116 @@ Terminology:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+import math
+from datetime import UTC, datetime
 
 import pytz
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import create_engine
 
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
+
+
+# ── Pure helpers (unit-testable, no DB dependency) ─────────────────────
+
+def _to_int(value: object) -> int | None:
+    """Coerce to int; None for missing/NaN/unparseable (pandas may emit NaN floats)."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(f):
+        return None
+    return int(f)
+
+
+def _to_float(value: object) -> float | None:
+    """Coerce to float; None for missing/NaN/Inf/unparseable."""
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+_LIVE_UPSERT_SQL = """
+    INSERT INTO stock_prices
+        (time, ticker, open, high, low, close, volume, trades,
+         value_bdt, prev_close, change_pct, source, quality_flag)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+    ON CONFLICT (time, ticker) DO UPDATE SET
+        high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
+        volume=EXCLUDED.volume, trades=EXCLUDED.trades,
+        value_bdt=EXCLUDED.value_bdt, change_pct=EXCLUDED.change_pct,
+        prev_close=EXCLUDED.prev_close, source=EXCLUDED.source,
+        ingested_at=NOW(), quality_flag=EXCLUDED.quality_flag
+"""
+
+
+def _market_is_open(now: datetime) -> bool:
+    """DSE trades Sun–Thu, 10:00–14:30 Asia/Dhaka. `now` must be BD-tz-aware.
+    Mon=0..Sun=6; Fri=4, Sat=5 are closed."""
+    if now.weekday() in (4, 5):
+        return False
+    minutes = now.hour * 60 + now.minute
+    return 600 <= minutes <= 870
+
+
+def _live_records_to_rows(
+    records: list[dict[str, object]], bucket_time: datetime, source: str
+) -> list[tuple[object, ...]]:
+    """Map live_prices snapshot records to stock_prices INSERT tuples.
+
+    One tuple per ticker. close = ltp (live feeds) or close. Skips rows with no
+    ticker or no close. Computes change_pct from prev_close when the feed omits
+    it. Falls back value_mn*1e6 → value_bdt. `open` is None (live feeds carry no
+    open). quality_flag='live'.
+    """
+    rows = []
+    for rec in records:
+        ticker = str(rec.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        close = rec.get("ltp")
+        if close is None:
+            close = rec.get("close")
+        close = _to_float(close)
+        if close is None:
+            continue
+
+        prev_close = _to_float(rec.get("prev_close"))
+        change_pct = _to_float(rec.get("change_pct"))
+        if change_pct is None and prev_close not in (None, 0):
+            change_pct = (close - prev_close) / prev_close * 100.0
+
+        value_bdt = _to_float(rec.get("value_bdt"))
+        if value_bdt is None:
+            value_mn = _to_float(rec.get("value_mn"))
+            if value_mn is not None:
+                value_bdt = value_mn * 1_000_000
+
+        rows.append((
+            bucket_time,                    # $1  time (trading-day bucket)
+            ticker,                         # $2  ticker
+            None,                           # $3  open (not in live feeds)
+            _to_float(rec.get("high")),     # $4  high
+            _to_float(rec.get("low")),      # $5  low
+            close,                          # $6  close (= ltp)
+            _to_int(rec.get("volume")),     # $7  volume
+            _to_int(rec.get("trades")),     # $8  trades
+            value_bdt,                      # $9  value_bdt
+            prev_close,                     # $10 prev_close
+            change_pct,                     # $11 change_pct
+            source,                         # $12 source
+            "live",                         # $13 quality_flag
+        ))
+    return rows
 
 
 def get_scheduler(database_url: str) -> AsyncIOScheduler:
@@ -43,7 +144,6 @@ def get_scheduler(database_url: str) -> AsyncIOScheduler:
 
 async def _upsert_macro_df(pool, df) -> int:
     """Insert/update rows from a macro AdapterResult DataFrame into macro_indicators."""
-    import pandas as pd
     count = 0
     for _, row in df.iterrows():
         r = await pool.fetchrow(
@@ -72,16 +172,62 @@ async def _upsert_macro_df(pool, df) -> int:
 # ── Job Functions ──────────────────────────────────────────────────────
 
 
-async def job_live_prices() -> None:
-    """Fetch live prices every 15 min during market hours."""
-    logger.info("job_live_prices: starting")
-    # TODO: implement ingest_live_prices()
+async def _invalidate_live_caches() -> None:
+    """Drop caches that depend on live prices so the next request rebuilds."""
     try:
         from mgmt.cache import cache_delete_pattern
         await cache_delete_pattern("cache:pipeline_status:*")
         await cache_delete_pattern("cache:live_prices*")
+        await cache_delete_pattern("cache:live_snapshot")
+        await cache_delete_pattern("cache:api:stocks:detail:*")
+        await cache_delete_pattern("cache:api:market:*")
     except Exception as exc:
         logger.warning("job_live_prices: cache invalidation failed error=%s", exc)
+
+
+async def job_live_prices() -> None:
+    """Fetch live prices during market hours and UPSERT one row per ticker per
+    trading day into stock_prices. Live feeds report cumulative volume/value, so
+    appending a fresh row each run would inflate daily_ohlcv's SUM(volume); the
+    per-day bucket + ON CONFLICT DO UPDATE keeps a single converging bar."""
+    from db.pool import get_pool
+    from extraction.base import AllAdaptersFailedError
+    from extraction.jobs import job_run
+    from extraction.registry import STREAMS
+
+    logger.info("job_live_prices: starting")
+    now = datetime.now(BD_TZ)
+    if not _market_is_open(now):
+        logger.info("job_live_prices: market closed — skipping write")
+        await _invalidate_live_caches()
+        return
+
+    async with job_run("live_price_pull", stream_name="live_prices") as ctx:
+        try:
+            result = await STREAMS["live_prices"].fetch()
+        except AllAdaptersFailedError as exc:
+            logger.error("job_live_prices: all adapters failed error=%s", exc)
+            raise
+
+        records = result.data.to_dict("records")
+        ctx["records_fetched"] = len(records)
+
+        # Bucket to 00:00 UTC of the Dhaka trading date so the row shares its
+        # (time, ticker) key — and its daily_ohlcv UTC time_bucket — with the
+        # historical/EOD bars (AmarStock stamps daily bars at 00:00:00 UTC).
+        # During trading hours (04:00–08:30 UTC) the Dhaka date equals the UTC
+        # date, so there is no day-boundary ambiguity.
+        d = now.date()
+        bucket_time = datetime(d.year, d.month, d.day, tzinfo=UTC)
+        rows = _live_records_to_rows(records, bucket_time, result.source_name)
+
+        if rows:
+            pool = await get_pool()
+            await pool.executemany(_LIVE_UPSERT_SQL, rows)
+        ctx["records_inserted"] = len(rows)
+        logger.info("job_live_prices: upserted=%d source=%s", len(rows), result.source_name)
+
+    await _invalidate_live_caches()
     logger.info("job_live_prices: complete")
 
 
@@ -214,8 +360,8 @@ async def job_news_scrape() -> None:
 async def job_daily_macro() -> None:
     """Daily macro indicators at 02:00 — FX rate + policy rate check."""
     from db.pool import get_pool
-    from extraction.registry import STREAMS
     from extraction.jobs import job_run
+    from extraction.registry import STREAMS
 
     async with job_run("daily_macro") as ctx:
         pool = await get_pool()
@@ -236,7 +382,9 @@ async def job_weekly_fundamentals() -> None:
 
     ~18 min for 406 tickers at 3 concurrent, 1.5s delay.
     """
-    from extraction.bulk_load.fundamentals_historical_loader import bulk_load_fundamentals_historical
+    from extraction.bulk_load.fundamentals_historical_loader import (
+        bulk_load_fundamentals_historical,
+    )
     logger.info("job_weekly_fundamentals: starting")
     summary = await bulk_load_fundamentals_historical()
     logger.info(
@@ -248,8 +396,8 @@ async def job_weekly_fundamentals() -> None:
 async def job_monthly() -> None:
     """Monthly macro data (1st day, 01:00) — all 5 macro streams."""
     from db.pool import get_pool
-    from extraction.registry import STREAMS
     from extraction.jobs import job_run
+    from extraction.registry import STREAMS
 
     async with job_run("monthly_macro") as ctx:
         pool = await get_pool()
@@ -302,6 +450,7 @@ async def job_nightly_ml() -> None:
 async def job_news_sentiment() -> None:
     """Score unscored news articles with Gemini Flash sentiment analysis."""
     import logging as _logging
+
     from db.pool import get_pool
     from extraction.jobs import job_run
     from mgmt.config import get_settings
