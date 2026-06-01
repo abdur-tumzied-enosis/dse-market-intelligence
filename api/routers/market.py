@@ -37,7 +37,7 @@ async def _cache_set(key: str, value: Any, ttl: int) -> None:
 
 # ── Source: registry DataStreams (failover chains), not raw AmarStock ──────
 # live_prices:    bdshare → amarstock → dse_direct
-# market_indices: bdshare_market_info
+# market_indices: dse_direct_market_info (priority 1) → bdshare_market_info (priority 2)
 # AmarStock is a priority-2 fallback inside these chains, never a hard dep.
 
 
