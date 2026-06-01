@@ -7,7 +7,7 @@ import math
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from api.deps import get_current_user, get_db
@@ -296,13 +296,28 @@ async def _default_get_indices() -> dict:
     return result
 
 
-async def _generate_market_events(get_indices_fn=_default_get_indices, interval: int = 30):
+# Cap a single SSE connection's lifetime. The EventSource client reconnects
+# automatically, so bounding this frees the connection periodically and stops a
+# never-ending response from blocking `uvicorn --reload` graceful shutdown.
+_STREAM_MAX_SECONDS = 300
+
+
+async def _generate_market_events(
+    request: Request | None = None,
+    get_indices_fn=_default_get_indices,
+    interval: int = 30,
+):
     """Async generator that yields SSE-formatted market index events.
 
-    Stops after the first event when market_status != 'Open'; the client is
-    responsible for reconnecting later to check if the market has re-opened.
+    Ends when: the market closes (one final event), the client disconnects, the
+    server cancels the task (shutdown/reload), or the connection exceeds
+    _STREAM_MAX_SECONDS. Honoring disconnects + bounding the lifetime keeps a
+    long-lived stream from blocking server reload/shutdown.
     """
+    elapsed = 0
     while True:
+        if request is not None and await request.is_disconnected():
+            return
         try:
             data = await get_indices_fn()
             yield f"data: {_json.dumps(data)}\n\n"
@@ -312,17 +327,24 @@ async def _generate_market_events(get_indices_fn=_default_get_indices, interval:
             return
         except Exception as exc:
             yield f"data: {_json.dumps({'error': 'fetch_failed', 'detail': type(exc).__name__})}\n\n"
-        if interval > 0:
-            await asyncio.sleep(interval)
-        else:
+        if interval <= 0:
             return  # test mode: yield once then stop
+        # Sleep in 1s slices so a client disconnect (or task cancellation on
+        # server shutdown) is noticed within ~1s instead of stuck in one long await.
+        for _ in range(interval):
+            if request is not None and await request.is_disconnected():
+                return
+            await asyncio.sleep(1)
+            elapsed += 1
+        if elapsed >= _STREAM_MAX_SECONDS:
+            return  # cap lifetime; EventSource client reconnects
 
 
 @router.get("/stream")
-async def market_stream():
+async def market_stream(request: Request):
     """SSE stream of market indices — no auth required (public data)."""
     return StreamingResponse(
-        _generate_market_events(),
+        _generate_market_events(request),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

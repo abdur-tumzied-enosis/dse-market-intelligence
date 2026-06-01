@@ -1,12 +1,14 @@
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 import json
-from unittest.mock import AsyncMock, patch
-import pytest
-from api.routers.market import _generate_market_events
+from unittest.mock import AsyncMock
 
+import pytest
+
+from api.routers.market import _generate_market_events
 
 FAKE_INDICES = {
     "dsex_value": 5330.89, "dsex_change_pct": 1.27,
@@ -39,6 +41,24 @@ async def test_generate_market_events_on_error_yields_error_event():
     assert event.startswith("data: ")
     payload = json.loads(event[len("data: "):].strip())
     assert payload["error"] == "fetch_failed"
+
+
+@pytest.mark.asyncio
+async def test_generate_market_events_stops_when_client_disconnected():
+    """A disconnected client ends the stream immediately — no events, no hang.
+    This is what lets the server stop waiting on the SSE connection."""
+    async def _fake_get_cached():
+        return FAKE_INDICES
+
+    req = AsyncMock()
+    req.is_disconnected = AsyncMock(return_value=True)
+
+    events = []
+    async for event in _generate_market_events(req, get_indices_fn=_fake_get_cached, interval=30):
+        events.append(event)
+
+    assert events == []
+    req.is_disconnected.assert_awaited()
 
 
 @pytest.mark.asyncio

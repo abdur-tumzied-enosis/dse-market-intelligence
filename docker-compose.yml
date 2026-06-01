@@ -156,7 +156,7 @@ services:
       target: mgmt
     container_name: dse_mgmt_api
     restart: unless-stopped
-    command: uvicorn mgmt.main:app --host 0.0.0.0 --port 8001 --reload
+    command: uvicorn mgmt.main:app --host 0.0.0.0 --port 8001 --reload --timeout-graceful-shutdown 5
     ports:
       - "${MGMT_API_PORT:-8001}:8001"
     env_file: .env
@@ -186,7 +186,7 @@ services:
       target: mgmt
     container_name: dse_api
     restart: unless-stopped
-    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload --timeout-graceful-shutdown 5
     ports:
       - "${API_PORT:-8000}:8000"
     env_file: .env
