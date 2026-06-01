@@ -51,9 +51,22 @@ Extend `list_stocks` (the `GET /api/stocks` handler):
 
 - Add param `q: str | None = None`.
 - When `q` is set and non-blank, add to the WHERE clause:
-  `AND (ticker ILIKE $n OR name ILIKE $n)` with bound value `f"%{q}%"`
-  (single bound param reused for both columns).
-- Include `q` in `cache_key` so `?q=` responses cache independently.
+  `AND (ticker ILIKE $n OR name ILIKE $n) ESCAPE '\'` with bound value
+  `f"%{escaped}%"` (single bound param reused for both columns).
+- Include the normalized `q` in `cache_key` so `?q=` responses cache
+  independently.
+
+**`q` input validation / hygiene** (the value is *bound* as a param —
+asyncpg `$n` — so there is no SQL injection vector; `f"%...%"` builds only
+the bound value, never SQL text. The following is correctness/perf hygiene,
+not injection defense):
+- `q = q.strip()`; treat empty-after-strip as no filter.
+- Enforce a max length: `q: str | None = Query(None, max_length=64)` (FastAPI
+  returns 422 on overflow — palette also caps input client-side).
+- Escape ILIKE metacharacters before building the value so a literal `%`,
+  `_`, or `\` is matched as itself, not as a wildcard:
+  `escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")`
+  paired with the `ESCAPE '\'` clause above.
 - Existing `sector` / `category` filters, ordering, pagination, and response
   shape are unchanged.
 
@@ -142,6 +155,10 @@ User: types "gp" ──► debounce ──► api.stocks.list({q:"gp",limit:8})
 
 - Empty/whitespace `q`: do not call API; show idle hint. (Backend also
   treats blank `q` as no filter for safety.)
+- `q` length capped client-side (input `maxLength={64}`) and server-side
+  (`Query(max_length=64)`); over-long is rejected before hitting the DB.
+- LIKE metacharacters (`%`, `_`, `\`) in `q` are escaped server-side and
+  matched literally — no wildcard-injection / broad-match surprise.
 - API error: show a single error line in `CommandList` (theme error color);
   do not crash the palette.
 - Stale responses: sequence guard discards out-of-order results.
@@ -158,6 +175,9 @@ User: types "gp" ──► debounce ──► api.stocks.list({q:"gp",limit:8})
 - `?q=` matches by company name substring.
 - blank/absent `q` returns the unfiltered (sector/category) list.
 - `q` combines with `sector` filter.
+- `q` containing `%` / `_` is matched literally (e.g. `q=50%` does not match
+  everything) — verifies ESCAPE handling.
+- `q` over 64 chars returns 422.
 
 **Frontend** (`frontend/__tests__/`, jest + testing-library):
 - `Ctrl+K` opens the palette.
