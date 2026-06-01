@@ -50,6 +50,13 @@ PRIOR_TREND_SLOPE_MIN: float = 0.0015
 #: Prior-slope magnitude that maps to full confidence from trend alone.
 PRIOR_TREND_SLOPE_FULL: float = 0.006
 
+#: Extra historical bars a caller should fetch *before* the visible window so
+#: the detector has lead-in for the rolling-band warm-up (ROLLING_BAND_WINDOW)
+#: plus the prior-trend classification (PRIOR_TREND_WINDOW), with margin.
+#: Without this buffer short windows (1M, 3M) starve and detect nothing —
+#: see clip_ranges_to_window for the matching display-side clamp.
+LOOKBACK_BARS: int = ROLLING_BAND_WINDOW + PRIOR_TREND_WINDOW + 10
+
 #: Volume multiple over the rolling average that flags a climax bar.
 CLIMAX_VOLUME_MULT: float = 2.5
 #: Window for the rolling average volume used by climax detection.
@@ -914,3 +921,30 @@ def detect_wyckoff(bars: list[Bar] | list[dict[str, object]]) -> list[WyckoffRan
             )
         )
     return ranges
+
+
+def clip_ranges_to_window(
+    ranges: list[WyckoffRange], from_date: date | None
+) -> list[WyckoffRange]:
+    """Restrict detected ranges to a visible window starting at ``from_date``.
+
+    Detection is run over buffered data that extends ``LOOKBACK_BARS`` before
+    ``from_date`` (lead-in for the band warm-up + prior-trend classification).
+    This keeps only ranges that reach into the visible window, clamps each
+    range's start to ``from_date``, and drops events that fall before it — so a
+    caller receives nothing earlier than the window it asked for, while the
+    phase / support / resistance still benefit from the full lead-in.
+
+    ``from_date is None`` (no window requested) returns ``ranges`` unchanged.
+    """
+    if from_date is None:
+        return ranges
+    clipped: list[WyckoffRange] = []
+    for rng in ranges:
+        if rng.end_day < from_date:
+            continue
+        if rng.start_day < from_date:
+            rng.start_day = from_date
+        rng.events = [ev for ev in rng.events if ev.day >= from_date]
+        clipped.append(rng)
+    return clipped

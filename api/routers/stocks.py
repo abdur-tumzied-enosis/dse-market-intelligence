@@ -7,7 +7,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from api.analysis.wyckoff import detect_wyckoff
+from api.analysis.wyckoff import (
+    LOOKBACK_BARS,
+    clip_ranges_to_window,
+    detect_wyckoff,
+)
 from api.deps import get_current_user, get_db
 from api.routers.market import _market_status
 from api.schemas.common import PagedResponse
@@ -229,24 +233,41 @@ async def get_wyckoff(
         return cached
 
     table = _INTERVAL_TABLE[interval]
-    where_parts = ["ticker = $1"]
     params: list = [ticker]
-    if from_date:
-        params.append(from_date)
-        where_parts.append(f"day >= ${len(params)}")
+    upper = ""
     if to_date:
         params.append(to_date)
-        where_parts.append(f"day <= ${len(params)}")
-    where = " AND ".join(where_parts)
+        upper = f" AND day <= ${len(params)}"
+
+    if from_date:
+        # Fetch LOOKBACK_BARS of history *before* the visible window so the
+        # detector has lead-in for the rolling-band warm-up + prior-trend
+        # classification; without it short windows (1M/3M) detect nothing.
+        # The extra bars are clamped back off the response below.
+        params.append(from_date)
+        from_idx = len(params)
+        sql = (
+            f"SELECT day, open, high, low, close, volume FROM ("
+            f" SELECT day, open, high, low, close, volume FROM {table}"
+            f" WHERE ticker = $1 AND day < ${from_idx}{upper}"
+            f" ORDER BY day DESC LIMIT {LOOKBACK_BARS}"
+            f") buf"
+            f" UNION ALL"
+            f" SELECT day, open, high, low, close, volume FROM {table}"
+            f" WHERE ticker = $1 AND day >= ${from_idx}{upper}"
+            f" ORDER BY day"
+        )
+    else:
+        sql = (
+            f"SELECT day, open, high, low, close, volume FROM {table}"
+            f" WHERE ticker = $1{upper} ORDER BY day"
+        )
 
     async with pool.acquire() as conn:
         exists = await conn.fetchrow("SELECT 1 FROM companies WHERE ticker = $1", ticker)
         if not exists:
             raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
-        rows = await conn.fetch(
-            f"SELECT day, open, high, low, close, volume FROM {table} WHERE {where} ORDER BY day",
-            *params,
-        )
+        rows = await conn.fetch(sql, *params)
 
     bars = [
         {
@@ -259,7 +280,7 @@ async def get_wyckoff(
         }
         for r in rows
     ]
-    detected = detect_wyckoff(bars)
+    detected = clip_ranges_to_window(detect_wyckoff(bars), from_date)
 
     result = {
         "ticker": ticker,

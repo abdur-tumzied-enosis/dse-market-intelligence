@@ -23,7 +23,11 @@ import pytest
 from api.analysis.wyckoff import (
     EVENT_HELP,
     EVENT_LABEL,
+    LOOKBACK_BARS,
     Bar,
+    WyckoffEvent,
+    WyckoffRange,
+    clip_ranges_to_window,
     detect_wyckoff,
 )
 
@@ -625,3 +629,93 @@ class TestHelpText:
         for e in events:
             assert isinstance(e.label, str)
             assert e.label.strip()
+
+
+# ---------------------------------------------------------------------------
+# Visible-window clipping (short-range fix: 1M/3M starved without lead-in).
+# Detection runs over buffered data extending LOOKBACK_BARS before the window;
+# clip_ranges_to_window restricts the *display* back to the requested window.
+# ---------------------------------------------------------------------------
+
+
+class TestClipRangesToWindow:
+    def _range(
+        self, start: date, end: date, event_days: list[date]
+    ) -> WyckoffRange:
+        return WyckoffRange(
+            start_day=start,
+            end_day=end,
+            phase="accumulation",
+            phase_help="x",
+            confidence=0.5,
+            support=1.0,
+            resistance=2.0,
+            events=[
+                WyckoffEvent(day=d, type="ST", price=1.5, label="ST", help="y")
+                for d in event_days
+            ],
+        )
+
+    def test_lookback_covers_warmup_and_prior_trend(self):
+        # The buffer must be large enough for the band warm-up + prior-trend.
+        from api.analysis.wyckoff import (
+            PRIOR_TREND_WINDOW,
+            ROLLING_BAND_WINDOW,
+        )
+
+        assert LOOKBACK_BARS >= ROLLING_BAND_WINDOW + PRIOR_TREND_WINDOW
+
+    def test_none_from_date_returns_unchanged(self):
+        ranges = [self._range(date(2025, 1, 1), date(2025, 2, 1), [date(2025, 1, 10)])]
+        assert clip_ranges_to_window(ranges, None) is ranges
+
+    def test_drops_range_entirely_before_window(self):
+        ranges = [self._range(date(2025, 1, 1), date(2025, 1, 20), [date(2025, 1, 10)])]
+        assert clip_ranges_to_window(ranges, date(2025, 2, 1)) == []
+
+    def test_keeps_range_overlapping_window_clamps_start(self):
+        window = date(2025, 2, 1)
+        ranges = [
+            self._range(
+                date(2025, 1, 1),
+                date(2025, 3, 1),
+                [date(2025, 1, 15), date(2025, 2, 10)],
+            )
+        ]
+        out = clip_ranges_to_window(ranges, window)
+        assert len(out) == 1
+        # start clamped to the window edge; the pre-window event dropped.
+        assert out[0].start_day == window
+        assert [e.day for e in out[0].events] == [date(2025, 2, 10)]
+
+    def test_short_window_recovers_with_lookback_buffer(self):
+        # Regression for the reported bug: a bare short window detects nothing,
+        # but prepending LOOKBACK_BARS of lead-in recovers the range.
+        bars: list[dict[str, object]] = []
+        d = date(2025, 1, 1)
+        px = 160.0
+        for _ in range(60):  # downtrend lead-in
+            px -= 1.0
+            bars.append(
+                dict(day=d, open=px + 0.5, high=px + 1.0, low=px - 1.0, close=px, volume=100000)
+            )
+            d += timedelta(days=1)
+        for i in range(40):  # flat consolidation
+            c = 100.0 + ((-1) ** i) * 1.5
+            bars.append(
+                dict(day=d, open=c, high=c + 2.0, low=c - 2.0, close=c, volume=80000)
+            )
+            d += timedelta(days=1)
+
+        view_start = len(bars) - 21  # ~1M of visible bars
+        from_date = bars[view_start]["day"]
+        assert isinstance(from_date, date)
+
+        bare = detect_wyckoff(bars[view_start:])
+        buffered = clip_ranges_to_window(
+            detect_wyckoff(bars[max(0, view_start - LOOKBACK_BARS):]), from_date
+        )
+
+        assert bare == []  # bare short window starves
+        assert buffered  # lead-in buffer recovers detection
+        assert all(r.end_day >= from_date for r in buffered)
