@@ -41,11 +41,11 @@ async def backfill_index_history() -> dict:
     pool = await get_pool()
     inserted = 0
     for _, row in df.iterrows():
-        try:
-            d = pd.to_datetime(row.get("DATE")).date()
-        except (ValueError, TypeError):
+        dt = pd.to_datetime(row.get("DATE"), errors="coerce")
+        if pd.isna(dt):
             logger.warning("index_backfill: unparseable DATE=%r — skipping", row.get("DATE"))
             continue
+        d = dt.date()
         rec = await pool.fetchrow(
             """
             INSERT INTO index_daily (date, dsex, ds30, dses, source)
