@@ -4,6 +4,8 @@ import { useEffect, useState, useMemo } from 'react'
 import Link from 'next/link'
 import { get } from '@/lib/api'
 import type { PagedResponse, StockListItem } from '@/lib/types'
+import { matchesFilters } from '@/lib/screener'
+import RatingBadge from '@/components/stocks/RatingBadge'
 
 const SECTORS = [
   'All', 'Bank', 'Insurance', 'Financial Institutions', 'Telecom',
@@ -20,7 +22,7 @@ function fmtCap(bdt: number | null): string {
   return `৳${cr.toFixed(0)} Cr`
 }
 
-type SortKey = 'name' | 'ticker' | 'sector' | 'market_cap_bdt'
+type SortKey = 'name' | 'ticker' | 'sector' | 'market_cap_bdt' | 'pe'
 
 export default function StocksPage() {
   const [stocks, setStocks] = useState<StockListItem[]>([])
@@ -28,6 +30,9 @@ export default function StocksPage() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [sector, setSector] = useState('All')
+  const [maxPe, setMaxPe] = useState<number | null>(null)
+  const [rating, setRating] = useState('All')
+  const RATINGS = ['All', 'STRONG_BUY', 'BUY', 'HOLD', 'SELL', 'STRONG_SELL']
   const [sortKey, setSortKey] = useState<SortKey>('market_cap_bdt')
   const [sortAsc, setSortAsc] = useState(false)
 
@@ -53,12 +58,7 @@ export default function StocksPage() {
   }, [])
 
   const filtered = useMemo(() => {
-    let s = stocks
-    if (sector !== 'All') s = s.filter(x => x.sector === sector)
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      s = s.filter(x => x.ticker.toLowerCase().includes(q) || x.name.toLowerCase().includes(q))
-    }
+    const s = stocks.filter(x => matchesFilters(x, { sector, search, maxPe, rating }))
     return [...s].sort((a, b) => {
       let av: string | number = a[sortKey] ?? ''
       let bv: string | number = b[sortKey] ?? ''
@@ -68,7 +68,7 @@ export default function StocksPage() {
       if (av > bv) return sortAsc ? 1 : -1
       return 0
     })
-  }, [stocks, sector, search, sortKey, sortAsc])
+  }, [stocks, sector, search, maxPe, rating, sortKey, sortAsc])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortAsc(p => !p)
@@ -110,9 +110,23 @@ export default function StocksPage() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
-        {(search || sector !== 'All') && (
+        <input
+          type="number"
+          placeholder="Max P/E"
+          value={maxPe ?? ''}
+          onChange={e => setMaxPe(e.target.value === '' ? null : Number(e.target.value))}
+          className="w-28 bg-[#1a1a24] border border-[#2a2a3a] rounded-lg px-3 py-2 text-sm font-mono text-[#e8e8f0] placeholder:text-[#6b6b80] focus:outline-none focus:border-[#4d9eff]/50 transition-colors"
+        />
+        <select
+          value={rating}
+          onChange={e => setRating(e.target.value)}
+          className="bg-[#1a1a24] border border-[#2a2a3a] rounded-lg px-3 py-2 text-sm font-mono text-[#e8e8f0] focus:outline-none focus:border-[#4d9eff]/50 transition-colors"
+        >
+          {RATINGS.map(r => <option key={r} value={r}>{r === 'All' ? 'All ratings' : r.replace('_', ' ')}</option>)}
+        </select>
+        {(search || sector !== 'All' || maxPe !== null || rating !== 'All') && (
           <button
-            onClick={() => { setSearch(''); setSector('All') }}
+            onClick={() => { setSearch(''); setSector('All'); setMaxPe(null); setRating('All') }}
             className="text-[11px] font-mono text-[#6b6b80] hover:text-[#ff4d6a] transition-colors px-2 py-1 border border-[#2a2a3a] rounded-lg"
           >
             Clear
@@ -165,6 +179,15 @@ export default function StocksPage() {
                     Market Cap<SortIcon k="market_cap_bdt" />
                   </span>
                 </th>
+                <th className="py-3 px-2 text-right hidden sm:table-cell cursor-pointer select-none"
+                  onClick={() => toggleSort('pe')}>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#6b6b80] hover:text-[#e8e8f0] transition-colors">
+                    P/E{sortKey === 'pe' ? <span className="text-[#4d9eff] ml-1">{sortAsc ? '↑' : '↓'}</span> : <span className="text-[#3a3a4a] ml-1">⇅</span>}
+                  </span>
+                </th>
+                <th className="py-3 px-2 text-right hidden md:table-cell">
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-[#6b6b80]">Rating</span>
+                </th>
                 <th className="py-3 pl-2 pr-4 w-14" />
               </tr>
             </thead>
@@ -197,6 +220,14 @@ export default function StocksPage() {
                     <span className="text-sm font-mono tabular-nums text-[#e8e8f0]">
                       {fmtCap(stock.market_cap_bdt)}
                     </span>
+                  </td>
+                  <td className="py-3 px-2 text-right hidden sm:table-cell">
+                    <span className="text-sm font-mono tabular-nums text-[#e8e8f0]">
+                      {stock.pe != null ? Number(stock.pe).toFixed(1) : '—'}
+                    </span>
+                  </td>
+                  <td className="py-3 px-2 text-right hidden md:table-cell">
+                    <RatingBadge score={stock.health_score} />
                   </td>
                   <td className="py-3 pl-2 pr-4 text-right">
                     <Link href={`/stocks/${stock.ticker}`}
