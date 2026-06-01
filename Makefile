@@ -113,6 +113,9 @@ load-historical: ## Load data/amarstock_csv/ into stock_prices (~1.5M rows, idem
 bulk-historical: ## Bulk download AmarStock CSVs (2012-present). Slow — run once.
 	$(PYTHON) -m extraction.bulk_load.amarstock_historical
 
+backfill-index-history: ## Seed index_daily with ~30d DSEX/DS30/DSES history from bdshare
+	$(PYTHON) -m extraction.bulk_load.index_history_loader
+
 # ---------------------------------------------------------------------------
 # Pipeline verification (test mode)
 # ---------------------------------------------------------------------------
