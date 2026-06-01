@@ -12,11 +12,11 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytz
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import create_engine
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ def _to_int(value: object) -> int | None:
 
 
 def _to_float(value: object) -> float | None:
+    """Coerce to float; None for missing/NaN/Inf/unparseable."""
     if value is None:
         return None
     try:
@@ -71,7 +72,9 @@ def _market_is_open(now: datetime) -> bool:
     return 600 <= minutes <= 870
 
 
-def _live_records_to_rows(records, bucket_time, source):
+def _live_records_to_rows(
+    records: list[dict[str, object]], bucket_time: datetime, source: str
+) -> list[tuple[object, ...]]:
     """Map live_prices snapshot records to stock_prices INSERT tuples.
 
     One tuple per ticker. close = ltp (live feeds) or close. Skips rows with no
@@ -141,7 +144,6 @@ def get_scheduler(database_url: str) -> AsyncIOScheduler:
 
 async def _upsert_macro_df(pool, df) -> int:
     """Insert/update rows from a macro AdapterResult DataFrame into macro_indicators."""
-    import pandas as pd
     count = 0
     for _, row in df.iterrows():
         r = await pool.fetchrow(
@@ -312,8 +314,8 @@ async def job_news_scrape() -> None:
 async def job_daily_macro() -> None:
     """Daily macro indicators at 02:00 — FX rate + policy rate check."""
     from db.pool import get_pool
-    from extraction.registry import STREAMS
     from extraction.jobs import job_run
+    from extraction.registry import STREAMS
 
     async with job_run("daily_macro") as ctx:
         pool = await get_pool()
@@ -334,7 +336,9 @@ async def job_weekly_fundamentals() -> None:
 
     ~18 min for 406 tickers at 3 concurrent, 1.5s delay.
     """
-    from extraction.bulk_load.fundamentals_historical_loader import bulk_load_fundamentals_historical
+    from extraction.bulk_load.fundamentals_historical_loader import (
+        bulk_load_fundamentals_historical,
+    )
     logger.info("job_weekly_fundamentals: starting")
     summary = await bulk_load_fundamentals_historical()
     logger.info(
@@ -346,8 +350,8 @@ async def job_weekly_fundamentals() -> None:
 async def job_monthly() -> None:
     """Monthly macro data (1st day, 01:00) — all 5 macro streams."""
     from db.pool import get_pool
-    from extraction.registry import STREAMS
     from extraction.jobs import job_run
+    from extraction.registry import STREAMS
 
     async with job_run("monthly_macro") as ctx:
         pool = await get_pool()
@@ -400,6 +404,7 @@ async def job_nightly_ml() -> None:
 async def job_news_sentiment() -> None:
     """Score unscored news articles with Gemini Flash sentiment analysis."""
     import logging as _logging
+
     from db.pool import get_pool
     from extraction.jobs import job_run
     from mgmt.config import get_settings

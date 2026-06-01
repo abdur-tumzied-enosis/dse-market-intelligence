@@ -1,8 +1,10 @@
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from datetime import datetime
+
 import pytz
 
 from extraction.scheduler import _live_records_to_rows, _market_is_open
@@ -53,6 +55,11 @@ def test_rows_without_close_are_skipped():
 
 
 def test_market_is_open_weekday_and_hours():
-    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 11, 0)))   # Sun 11:00
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 15, 0)))  # Sun 15:00 (after close)
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 5, 11, 0)))  # Fri 11:00
+    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 11, 0)))         # Mon 11:00 (trading day)
+    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 15, 0)))     # Mon 15:00 (after close)
+    assert not _market_is_open(BD.localize(datetime(2026, 6, 5, 11, 0)))     # Fri 11:00
+    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 10, 0)))         # open boundary
+    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 9, 59)))     # just before open
+    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 14, 30)))        # close boundary
+    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 14, 31)))    # just after close
+    assert not _market_is_open(BD.localize(datetime(2026, 6, 6, 11, 0)))     # Sat 11:00
