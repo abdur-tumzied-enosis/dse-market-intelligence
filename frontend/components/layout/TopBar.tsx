@@ -1,3 +1,4 @@
+import LogoutButton from './LogoutButton'
 import MarketStreamBar from './MarketStreamBar'
 import SearchTrigger from './SearchTrigger'
 
@@ -8,6 +9,7 @@ export default function TopBar() {
       <SearchTrigger />
       <div className="flex-1" />
       <MarketStreamBar />
+      <LogoutButton />
     </header>
   )
 }
