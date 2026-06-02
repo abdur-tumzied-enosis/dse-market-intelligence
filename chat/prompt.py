@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 from langchain_core.messages import SystemMessage
 
+from extraction.market_status import get_market_status_sync
+
 _BD_TZ = ZoneInfo("Asia/Dhaka")
 
 
@@ -62,11 +64,7 @@ _STATIC_BN = """\
 
 
 def _is_market_open() -> bool:
-    now = datetime.now(_BD_TZ)
-    if now.weekday() not in (0, 1, 2, 3, 6):
-        return False
-    t = now.hour * 60 + now.minute
-    return 600 <= t <= 870
+    return get_market_status_sync()["status"] == "Open"
 
 
 def build_system_message(lang: str = "en", ticker_context: str = "") -> SystemMessage:

@@ -32,6 +32,7 @@ from langchain_core.messages import (
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
+from extraction.market_status import get_market_status_sync
 from mgmt.agent.llm import make_llm
 from mgmt.config import get_settings
 
@@ -129,11 +130,7 @@ In chat mode: answer questions and execute requested actions.\
 
 
 def _is_market_open() -> bool:
-    now = datetime.now(_BD_TZ)
-    if now.weekday() not in (0, 1, 2, 3, 6):  # Mon–Thu + Sun
-        return False
-    t = now.hour * 60 + now.minute
-    return 600 <= t <= 870  # 10:00–14:30
+    return get_market_status_sync()["status"] == "Open"
 
 
 def _build_system(auto_execute_risk: str, scratchpad: list[str] | None = None) -> SystemMessage:

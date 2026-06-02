@@ -9,7 +9,6 @@ Three layers:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -131,44 +130,14 @@ class TestToLc:
 
 
 class TestIsMarketOpen:
-    def _patch_now(self, weekday: int, hour: int, minute: int):
-        """Return a context manager that patches datetime.now for _BD_TZ checks."""
-        fake = MagicMock()
-        fake.weekday.return_value = weekday
-        fake.hour = hour
-        fake.minute = minute
-        return patch("mgmt.agent.agent.datetime") , fake
-
-    def test_closed_on_friday(self):
-        with patch("mgmt.agent.agent.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(
-                weekday=MagicMock(return_value=4),  # Friday
-                hour=11, minute=0,
-            )
-            assert _is_market_open() is False
-
-    def test_open_on_sunday_midday(self):
-        with patch("mgmt.agent.agent.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(
-                weekday=MagicMock(return_value=6),  # Sunday
-                hour=11, minute=0,
-            )
+    def test_open_reads_store(self):
+        with patch("mgmt.agent.agent.get_market_status_sync",
+                   return_value={"status": "Open", "source": "dse_direct"}):
             assert _is_market_open() is True
 
-    def test_closed_before_opening(self):
-        with patch("mgmt.agent.agent.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(
-                weekday=MagicMock(return_value=0),  # Monday
-                hour=9, minute=59,
-            )
-            assert _is_market_open() is False
-
-    def test_closed_after_close(self):
-        with patch("mgmt.agent.agent.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(
-                weekday=MagicMock(return_value=0),
-                hour=14, minute=31,
-            )
+    def test_closed_reads_store(self):
+        with patch("mgmt.agent.agent.get_market_status_sync",
+                   return_value={"status": "Closed", "source": "clock"}):
             assert _is_market_open() is False
 
 
