@@ -40,7 +40,8 @@ def test_live_returns_filtered_ticker():
         {"ticker": "CITYBANK", "ltp": 23.4, "change_pct": 1.7},
     ]
     with patch("api.routers.stocks._live_snapshot", AsyncMock(return_value=snapshot)), \
-         patch("api.routers.stocks._market_status", return_value="Open"):
+         patch("api.routers.stocks.get_market_status",
+               AsyncMock(return_value={"status": "Open", "source": "dse_direct"})):
         client = TestClient(_app(_pool_company_exists(True)))
         resp = client.get("/api/stocks/GP/live")
     assert resp.status_code == 200
@@ -49,6 +50,7 @@ def test_live_returns_filtered_ticker():
     assert body["available"] is True
     assert body["ltp"] == 400.0
     assert body["market_status"] == "Open"
+    assert body["status_source"] == "dse_direct"
 
 
 def test_live_computes_change_pct_when_feed_omits_it():
@@ -58,7 +60,8 @@ def test_live_computes_change_pct_when_feed_omits_it():
          "prev_close": 28.7, "change_pct": None, "volume": 3593515, "value_mn": 104.998},
     ]
     with patch("api.routers.stocks._live_snapshot", AsyncMock(return_value=snapshot)), \
-         patch("api.routers.stocks._market_status", return_value="Open"):
+         patch("api.routers.stocks.get_market_status",
+               AsyncMock(return_value={"status": "Open", "source": "dse_direct"})):
         client = TestClient(_app(_pool_company_exists(True)))
         resp = client.get("/api/stocks/CITYBANK/live")
     assert resp.status_code == 200
@@ -69,7 +72,8 @@ def test_live_computes_change_pct_when_feed_omits_it():
 
 def test_live_404_for_unknown_ticker():
     with patch("api.routers.stocks._live_snapshot", AsyncMock(return_value=[])), \
-         patch("api.routers.stocks._market_status", return_value="Closed"):
+         patch("api.routers.stocks.get_market_status",
+               AsyncMock(return_value={"status": "Closed", "source": "clock"})):
         client = TestClient(_app(_pool_company_exists(False)))
         resp = client.get("/api/stocks/NOPE/live")
     assert resp.status_code == 404
@@ -78,7 +82,8 @@ def test_live_404_for_unknown_ticker():
 def test_live_available_false_when_absent_from_snapshot():
     snapshot = [{"ticker": "GP", "ltp": 400.0}]
     with patch("api.routers.stocks._live_snapshot", AsyncMock(return_value=snapshot)), \
-         patch("api.routers.stocks._market_status", return_value="Open"):
+         patch("api.routers.stocks.get_market_status",
+               AsyncMock(return_value={"status": "Open", "source": "dse_direct"})):
         client = TestClient(_app(_pool_company_exists(True)))
         resp = client.get("/api/stocks/CITYBANK/live")
     assert resp.status_code == 200

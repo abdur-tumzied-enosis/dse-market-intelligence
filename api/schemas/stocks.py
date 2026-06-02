@@ -160,4 +160,5 @@ class LivePrice(BaseModel):
     volume: float | None = None
     value_bdt: float | None = None
     market_status: str
+    status_source: str
     as_of: datetime

@@ -13,7 +13,6 @@ from api.analysis.wyckoff import (
     detect_wyckoff,
 )
 from api.deps import get_current_user, get_db
-from api.routers.market import _market_status
 from api.schemas.common import PagedResponse
 from api.schemas.stocks import (
     AnnouncementsResponse,
@@ -26,6 +25,7 @@ from api.schemas.stocks import (
     WyckoffResponse,
 )
 from extraction.base import AllAdaptersFailedError
+from extraction.market_status import get_market_status
 from extraction.registry import STREAMS
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
@@ -501,7 +501,8 @@ async def get_live_price(ticker: str, pool=Depends(get_db), _user=Depends(get_cu
     if not exists:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
 
-    status = _market_status()
+    session = await get_market_status()
+    status = session["status"]
     as_of = datetime.now(UTC)
 
     for rec in await _live_snapshot():
@@ -529,6 +530,7 @@ async def get_live_price(ticker: str, pool=Depends(get_db), _user=Depends(get_cu
             "volume": _f(rec.get("volume")),
             "value_bdt": _f(value),
             "market_status": status,
+            "status_source": session["source"],
             "as_of": as_of,
         }
 
@@ -538,5 +540,6 @@ async def get_live_price(ticker: str, pool=Depends(get_db), _user=Depends(get_cu
         "ltp": None, "high": None, "low": None, "prev_close": None,
         "change_pct": None, "volume": None, "value_bdt": None,
         "market_status": status,
+        "status_source": session["source"],
         "as_of": as_of,
     }
