@@ -149,7 +149,9 @@ async def test_job_market_status_open_triggers_live_once():
 async def test_job_market_status_open_no_trigger_when_closed():
     rec = {"status": "Closed", "source": "dse_direct", "session_date": "2026-06-02",
            "checked_at": "2026-06-02T10:01:00+06:00"}
-    redis = MagicMock(); redis.get = AsyncMock(return_value=None); redis.set = AsyncMock()
+    redis = MagicMock()
+    redis.get = AsyncMock(return_value=None)
+    redis.set = AsyncMock()
     with patch.object(sched, "refresh_market_status", AsyncMock(return_value=rec)), \
          patch.object(sched, "get_redis", AsyncMock(return_value=redis)), \
          patch.object(sched, "job_live_prices", AsyncMock()) as live:
