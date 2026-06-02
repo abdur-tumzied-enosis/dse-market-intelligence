@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     live_prices_market_close_hour: int = 14
     live_prices_minutes: str = "*/2"
 
+    # market_status: scrape DSE Open/Closed. Morning window polls until open,
+    # afternoon window polls until closed. day_of_week reuses live_prices_market_days.
+    market_status_open_hour: int = 10
+    market_status_open_minutes: str = "0-15"     # 10:00–10:15, every minute
+    market_status_close_hour: int = 14
+    market_status_close_minutes: str = "*"        # 14:00–14:59, every minute
+    test_market_status_minutes: int = 3           # test-mode interval
+
     # eod_snapshot: cron at HH:MM on market days
     eod_snapshot_hour: int = 14
     eod_snapshot_minute: int = 35
