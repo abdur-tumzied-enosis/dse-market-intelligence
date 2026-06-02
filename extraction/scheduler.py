@@ -19,6 +19,9 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import create_engine
 
+from extraction.market_status import get_market_status, refresh_market_status
+from mgmt.cache import get_redis
+
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
 
@@ -61,15 +64,6 @@ _LIVE_UPSERT_SQL = """
         prev_close=EXCLUDED.prev_close, source=EXCLUDED.source,
         ingested_at=NOW(), quality_flag=EXCLUDED.quality_flag
 """
-
-
-def _market_is_open(now: datetime) -> bool:
-    """DSE trades Sun–Thu, 10:00–14:30 Asia/Dhaka. `now` must be BD-tz-aware.
-    Mon=0..Sun=6; Fri=4, Sat=5 are closed."""
-    if now.weekday() in (4, 5):
-        return False
-    minutes = now.hour * 60 + now.minute
-    return 600 <= minutes <= 870
 
 
 def _live_records_to_rows(
@@ -273,8 +267,9 @@ async def job_live_prices() -> None:
 
     logger.info("job_live_prices: starting")
     now = datetime.now(BD_TZ)
-    if not _market_is_open(now):
-        logger.info("job_live_prices: market closed — skipping write")
+    status = (await get_market_status())["status"]
+    if status != "Open":
+        logger.info("job_live_prices: market not open (status=%s) — skipping write", status)
         await _invalidate_live_caches()
         return
 
@@ -690,6 +685,38 @@ async def job_seed_companies() -> None:
     )
 
 
+async def job_market_status_open() -> None:
+    """Morning poll-until-open (cron 10:00-10:15, every minute). Refresh the
+    real DSE status; on the first Closed→Open transition of the day, fire
+    job_live_prices immediately so the first live pull doesn't wait for the next
+    live-prices tick. A per-day Redis flag guards against re-triggering."""
+    rec = await refresh_market_status()
+    if rec["status"] != "Open":
+        return
+    flag = f"market:open_triggered:{rec['session_date']}"
+    redis = await get_redis()
+    if await redis.get(flag):
+        return
+    await redis.set(flag, "1", ex=86_400)
+    logger.info("job_market_status_open: market open — triggering live_prices")
+    await job_live_prices()
+
+
+async def job_market_status_close() -> None:
+    """Afternoon poll-until-closed (cron 14:00-14:59, every minute). Refresh the
+    real DSE status; once today's status reads Closed, set a per-day Redis flag
+    so later fires in the window short-circuit (no extra scrapes)."""
+    today = datetime.now(BD_TZ).date().isoformat()
+    flag = f"market:closed_confirmed:{today}"
+    redis = await get_redis()
+    if await redis.get(flag):
+        return
+    rec = await refresh_market_status()
+    if rec["status"] == "Closed":
+        await redis.set(flag, "1", ex=86_400)
+        logger.info("job_market_status_close: market closed confirmed")
+
+
 # ── Scheduler Configuration ────────────────────────────────────────────
 
 
@@ -715,6 +742,28 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         id="live_price_pull",
         replace_existing=True,
         misfire_grace_time=300,
+    )
+
+    scheduler.add_job(
+        job_market_status_open,
+        trigger="cron",
+        day_of_week=cfg.live_prices_market_days,
+        hour=cfg.market_status_open_hour,
+        minute=cfg.market_status_open_minutes,
+        id="market_status_open",
+        replace_existing=True,
+        misfire_grace_time=120,
+    )
+
+    scheduler.add_job(
+        job_market_status_close,
+        trigger="cron",
+        day_of_week=cfg.live_prices_market_days,
+        hour=cfg.market_status_close_hour,
+        minute=cfg.market_status_close_minutes,
+        id="market_status_close",
+        replace_existing=True,
+        misfire_grace_time=120,
     )
 
     scheduler.add_job(
@@ -840,7 +889,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         misfire_grace_time=3600,
     )
 
-    logger.info("scheduler: all 13 jobs registered (production mode)")
+    logger.info("scheduler: all 15 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
@@ -858,6 +907,8 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
     """
     job_map = [
         (job_live_prices,         "live_price_pull",     cfg.test_live_prices_minutes),
+        (job_market_status_open,  "market_status_open",  cfg.test_market_status_minutes),
+        (job_market_status_close, "market_status_close", cfg.test_market_status_minutes),
         (job_eod_snapshot,        "eod_snapshot",        cfg.test_eod_snapshot_minutes),
         (job_announcements,       "dse_announcements",   cfg.test_announcements_minutes),
         (job_news_scrape,         "news_scrape",         cfg.test_news_scrape_minutes),
@@ -881,7 +932,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         )
 
     logger.warning(
-        "scheduler: TEST MODE — all 13 intervals compressed to minutes. "
+        "scheduler: TEST MODE — all 15 intervals compressed to minutes. "
         "Do NOT use in production."
     )
 

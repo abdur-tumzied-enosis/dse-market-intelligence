@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 import extraction.market_status as ms
+import extraction.scheduler as sched
 from extraction.adapters.dse_direct.market_status import _parse_status
 from extraction.market_status import clock_status, normalize_status
 from extraction.normalizers import DHAKA_TZ
@@ -125,3 +126,48 @@ def test_get_market_status_sync_clock_fallback():
         result = ms.get_market_status_sync()
     assert result["status"] in ("Open", "Closed")
     assert result["source"] == "clock"
+
+
+@pytest.mark.asyncio
+async def test_job_market_status_open_triggers_live_once():
+    """When the morning poll sees Open, job_live_prices fires once (Redis flag guards repeats)."""
+    flag_store = {}
+    redis = MagicMock()
+    redis.get = AsyncMock(side_effect=lambda k: flag_store.get(k))
+    redis.set = AsyncMock(side_effect=lambda k, v, ex=None: flag_store.__setitem__(k, v))
+    rec = {"status": "Open", "source": "dse_direct", "session_date": "2026-06-02",
+           "checked_at": "2026-06-02T10:01:00+06:00"}
+    with patch.object(sched, "refresh_market_status", AsyncMock(return_value=rec)), \
+         patch.object(sched, "get_redis", AsyncMock(return_value=redis)), \
+         patch.object(sched, "job_live_prices", AsyncMock()) as live:
+        await sched.job_market_status_open()
+        await sched.job_market_status_open()  # second fire — flag set, no re-trigger
+    assert live.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_job_market_status_open_no_trigger_when_closed():
+    rec = {"status": "Closed", "source": "dse_direct", "session_date": "2026-06-02",
+           "checked_at": "2026-06-02T10:01:00+06:00"}
+    redis = MagicMock(); redis.get = AsyncMock(return_value=None); redis.set = AsyncMock()
+    with patch.object(sched, "refresh_market_status", AsyncMock(return_value=rec)), \
+         patch.object(sched, "get_redis", AsyncMock(return_value=redis)), \
+         patch.object(sched, "job_live_prices", AsyncMock()) as live:
+        await sched.job_market_status_open()
+    assert live.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_job_market_status_close_short_circuits_after_closed():
+    rec = {"status": "Closed", "source": "dse_direct", "session_date": "2026-06-02",
+           "checked_at": "2026-06-02T14:31:00+06:00"}
+    flag_store = {}
+    redis = MagicMock()
+    redis.get = AsyncMock(side_effect=lambda k: flag_store.get(k))
+    redis.set = AsyncMock(side_effect=lambda k, v, ex=None: flag_store.__setitem__(k, v))
+    refresh = AsyncMock(return_value=rec)
+    with patch.object(sched, "refresh_market_status", refresh), \
+         patch.object(sched, "get_redis", AsyncMock(return_value=redis)):
+        await sched.job_market_status_close()  # scrapes, sets flag
+        await sched.job_market_status_close()  # flag set → short-circuit, no scrape
+    assert refresh.await_count == 1

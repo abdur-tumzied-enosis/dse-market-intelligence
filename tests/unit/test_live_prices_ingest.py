@@ -7,9 +7,9 @@ from datetime import datetime
 
 import pytz
 
+from extraction.market_status import clock_status
 from extraction.scheduler import (
     _live_records_to_rows,
-    _market_is_open,
     _split_known_tickers,
 )
 
@@ -91,11 +91,11 @@ def test_split_known_tickers_dedupes_and_sorts_dropped():
 
 
 def test_market_is_open_weekday_and_hours():
-    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 11, 0)))         # Mon 11:00 (trading day)
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 15, 0)))     # Mon 15:00 (after close)
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 5, 11, 0)))     # Fri 11:00
-    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 10, 0)))         # open boundary
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 9, 59)))     # just before open
-    assert _market_is_open(BD.localize(datetime(2026, 6, 1, 14, 30)))        # close boundary
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 1, 14, 31)))    # just after close
-    assert not _market_is_open(BD.localize(datetime(2026, 6, 6, 11, 0)))     # Sat 11:00
+    assert clock_status(BD.localize(datetime(2026, 6, 1, 11, 0))) == "Open"   # Mon 11:00
+    assert clock_status(BD.localize(datetime(2026, 6, 1, 15, 0))) == "Closed" # Mon 15:00
+    assert clock_status(BD.localize(datetime(2026, 6, 5, 11, 0))) == "Closed" # Fri
+    assert clock_status(BD.localize(datetime(2026, 6, 1, 10, 0))) == "Open"   # open boundary
+    assert clock_status(BD.localize(datetime(2026, 6, 1, 9, 59))) == "Closed"
+    assert clock_status(BD.localize(datetime(2026, 6, 1, 14, 30))) == "Open"  # close boundary
+    assert clock_status(BD.localize(datetime(2026, 6, 1, 14, 31))) == "Closed"
+    assert clock_status(BD.localize(datetime(2026, 6, 6, 11, 0))) == "Closed" # Sat
