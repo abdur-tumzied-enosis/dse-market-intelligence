@@ -10,6 +10,15 @@ function makeReq(pathname: string, token?: string): NextRequest {
   })
 }
 
+function makeReqCookies(pathname: string, cookies: Record<string, string>): NextRequest {
+  const cookie = Object.entries(cookies)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ')
+  return new NextRequest(`http://localhost:3000${pathname}`, {
+    headers: cookie ? { cookie } : {},
+  })
+}
+
 it('redirects unauthenticated request to /login', () => {
   const res = middleware(makeReq('/dashboard'))
   expect(res.headers.get('location')).toMatch(/\/login/)
@@ -23,4 +32,14 @@ it('allows authenticated request to /dashboard (no redirect)', () => {
 it('redirects authenticated user away from /login to /dashboard', () => {
   const res = middleware(makeReq('/login', 'valid-token'))
   expect(res.headers.get('location')).toMatch(/\/dashboard/)
+})
+
+it('allows request with valid refresh cookie but expired access cookie (no redirect)', () => {
+  const res = middleware(makeReqCookies('/dashboard', { dse_refresh_token: 'rt' }))
+  expect(res.headers.get('location')).toBeNull()
+})
+
+it('redirects to /login when neither access nor refresh cookie present', () => {
+  const res = middleware(makeReqCookies('/dashboard', {}))
+  expect(res.headers.get('location')).toMatch(/\/login/)
 })
