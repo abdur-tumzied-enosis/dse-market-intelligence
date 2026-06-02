@@ -31,6 +31,7 @@ const NEUTRAL = '#a78bfa'
 const VP_BINS = 24
 const VP_COLOR = '#7aa2f7'          // soft blue — distinct from candle green/red + Wyckoff violet
 const VP_POC_COLOR = '#ffd166'      // amber POC line
+const VP_VA_LINE_COLOR = '#7aa2f7'  // blue dashed VAH/VAL bounds
 const VP_BAR_MAX_FRACTION = 0.35    // widest bar = 35% of chart width
 const VP_BAR_ALPHA = 0.22           // out-of-value-area bars
 const VP_VA_ALPHA = 0.34            // value-area bars (slightly stronger)
@@ -827,13 +828,37 @@ class VolumeProfilePaneRenderer {
         ctx.fillRect(0, top, w, h)
       }
 
-      // POC line across the full bar width
-      const yPoc = priceToCoordinate(profile.poc)
-      if (yPoc != null) {
-        const y = yPoc * vr
-        ctx.fillStyle = VP_POC_COLOR
-        ctx.fillRect(0, y - 0.5 * vr, maxBarPx * hr, Math.max(1, 1 * vr))
+      const barW = maxBarPx * hr
+
+      // Labeled horizontal level: solid (POC) or dashed (VAH/VAL), with a
+      // right-aligned caption at the end of the bar band.
+      const drawLevel = (price: number, color: string, label: string, dashed: boolean) => {
+        const yc = priceToCoordinate(price)
+        if (yc == null) return
+        const y = yc * vr
+        ctx.save()
+        ctx.strokeStyle = color
+        ctx.lineWidth = Math.max(1, 1 * vr)
+        ctx.setLineDash(dashed ? [4 * hr, 3 * hr] : [])
+        ctx.beginPath()
+        ctx.moveTo(0, y)
+        ctx.lineTo(barW, y)
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.font = `${10 * vr}px Menlo, Consolas, monospace`
+        ctx.fillStyle = color
+        ctx.textAlign = 'right'
+        ctx.textBaseline = 'bottom'
+        ctx.fillText(label, barW - 2 * hr, y - 1 * vr)
+        ctx.restore()
       }
+
+      // Value-area bounds first (dashed), then POC on top (solid, brighter).
+      if (profile.vah > profile.val) {
+        drawLevel(profile.vah, VP_VA_LINE_COLOR, 'VAH', true)
+        drawLevel(profile.val, VP_VA_LINE_COLOR, 'VAL', true)
+      }
+      drawLevel(profile.poc, VP_POC_COLOR, 'POC', false)
     })
   }
 }
