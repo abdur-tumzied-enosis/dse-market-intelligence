@@ -1,4 +1,5 @@
 import os
+
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
@@ -59,3 +60,75 @@ def test_parse_status_open():
 def test_parse_status_missing_raises():
     with pytest.raises(ValueError):
         _parse_status("<html><body>no status here</body></html>")
+
+
+# tests/unit/test_market_status.py  (append)
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pandas as pd
+
+import extraction.market_status as ms
+
+
+@pytest.mark.asyncio
+async def test_get_market_status_redis_hit():
+    payload = {"status": "Open", "source": "dse_direct", "checked_at": "2026-06-02T11:00:00+06:00"}
+    with patch.object(ms, "cache_get", AsyncMock(return_value=payload)):
+        assert (await ms.get_market_status()) == payload
+
+
+@pytest.mark.asyncio
+async def test_get_market_status_db_fallback():
+    row = {"status": "Closed", "source": "dse_direct",
+           "checked_at": datetime(2026, 6, 2, 15, 0, tzinfo=DHAKA_TZ)}
+    pool = MagicMock()
+    pool.fetchrow = AsyncMock(return_value=row)
+    with patch.object(ms, "cache_get", AsyncMock(return_value=None)), \
+         patch.object(ms, "_get_pool", AsyncMock(return_value=pool)):
+        result = await ms.get_market_status()
+    assert result["status"] == "Closed"
+    assert result["source"] == "dse_direct"
+
+
+@pytest.mark.asyncio
+async def test_get_market_status_clock_fallback():
+    pool = MagicMock()
+    pool.fetchrow = AsyncMock(return_value=None)
+    with patch.object(ms, "cache_get", AsyncMock(return_value=None)), \
+         patch.object(ms, "_get_pool", AsyncMock(return_value=pool)):
+        result = await ms.get_market_status()
+    assert result["status"] in ("Open", "Closed")
+    assert result["source"] == "clock"
+
+
+@pytest.mark.asyncio
+async def test_refresh_uses_clock_on_scrape_failure():
+    from extraction.base import AllAdaptersFailedError
+    bad = MagicMock()
+    bad.fetch = AsyncMock(side_effect=AllAdaptersFailedError("market_status", []))
+    writes = []
+    with patch.dict("extraction.registry.STREAMS", {"market_status": bad}, clear=False), \
+         patch.object(ms, "_write", AsyncMock(side_effect=lambda r: writes.append(r))):
+        rec = await ms.refresh_market_status()
+    assert rec["source"] == "clock"
+    assert rec["status"] in ("Open", "Closed")
+    assert writes and writes[0]["source"] == "clock"
+
+
+@pytest.mark.asyncio
+async def test_refresh_uses_scrape_when_ok():
+    df = pd.DataFrame([{"status": "Open", "raw_label": "Market Status: Open"}])
+    ok = MagicMock()
+    ok.fetch = AsyncMock(return_value=MagicMock(data=df))
+    with patch.dict("extraction.registry.STREAMS", {"market_status": ok}, clear=False), \
+         patch.object(ms, "_write", AsyncMock()):
+        rec = await ms.refresh_market_status()
+    assert rec["status"] == "Open"
+    assert rec["source"] == "dse_direct"
+
+
+def test_get_market_status_sync_clock_fallback():
+    with patch.object(ms, "_sync_redis", MagicMock(side_effect=RuntimeError("no redis"))):
+        result = ms.get_market_status_sync()
+    assert result["status"] in ("Open", "Closed")
+    assert result["source"] == "clock"
