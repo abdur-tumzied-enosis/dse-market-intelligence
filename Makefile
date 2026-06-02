@@ -104,8 +104,11 @@ clean-volumes: ## WARNING: destroy Docker volumes (wipes DB data)
 # ---------------------------------------------------------------------------
 # Bulk data load (one-time)
 # ---------------------------------------------------------------------------
-seed-companies: ## Seed companies table from DSE company list
-	$(PYTHON) -m db.seeds.companies
+seed-companies: ## Seed companies roster from DSE company_listing.php (new tickers flagged for enrichment)
+	$(PYTHON) -m extraction.bulk_load.seed_companies
+
+enrich-companies: ## Fill name/sector/category/market_cap for unenriched companies from DSE displayCompany.php
+	$(PYTHON) -m extraction.bulk_load.enrich_companies
 
 load-historical: ## Load data/amarstock_csv/ into stock_prices (~1.5M rows, idempotent)
 	$(PYTHON) scripts/load_amarstock_historical.py

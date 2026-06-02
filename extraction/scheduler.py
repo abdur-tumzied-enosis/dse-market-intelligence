@@ -663,6 +663,33 @@ async def job_sector_pe() -> None:
     logger.info("job_sector_pe: complete")
 
 
+async def job_seed_companies() -> None:
+    """Refresh the companies roster from DSE + enrich new tickers (daily, pre-open).
+
+    Sources the ticker roster from dsebd.org/company_listing.php so newly listed
+    companies get registered (as placeholders), then fills name/sector/category/
+    market_cap for every unenriched row from displayCompany.php. Runs before the
+    10:00 market open: without a seeded companies row, job_live_prices drops a
+    new listing's prices (stock_prices.ticker is FK → companies)."""
+    from extraction.bulk_load.enrich_companies import enrich_companies
+    from extraction.bulk_load.seed_companies import seed
+    from mgmt.config import get_settings
+
+    cfg = get_settings()
+    sync_url = (
+        cfg.database_url
+        .replace("postgresql+asyncpg://", "postgresql://")
+        .replace("postgresql+psycopg://", "postgresql://")
+    )
+    logger.info("job_seed_companies: starting")
+    roster = await seed(sync_url)
+    enriched = await enrich_companies()
+    logger.info(
+        "job_seed_companies: complete roster_new=%d roster_total=%d enriched_ok=%d enriched_failed=%d",
+        roster["new"], roster["total"], enriched["ok"], enriched["failed"],
+    )
+
+
 # ── Scheduler Configuration ────────────────────────────────────────────
 
 
@@ -802,7 +829,18 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         misfire_grace_time=3600,
     )
 
-    logger.info("scheduler: all 12 jobs registered (production mode)")
+    scheduler.add_job(
+        job_seed_companies,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        timezone=BD_TZ,
+        id="seed_companies",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    logger.info("scheduler: all 13 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
@@ -831,6 +869,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         (job_nightly_ml,          "nightly_ml",          cfg.test_nightly_ml_minutes),
         (job_news_sentiment,      "news_sentiment",      cfg.test_news_sentiment_minutes),
         (job_sector_pe,           "sector_pe",           cfg.test_sector_pe_minutes),
+        (job_seed_companies,      "seed_companies",      cfg.test_seed_companies_minutes),
     ]
     for func, job_id, interval_minutes in job_map:
         scheduler.add_job(
@@ -842,7 +881,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         )
 
     logger.warning(
-        "scheduler: TEST MODE — all 12 intervals compressed to minutes. "
+        "scheduler: TEST MODE — all 13 intervals compressed to minutes. "
         "Do NOT use in production."
     )
 

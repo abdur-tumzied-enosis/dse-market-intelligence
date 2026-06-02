@@ -2,7 +2,7 @@
 Bulk historical load orchestrator.
 
 Steps:
-  1. seed          — Upsert companies table from AmarStock live prices
+  1. seed          — Upsert companies roster from DSE listing + enrich new tickers
   2. load          — Bulk-load historical prices for all tickers
   3. report        — Print gap analysis report
   4. announcements — Fetch per-company historical announcements for all tickers
@@ -53,10 +53,17 @@ async def _run(args: argparse.Namespace) -> None:
         sys.exit("ERROR: DATABASE_URL or DATABASE_SYNC_URL not set in .env")
 
     if args.cmd in ("seed", "all"):
+        from extraction.bulk_load.enrich_companies import enrich_companies
         from extraction.bulk_load.seed_companies import seed
-        print("-- Step 1: Seeding companies table ----------------------------------")
-        count = await seed(dsn)
-        print(f"   -> Seeded {count} companies.\n")
+        print("-- Step 1: Seeding companies roster from DSE ------------------------")
+        roster = await seed(dsn)
+        print(
+            f"   -> Roster: {roster['total']} tickers "
+            f"({roster['new']} new, {roster['existing']} existing).\n"
+        )
+        print("-- Step 1b: Enriching new companies from DSE ------------------------")
+        enriched = await enrich_companies()
+        print(f"   -> Enriched ok={enriched['ok']} failed={enriched['failed']}.\n")
 
     if args.cmd in ("load", "all"):
         from extraction.bulk_load.historical_loader import HistoricalLoader
@@ -155,7 +162,7 @@ def main() -> None:
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("seed", help="Seed companies table from AmarStock live prices")
+    sub.add_parser("seed", help="Seed companies roster from DSE listing + enrich new tickers")
 
     load_p = sub.add_parser("load", help="Bulk-load historical prices for all/selected tickers")
     _add_load_args(load_p)
