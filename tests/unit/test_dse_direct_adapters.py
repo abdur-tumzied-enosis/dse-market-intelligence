@@ -428,18 +428,20 @@ class TestDSEDirectSectorPENormalize:
         assert len(df) == 3
 
     def test_sector_names(self, df: pd.DataFrame):
-        assert list(df["sector_name"]) == ["Bank", "Cement", "Engineering"]
+        assert list(df["sector"]) == ["Bank", "Cement", "Engineering"]
 
-    def test_median_pe_decimal(self, df: pd.DataFrame):
-        assert isinstance(df.iloc[0]["median_pe"], Decimal)
-        assert df.iloc[0]["median_pe"] == Decimal("4.645")
+    def test_pe_decimal(self, df: pd.DataFrame):
+        assert isinstance(df.iloc[0]["pe"], Decimal)
+        assert df.iloc[0]["pe"] == Decimal("4.645")
 
-    def test_rank_int(self, df: pd.DataFrame):
-        assert df.iloc[0]["rank"] == 1
-        assert df.iloc[2]["rank"] == 3
+    def test_enriched_columns_present_but_null(self, df: pd.DataFrame):
+        # DSE page has no change_pct / market_cap; columns exist for the table
+        # schema + quality rule, filled later by job_sector_pe.
+        assert df["change_pct"].isna().all()
+        assert df["market_cap_bdt"].isna().all()
 
     def test_required_columns(self, df: pd.DataFrame):
-        assert {"rank", "sector_name", "median_pe", "fetched_at", "source"} <= set(df.columns)
+        assert {"sector", "pe", "change_pct", "market_cap_bdt", "fetched_at", "source"} <= set(df.columns)
 
     def test_source(self, df: pd.DataFrame):
         assert (df["source"] == "dse_direct_sector_pe").all()
@@ -460,17 +462,17 @@ class TestDSEDirectSectorPEFixture:
     def test_row_count(self, df: pd.DataFrame):
         assert len(df) == 18  # DSE has 18 sectors
 
-    def test_median_pe_positive(self, df: pd.DataFrame):
-        assert (df["median_pe"] > 0).all()
+    def test_pe_positive(self, df: pd.DataFrame):
+        assert (df["pe"] > 0).all()
 
     def test_sector_names_not_empty(self, df: pd.DataFrame):
-        assert (df["sector_name"].str.len() > 0).all()
+        assert (df["sector"].str.len() > 0).all()
 
     def test_bank_sector_present(self, df: pd.DataFrame):
-        assert df["sector_name"].str.contains("Bank", case=False).any()
+        assert df["sector"].str.contains("Bank", case=False).any()
 
-    def test_median_pe_decimal(self, df: pd.DataFrame):
-        assert isinstance(df["median_pe"].iloc[0], Decimal)
+    def test_pe_decimal(self, df: pd.DataFrame):
+        assert isinstance(df["pe"].iloc[0], Decimal)
 
     def test_source(self, df: pd.DataFrame):
         assert (df["source"] == "dse_direct_sector_pe").all()

@@ -67,25 +67,30 @@ class DSEDirectSectorPEAdapter(BaseAdapter):
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:
         df = raw.copy()
-        # Columns: 0=rank, 1=sector_name (or link text), 2=median_pe
-        # Some rows may have 2 cols if rank merged; be flexible
+        # Raw columns: 0=rank, 1=sector_name (or link text), 2=median_pe.
+        # Some rows may have 2 cols if rank merged; be flexible.
         if df.shape[1] >= 3:
             df.columns = ["rank", "sector_name", "median_pe"] + list(df.columns[3:])
         elif df.shape[1] == 2:
             df.columns = ["sector_name", "median_pe"]
-            df.insert(0, "rank", range(1, len(df) + 1))
         else:
             raise ValueError(f"unexpected column count: {df.shape[1]}")
 
+        # Emit the canonical sector_performance schema (matches the sector_pe
+        # table, the quality rule, and the bdshare sibling adapter). The DSE
+        # sectoral_PE page carries only the median P/E; change_pct and
+        # market_cap_bdt have no source here and are enriched from
+        # companies/stock_prices by job_sector_pe before insert.
         out = pd.DataFrame()
-        out["rank"]        = pd.to_numeric(df["rank"], errors="coerce").astype("Int64")
-        out["sector_name"] = df["sector_name"].str.strip()
-        out["median_pe"]   = df["median_pe"].apply(to_decimal)
-        out["fetched_at"]  = datetime.now(timezone.utc)
-        out["source"]      = self.name
-        # Drop header-like rows where sector_name is empty or median_pe is null
-        out = out.loc[out["sector_name"].str.len() > 0]
-        out = out.loc[out["median_pe"].notna()]
+        out["sector"]         = df["sector_name"].str.strip()
+        out["pe"]             = df["median_pe"].apply(to_decimal)
+        out["change_pct"]     = None
+        out["market_cap_bdt"] = None
+        out["fetched_at"]     = datetime.now(timezone.utc)
+        out["source"]         = self.name
+        # Drop header-like rows where sector is empty or pe is null.
+        out = out.loc[out["sector"].str.len() > 0]
+        out = out.loc[out["pe"].notna()]
         return out.reset_index(drop=True)
 
     async def fetch(self, **kwargs: Any) -> AdapterResult:

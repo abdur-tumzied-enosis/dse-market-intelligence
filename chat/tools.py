@@ -137,10 +137,14 @@ def build_tools(pool) -> list:
             """,
             ticker.upper(),
         )
+        # sector_pe carries the DSE sectoral median P/E (column `pe`); it has no
+        # EPS/NAV. DSE labels use '&' ('Food & Allied') while companies.sector
+        # spells 'and', so match on the normalized name.
         sector_row = await pool.fetchrow(
             """
-            SELECT avg_pe, avg_eps, recorded_at FROM sector_pe
-            WHERE sector = $1 ORDER BY recorded_at DESC LIMIT 1
+            SELECT pe, change_pct, fetched_at FROM sector_pe
+            WHERE lower(replace(sector, '&', 'and')) = lower(replace($1, '&', 'and'))
+            ORDER BY fetched_at DESC LIMIT 1
             """,
             sector,
         )

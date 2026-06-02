@@ -186,6 +186,65 @@ async def _upsert_macro_df(pool, df) -> int:
     return count
 
 
+def _norm_sector(name: str) -> str:
+    """Canonicalize a sector label for cross-source matching.
+
+    DSE's sectoral_PE page writes '&' ('Food & Allied') while companies.sector
+    spells it out ('Food and Allied'); both also drift in case/spacing. Lower,
+    swap '&'→'and', and collapse whitespace so the two taxonomies line up."""
+    return " ".join(name.lower().replace("&", "and").split())
+
+
+async def _sector_enrichment(pool) -> dict[str, tuple[object, object]]:
+    """Per-sector market cap + market-cap-weighted change_pct from latest bars.
+
+    The DSE sectoral_PE page carries only median P/E, so market_cap_bdt and
+    change_pct (both rendered by the Sectors page) are derived here from
+    companies + the most recent stock_prices bar per ticker, keyed by the
+    normalized sector name (see _norm_sector). change_pct is a market-cap-
+    weighted average so large caps drive the sector move and a single tiny or
+    halted ticker can't skew it; it falls back to an equal-weight average for
+    sectors whose companies have no seeded caps. Sectors with no matching active
+    companies miss the dict and fall back to (None, None).
+    """
+    recs = await pool.fetch(
+        """
+        WITH latest AS (
+            SELECT DISTINCT ON (ticker) ticker, change_pct
+            FROM stock_prices
+            ORDER BY ticker, time DESC
+        )
+        SELECT
+            lower(replace(c.sector, '&', 'and')) AS sector_raw,
+            SUM(c.market_cap_bdt)                AS market_cap_bdt,
+            COALESCE(
+                SUM(l.change_pct * c.market_cap_bdt)
+                    FILTER (WHERE l.change_pct IS NOT NULL AND c.market_cap_bdt IS NOT NULL)
+                / NULLIF(SUM(c.market_cap_bdt)
+                    FILTER (WHERE l.change_pct IS NOT NULL AND c.market_cap_bdt IS NOT NULL), 0),
+                AVG(l.change_pct)
+            ) AS change_pct
+        FROM companies c
+        LEFT JOIN latest l USING (ticker)
+        WHERE c.is_active = true AND c.sector IS NOT NULL
+        GROUP BY lower(replace(c.sector, '&', 'and'))
+        """
+    )
+    return {
+        _norm_sector(r["sector_raw"]): (r["market_cap_bdt"], r["change_pct"])
+        for r in recs
+    }
+
+
+async def _invalidate_sector_caches() -> None:
+    """Drop the /api/sectors list + detail caches so the next request rebuilds."""
+    try:
+        from mgmt.cache import cache_delete_pattern
+        await cache_delete_pattern("cache:api:sectors:*")
+    except Exception as exc:
+        logger.warning("job_sector_pe: cache invalidation failed error=%s", exc)
+
+
 # ── Job Functions ──────────────────────────────────────────────────────
 
 
@@ -530,6 +589,80 @@ async def job_news_sentiment() -> None:
         _log.info("job_news_sentiment done scored=%d", n)
 
 
+async def job_sector_pe() -> None:
+    """Daily sector P/E snapshot (15:45 BD, after market close).
+
+    Fetches DSE sectoral median P/E (sector_performance stream), enriches each
+    sector with market cap + a market-cap-weighted change_pct from the latest
+    stock_prices bars, then appends one snapshot row per sector to sector_pe.
+    The /api/sectors endpoint reads the latest row per sector (DISTINCT ON), so
+    this append-only snapshot powers the Sectors page + heatmap.
+    """
+    from db.pool import get_pool
+    from extraction.base import AllAdaptersFailedError
+    from extraction.jobs import job_run
+    from extraction.registry import STREAMS
+
+    logger.info("job_sector_pe: starting")
+    async with job_run("sector_pe", stream_name="sector_performance") as ctx:
+        try:
+            result = await STREAMS["sector_performance"].fetch()
+        except AllAdaptersFailedError as exc:
+            logger.error("job_sector_pe: all adapters failed error=%s", exc)
+            raise
+
+        records = result.data.to_dict("records")
+        ctx["records_fetched"] = len(records)
+        if not records:
+            logger.info("job_sector_pe: no sector rows — skipping write")
+            return
+
+        pool = await get_pool()
+        enrich = await _sector_enrichment(pool)
+
+        insert_rows = []
+        n_cap = n_chg = 0
+        for rec in records:
+            sector = str(rec.get("sector") or "").strip()
+            if not sector:
+                continue
+            cap, change_pct = enrich.get(_norm_sector(sector), (None, None))
+            n_cap += cap is not None
+            n_chg += change_pct is not None
+            insert_rows.append((
+                rec["fetched_at"],          # $1 fetched_at
+                sector,                     # $2 sector
+                rec.get("pe"),              # $3 pe (Decimal from adapter)
+                change_pct,                 # $4 change_pct (equal-weight avg)
+                cap,                        # $5 market_cap_bdt
+                result.source_name,         # $6 source
+            ))
+
+        if insert_rows:
+            await pool.executemany(
+                """
+                INSERT INTO sector_pe
+                    (fetched_at, sector, pe, change_pct, market_cap_bdt, source)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                """,
+                insert_rows,
+            )
+        ctx["records_inserted"] = len(insert_rows)
+        logger.info(
+            "job_sector_pe: inserted=%d enriched_cap=%d enriched_change=%d source=%s",
+            len(insert_rows), n_cap, n_chg, result.source_name,
+        )
+        if insert_rows and n_cap == 0:
+            logger.warning(
+                "job_sector_pe: market_cap_bdt null for all %d sectors — "
+                "companies.market_cap_bdt is unseeded; heatmap tiles size equally",
+                len(insert_rows),
+            )
+
+    await _invalidate_sector_caches()
+    logger.info("job_sector_pe: complete")
+
+
 # ── Scheduler Configuration ────────────────────────────────────────────
 
 
@@ -658,7 +791,18 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         misfire_grace_time=3600,
     )
 
-    logger.info("scheduler: all 11 jobs registered (production mode)")
+    scheduler.add_job(
+        job_sector_pe,
+        trigger="cron",
+        hour=15,
+        minute=45,
+        timezone=BD_TZ,
+        id="sector_pe",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    logger.info("scheduler: all 12 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
@@ -686,6 +830,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         (job_health_checks,       "health_checks",       cfg.test_health_check_minutes),
         (job_nightly_ml,          "nightly_ml",          cfg.test_nightly_ml_minutes),
         (job_news_sentiment,      "news_sentiment",      cfg.test_news_sentiment_minutes),
+        (job_sector_pe,           "sector_pe",           cfg.test_sector_pe_minutes),
     ]
     for func, job_id, interval_minutes in job_map:
         scheduler.add_job(
@@ -697,7 +842,7 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
         )
 
     logger.warning(
-        "scheduler: TEST MODE — all 10 intervals compressed to minutes. "
+        "scheduler: TEST MODE — all 12 intervals compressed to minutes. "
         "Do NOT use in production."
     )
 
