@@ -39,6 +39,7 @@ class MarketIndices(BaseModel):
     dses_value: float
     dses_change_pct: float
     market_status: str
+    status_source: str
     advance: int
     decline: int
     unchanged: int

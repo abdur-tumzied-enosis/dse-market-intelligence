@@ -3,16 +3,14 @@ import os
 os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
-from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 import pytest
 
-from api.routers.market import _build_indices, _market_status
+from api.routers.market import _build_indices
 from extraction.base import AllAdaptersFailedError
-from extraction.normalizers import DHAKA_TZ
 
 
 def _fake_stream(df: pd.DataFrame):
@@ -34,7 +32,9 @@ async def test_build_indices_maps_from_registry():
         {"ticker": "C", "change_pct": 0.0},
     ])
     streams = {"market_indices": _fake_stream(idx_df), "live_prices": _fake_stream(live_df)}
-    with patch.dict("api.routers.market.STREAMS", streams):
+    with patch.dict("api.routers.market.STREAMS", streams), \
+         patch("api.routers.market.get_market_status",
+               AsyncMock(return_value={"status": "Closed", "source": "clock"})):
         result = await _build_indices()
 
     assert result["dsex_value"] == pytest.approx(5330.89)
@@ -47,6 +47,7 @@ async def test_build_indices_maps_from_registry():
     assert result["decline"] == 1
     assert result["unchanged"] == 1
     assert result["market_status"] in ("Open", "Closed")
+    assert result["status_source"] == "clock"
 
 
 @pytest.mark.asyncio
@@ -56,18 +57,11 @@ async def test_build_indices_partial_when_live_breadth_fails():
     bad_live = MagicMock()
     bad_live.fetch = AsyncMock(side_effect=AllAdaptersFailedError("live_prices", []))
     streams = {"market_indices": _fake_stream(idx_df), "live_prices": bad_live}
-    with patch.dict("api.routers.market.STREAMS", streams):
+    with patch.dict("api.routers.market.STREAMS", streams), \
+         patch("api.routers.market.get_market_status",
+               AsyncMock(return_value={"status": "Closed", "source": "clock"})):
         result = await _build_indices()
 
     assert result["dsex_value"] == pytest.approx(5330.89)
     assert result["advance"] == 0
     assert result["decline"] == 0
-
-
-def test_market_status_clock():
-    # 2026-06-01 is a Monday
-    assert _market_status(datetime(2026, 6, 1, 11, 0, tzinfo=DHAKA_TZ)) == "Open"
-    assert _market_status(datetime(2026, 6, 1, 9, 30, tzinfo=DHAKA_TZ)) == "Closed"
-    assert _market_status(datetime(2026, 6, 1, 15, 0, tzinfo=DHAKA_TZ)) == "Closed"
-    # 2026-06-05 is a Friday — weekend in BD
-    assert _market_status(datetime(2026, 6, 5, 11, 0, tzinfo=DHAKA_TZ)) == "Closed"

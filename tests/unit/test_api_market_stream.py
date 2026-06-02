@@ -14,7 +14,8 @@ FAKE_INDICES = {
     "dsex_value": 5330.89, "dsex_change_pct": 1.27,
     "ds30_value": 2023.89, "ds30_change_pct": 1.43,
     "dses_value": 1078.43, "dses_change_pct": 0.84,
-    "market_status": "Open", "advance": 271, "decline": 67, "unchanged": 68,
+    "market_status": "Open", "status_source": "dse_direct",
+    "advance": 271, "decline": 67, "unchanged": 68,
 }
 
 

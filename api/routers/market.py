@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import json as _json
 import math
-from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -13,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from api.deps import get_current_user, get_db
 from api.schemas.market import HeatmapItem, MarketIndices, MarketRegime, MarketSummary
 from extraction.base import AllAdaptersFailedError
-from extraction.normalizers import DHAKA_TZ
+from extraction.market_status import get_market_status
 from extraction.registry import STREAMS
 
 router = APIRouter(prefix="/market", tags=["market"])
@@ -95,17 +94,6 @@ def _rec_change_pct(rec: dict) -> float | None:
     if ltp is not None and prev not in (None, 0):
         return (ltp - prev) / prev * 100.0
     return None
-
-
-def _market_status(now: datetime | None = None) -> str:
-    """DSE trades Sun–Thu, 10:00–14:30 Asia/Dhaka. Derived from the clock since
-    bdshare market_info carries no status flag."""
-    now = now or datetime.now(DHAKA_TZ)
-    # Mon=0 .. Sun=6; trading days are Sun(6), Mon..Thu(0..3)
-    if now.weekday() in (4, 5):  # Fri, Sat
-        return "Closed"
-    minutes = now.hour * 60 + now.minute
-    return "Open" if 600 <= minutes <= 870 else "Closed"
 
 
 _MA_WINDOW = 50   # target moving-average window (trading days)
@@ -195,6 +183,7 @@ async def _build_indices() -> dict:
     except AllAdaptersFailedError as exc:
         raise HTTPException(status_code=502, detail=f"market_indices unavailable: {exc}") from exc
     idx_map = {row["index_name"]: row for row in idx_result.data.to_dict("records")}
+    session = await get_market_status()
 
     def g(name: str, field: str) -> float:
         row = idx_map.get(name)
@@ -222,7 +211,8 @@ async def _build_indices() -> dict:
         "ds30_change_pct": g("DS30", "change_pct"),
         "dses_value": g("DSES", "value"),
         "dses_change_pct": g("DSES", "change_pct"),
-        "market_status": _market_status(),
+        "market_status": session["status"],
+        "status_source": session["source"],
         "advance": advance,
         "decline": decline,
         "unchanged": unchanged,
