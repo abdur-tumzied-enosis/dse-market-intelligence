@@ -23,6 +23,7 @@ from extraction.adapters.dse_direct.depth import DSEDirectDepthPlaywrightAdapter
 from extraction.adapters.dse_direct.gainers_losers import DSEDirectGainersAdapter, DSEDirectLosersAdapter
 from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
 from extraction.adapters.dse_direct.market_info import DSEDirectMarketInfoAdapter
+from extraction.adapters.dse_direct.market_status import DSEMarketStatusAdapter
 from extraction.adapters.dse_direct.pdf_reports import DSEDirectPDFAdapter
 from extraction.adapters.dse_direct.sector_pe import DSEDirectSectorPEAdapter
 from extraction.adapters.bsec.ipo_scraper import BsecIPOAdapter
@@ -64,6 +65,15 @@ def _build_registry() -> dict[str, DataStream]:
     streams["market_indices"] = DataStream(name="market_indices", adapters=[
         DSEDirectMarketInfoAdapter(),
         BDShareMarketInfoAdapter(),
+    ])
+
+    # ------------------------------------------------------------------
+    # Stream: market_status
+    # Single adapter — DSE homepage "Market Status: Open|Closed" flag.
+    # No fallback adapter: extraction.market_status falls back to the clock.
+    # ------------------------------------------------------------------
+    streams["market_status"] = DataStream(name="market_status", adapters=[
+        DSEMarketStatusAdapter(),
     ])
 
     # ------------------------------------------------------------------
