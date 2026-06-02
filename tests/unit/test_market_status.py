@@ -4,7 +4,13 @@ os.environ.setdefault("DATABASE_URL", "postgresql://x:x@localhost/x")
 os.environ.setdefault("JWT_SECRET_KEY", "test-secret")
 
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pandas as pd
+import pytest
+
+import extraction.market_status as ms
+from extraction.adapters.dse_direct.market_status import _parse_status
 from extraction.market_status import clock_status, normalize_status
 from extraction.normalizers import DHAKA_TZ
 
@@ -28,11 +34,6 @@ def test_clock_status_matches_trading_window():
     assert clock_status(datetime(2026, 6, 5, 11, 0, tzinfo=DHAKA_TZ)) == "Closed"  # Friday
     assert clock_status(datetime(2026, 6, 6, 11, 0, tzinfo=DHAKA_TZ)) == "Closed"  # Saturday
 
-
-# tests/unit/test_market_status.py  (append)
-import pytest
-
-from extraction.adapters.dse_direct.market_status import _parse_status
 
 _PAGE_CLOSED = """
 <html><body>
@@ -60,14 +61,6 @@ def test_parse_status_open():
 def test_parse_status_missing_raises():
     with pytest.raises(ValueError):
         _parse_status("<html><body>no status here</body></html>")
-
-
-# tests/unit/test_market_status.py  (append)
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pandas as pd
-
-import extraction.market_status as ms
 
 
 @pytest.mark.asyncio
