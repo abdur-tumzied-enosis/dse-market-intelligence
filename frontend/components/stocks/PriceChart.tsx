@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { get } from '@/lib/api'
+import { computeVolumeProfile } from '@/lib/volumeProfile'
+import type { VPCandle, VProfile } from '@/lib/volumeProfile'
 import type {
   OHLCVResponse,
   LivePrice,
@@ -24,6 +26,14 @@ const RANGES = [
 const UP = '#00d4a4'
 const DOWN = '#ff4d6a'
 const NEUTRAL = '#a78bfa'
+
+// Volume Profile palette + layout
+const VP_BINS = 24
+const VP_COLOR = '#7aa2f7'          // soft blue — distinct from candle green/red + Wyckoff violet
+const VP_POC_COLOR = '#ffd166'      // amber POC line
+const VP_BAR_MAX_FRACTION = 0.35    // widest bar = 35% of chart width
+const VP_BAR_ALPHA = 0.22           // out-of-value-area bars
+const VP_VA_ALPHA = 0.34            // value-area bars (slightly stronger)
 
 // Per-event-type marker styling, grouped by Wyckoff side:
 //  • Markup / bullish (PS, SC, SPRING, TEST, SOS, LPS): green, arrow below the bar.
@@ -89,6 +99,11 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const volRef    = useRef<any>(null)
 
+  // Volume Profile handles + cached candle data (series doesn't expose data back)
+  const vpRef     = useRef<VolumeProfilePrimitive | null>(null)
+  const dataRef   = useRef<Array<VPCandle & { time: string }>>([])
+  const vpRafRef  = useRef<number | null>(null)
+
   // Wyckoff overlay handles, kept in refs so cleanup is independent of React state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markersRef   = useRef<any>(null)              // ISeriesMarkersPluginApi
@@ -110,6 +125,36 @@ export default function PriceChart({ ticker }: { ticker: string }) {
   const wyckoffOnRef                    = useRef(false)
   const [wyckoffRanges, setWyckoffRanges] = useState<WyckoffRange[]>([])
   const [wyckoffBusy, setWyckoffBusy]   = useState(false)
+
+  // Volume Profile state
+  const [vpOn, setVpOn] = useState(false)
+  const vpOnRef         = useRef(false)
+
+  // Recompute the volume profile from the candles inside the current visible
+  // logical range and push it into the primitive. No-op unless VP is on.
+  const recomputeVP = useCallback(() => {
+    const chart = chartRef.current
+    const vp = vpRef.current
+    if (!vpOnRef.current || !chart || !vp) return
+    const all = dataRef.current
+    let visible = all
+    const lr = chart.timeScale().getVisibleLogicalRange()
+    if (lr) {
+      const from = Math.max(0, Math.floor(lr.from))
+      const to = Math.min(all.length - 1, Math.ceil(lr.to))
+      visible = from <= to ? all.slice(from, to + 1) : []
+    }
+    vp.setProfile(computeVolumeProfile(visible, VP_BINS))
+  }, [])
+
+  // Coalesce a burst of pan/zoom events into a single recompute per frame.
+  const scheduleVP = useCallback(() => {
+    if (vpRafRef.current != null) cancelAnimationFrame(vpRafRef.current)
+    vpRafRef.current = requestAnimationFrame(() => {
+      vpRafRef.current = null
+      recomputeVP()
+    })
+  }, [recomputeVP])
 
   // Compute the same `from` date the chart uses for a given range label.
   const fromForRange = useCallback((range: string): string | null => {
@@ -249,11 +294,16 @@ export default function PriceChart({ ticker }: { ticker: string }) {
         value: Number(live.volume ?? 0),
         color: close >= open ? 'rgba(0,212,164,0.22)' : 'rgba(255,77,106,0.22)',
       })
+      const vpBar = { time: today, open, high, low, close, volume: Number(live.volume ?? 0) }
+      const arr = dataRef.current
+      if (arr.length && arr[arr.length - 1].time === today) arr[arr.length - 1] = vpBar
+      else arr.push(vpBar)
+      if (vpOnRef.current) recomputeVP()
       return live.market_status
     } catch {
       return null  // chart still shows historical data if live fetch fails
     }
-  }, [ticker])
+  }, [ticker, recomputeVP])
 
   const loadData = useCallback(async (range: string) => {
     if (!candleRef.current || !volRef.current) return
@@ -285,14 +335,25 @@ export default function PriceChart({ ticker }: { ticker: string }) {
           : 'rgba(255,77,106,0.22)',
       })))
 
+      // Cache raw candles for the volume profile (series can't return its data).
+      dataRef.current = sorted.map(d => ({
+        time:   d.day,
+        open:   Number(d.open  ?? d.close),
+        high:   Number(d.high  ?? d.close),
+        low:    Number(d.low   ?? d.close),
+        close:  Number(d.close),
+        volume: Number(d.volume ?? 0),
+      }))
+
       chartRef.current?.timeScale().fitContent()
       await appendLiveBar()  // overlay today's live candle on the historical data
+      if (vpOnRef.current) recomputeVP()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
       setLoading(false)
     }
-  }, [ticker, appendLiveBar])
+  }, [ticker, appendLiveBar, recomputeVP])
 
   // Module handle so overlay helpers can use lc.* (LineStyle, createSeriesMarkers)
   // outside the import().then closure.
@@ -386,6 +447,8 @@ export default function PriceChart({ ticker }: { ticker: string }) {
       candleRef.current = candleSeries
       volRef.current    = volSeries
 
+      chart.timeScale().subscribeVisibleLogicalRangeChange(scheduleVP)
+
       loadData('1Y')
     })
 
@@ -393,18 +456,23 @@ export default function PriceChart({ ticker }: { ticker: string }) {
       destroyed = true
       clearWyckoff()
       markersRef.current = null
+      if (vpRafRef.current != null) { cancelAnimationFrame(vpRafRef.current); vpRafRef.current = null }
+      try { chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(scheduleVP) } catch { /* gone */ }
       chartRef.current?.remove()
       chartRef.current  = null
       candleRef.current = null
       volRef.current    = null
+      vpRef.current     = null
       lcModRef.current  = null
       setActiveRange('1Y')
       setHovered(null)
       setEventTip(null)
       setWyckoffOn(false)
       wyckoffOnRef.current = false
+      setVpOn(false)
+      vpOnRef.current = false
     }
-  }, [ticker, loadData, clearWyckoff])
+  }, [ticker, loadData, clearWyckoff, scheduleVP])
 
   // Range button → reload data. Also refresh Wyckoff overlays for the new range
   // (clear first, then refetch if still on). This effect synchronizes the
@@ -430,6 +498,28 @@ export default function PriceChart({ ticker }: { ticker: string }) {
       return next
     })
   }, [activeRange, loadWyckoff, clearWyckoff])
+
+  // Toggle the Volume Profile overlay on/off.
+  const toggleVP = useCallback(() => {
+    setVpOn(prev => {
+      const next = !prev
+      vpOnRef.current = next
+      if (next) {
+        if (candleRef.current && !vpRef.current) {
+          vpRef.current = new VolumeProfilePrimitive()
+          candleRef.current.attachPrimitive(vpRef.current)
+        }
+        recomputeVP()
+      } else {
+        if (candleRef.current && vpRef.current) {
+          try { candleRef.current.detachPrimitive(vpRef.current) } catch { /* gone */ }
+        }
+        vpRef.current = null
+        if (vpRafRef.current != null) { cancelAnimationFrame(vpRafRef.current); vpRafRef.current = null }
+      }
+      return next
+    })
+  }, [recomputeVP])
 
   // Refresh today's live candle every 2 min while the market is open
   useEffect(() => {
@@ -482,6 +572,18 @@ export default function PriceChart({ ticker }: { ticker: string }) {
               <span className="w-1.5 h-1.5 rounded-full bg-[#a78bfa] animate-pulse" />
             )}
             Wyckoff
+          </button>
+          {/* Volume Profile toggle */}
+          <button
+            onClick={toggleVP}
+            title="Overlay Volume Profile — volume traded per price level over the visible range (POC + 70% value area). Recomputes on pan/zoom."
+            className={`px-2.5 py-0.5 text-[11px] font-mono rounded transition-all ${
+              vpOn
+                ? 'bg-[#7aa2f7]/15 text-[#7aa2f7] border border-[#7aa2f7]/30'
+                : 'text-[#6b6b80] hover:text-[#e8e8f0] border border-transparent hover:border-[#2a2a3a]'
+            }`}
+          >
+            VP
           </button>
         </div>
 
@@ -678,6 +780,112 @@ class PhaseBoxPrimitive {
 
   updateAllViews() {
     // coordinates are computed lazily in draw(); nothing to cache here
+  }
+
+  paneViews() {
+    return this.views
+  }
+}
+
+// ─── Volume Profile primitive ────────────────────────────────────────────────
+// Draws a left-anchored horizontal histogram of volume-by-price for the current
+// VProfile, behind the candles (zOrder 'bottom'). POC drawn as a bright amber
+// line; value-area bins shaded slightly stronger than the rest.
+
+interface VPDrawState {
+  profile: VProfile | null
+  priceToCoordinate: (price: number) => number | null
+}
+
+class VolumeProfilePaneRenderer {
+  constructor(private state: () => VPDrawState | null) {}
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  draw(target: any) {
+    const s = this.state()
+    if (!s || !s.profile || s.profile.maxVol <= 0) return
+    const { profile, priceToCoordinate } = s
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    target.useBitmapCoordinateSpace((scope: any) => {
+      const ctx = scope.context as CanvasRenderingContext2D
+      const hr = scope.horizontalPixelRatio
+      const vr = scope.verticalPixelRatio
+      const maxBarPx = scope.mediaSize.width * VP_BAR_MAX_FRACTION
+
+      for (const bin of profile.bins) {
+        const yHigh = priceToCoordinate(bin.priceHigh)
+        const yLow = priceToCoordinate(bin.priceLow)
+        if (yHigh == null || yLow == null) continue
+        const top = Math.min(yHigh, yLow) * vr
+        const bottom = Math.max(yHigh, yLow) * vr
+        const h = Math.max(1 * vr, bottom - top - 1 * vr) // 1px gap between bars
+        const w = (bin.volume / profile.maxVol) * maxBarPx * hr
+        const inVA = bin.priceHigh > profile.val && bin.priceLow < profile.vah
+        ctx.fillStyle = withAlpha(VP_COLOR, inVA ? VP_VA_ALPHA : VP_BAR_ALPHA)
+        ctx.fillRect(0, top, w, h)
+      }
+
+      // POC line across the full bar width
+      const yPoc = priceToCoordinate(profile.poc)
+      if (yPoc != null) {
+        const y = yPoc * vr
+        ctx.fillStyle = VP_POC_COLOR
+        ctx.fillRect(0, y - 0.5 * vr, maxBarPx * hr, Math.max(1, 1 * vr))
+      }
+    })
+  }
+}
+
+class VolumeProfilePaneView {
+  private _renderer: VolumeProfilePaneRenderer
+  constructor(state: () => VPDrawState | null) {
+    this._renderer = new VolumeProfilePaneRenderer(state)
+  }
+  zOrder() {
+    return 'bottom' as const
+  }
+  renderer() {
+    return this._renderer
+  }
+}
+
+class VolumeProfilePrimitive {
+  private profile: VProfile | null = null
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private series: any = null
+  private requestUpdate: (() => void) | null = null
+  private views: VolumeProfilePaneView[]
+
+  constructor() {
+    this.views = [new VolumeProfilePaneView(() => this.drawState())]
+  }
+
+  private drawState(): VPDrawState | null {
+    if (!this.series) return null
+    return {
+      profile: this.profile,
+      priceToCoordinate: (price: number) => this.series.priceToCoordinate(price),
+    }
+  }
+
+  setProfile(profile: VProfile | null) {
+    this.profile = profile
+    this.requestUpdate?.()
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  attached(param: any) {
+    this.series = param.series
+    this.requestUpdate = param.requestUpdate
+  }
+
+  detached() {
+    this.series = null
+    this.requestUpdate = null
+  }
+
+  updateAllViews() {
+    // profile is read lazily in draw(); nothing to cache
   }
 
   paneViews() {
