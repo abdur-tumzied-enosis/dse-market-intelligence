@@ -8,12 +8,9 @@ the record source="clock" so callers can flag the value as estimated.
 """
 from __future__ import annotations
 
-import re
 from datetime import datetime
 
 from extraction.normalizers import DHAKA_TZ
-
-_STATUS_RE = re.compile(r"market\s*status\s*:?\s*(open|closed)", re.IGNORECASE)
 
 
 def normalize_status(raw_label: str | None) -> str:
