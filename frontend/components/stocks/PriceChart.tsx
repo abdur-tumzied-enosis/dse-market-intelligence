@@ -149,6 +149,7 @@ export default function PriceChart({ ticker }: { ticker: string }) {
 
   // Coalesce a burst of pan/zoom events into a single recompute per frame.
   const scheduleVP = useCallback(() => {
+    if (!vpOnRef.current) return
     if (vpRafRef.current != null) cancelAnimationFrame(vpRafRef.current)
     vpRafRef.current = requestAnimationFrame(() => {
       vpRafRef.current = null
@@ -346,14 +347,13 @@ export default function PriceChart({ ticker }: { ticker: string }) {
       }))
 
       chartRef.current?.timeScale().fitContent()
-      await appendLiveBar()  // overlay today's live candle on the historical data
-      if (vpOnRef.current) recomputeVP()
+      await appendLiveBar()  // overlay today's live candle on the historical data + recompute VP
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load data')
     } finally {
       setLoading(false)
     }
-  }, [ticker, appendLiveBar, recomputeVP])
+  }, [ticker, appendLiveBar])
 
   // Module handle so overlay helpers can use lc.* (LineStyle, createSeriesMarkers)
   // outside the import().then closure.
@@ -820,7 +820,9 @@ class VolumeProfilePaneRenderer {
         const bottom = Math.max(yHigh, yLow) * vr
         const h = Math.max(1 * vr, bottom - top - 1 * vr) // 1px gap between bars
         const w = (bin.volume / profile.maxVol) * maxBarPx * hr
-        const inVA = bin.priceHigh > profile.val && bin.priceLow < profile.vah
+        const inVA = profile.vah > profile.val
+          ? bin.priceHigh > profile.val && bin.priceLow < profile.vah
+          : true // degenerate (single-bin) profile: the sole bin IS the value area
         ctx.fillStyle = withAlpha(VP_COLOR, inVA ? VP_VA_ALPHA : VP_BAR_ALPHA)
         ctx.fillRect(0, top, w, h)
       }
