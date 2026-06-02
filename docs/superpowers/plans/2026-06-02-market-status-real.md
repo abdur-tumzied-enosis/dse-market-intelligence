@@ -427,7 +427,7 @@ async def test_refresh_uses_clock_on_scrape_failure():
     bad = MagicMock()
     bad.fetch = AsyncMock(side_effect=AllAdaptersFailedError("market_status", []))
     writes = []
-    with patch.dict("extraction.market_status.STREAMS", {"market_status": bad}, clear=False), \
+    with patch.dict("extraction.registry.STREAMS", {"market_status": bad}, clear=False), \
          patch.object(ms, "_write", AsyncMock(side_effect=lambda r: writes.append(r))):
         rec = await ms.refresh_market_status()
     assert rec["source"] == "clock"
@@ -440,7 +440,7 @@ async def test_refresh_uses_scrape_when_ok():
     df = pd.DataFrame([{"status": "Open", "raw_label": "Market Status: Open"}])
     ok = MagicMock()
     ok.fetch = AsyncMock(return_value=MagicMock(data=df))
-    with patch.dict("extraction.market_status.STREAMS", {"market_status": ok}, clear=False), \
+    with patch.dict("extraction.registry.STREAMS", {"market_status": ok}, clear=False), \
          patch.object(ms, "_write", AsyncMock()):
         rec = await ms.refresh_market_status()
     assert rec["status"] == "Open"
@@ -467,7 +467,6 @@ Add these imports at the top of the module (below the existing imports):
 import json
 import logging
 
-from extraction.registry import STREAMS
 from mgmt.cache import cache_get, cache_set, get_redis
 
 logger = logging.getLogger(__name__)
@@ -525,6 +524,10 @@ async def refresh_market_status() -> dict:
     """Scrape DSE status → normalize → persist (DB + Redis) → return the record.
     On any scrape/parse failure, derive the status from the clock and tag
     source='clock'."""
+    # Lazy import: extraction.registry imports the adapter, which imports this
+    # module — a module-level import here would be circular.
+    from extraction.registry import STREAMS
+
     now = datetime.now(DHAKA_TZ)
     try:
         result = await STREAMS["market_status"].fetch()
