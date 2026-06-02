@@ -7,6 +7,7 @@ export interface MarketIndices {
   dses_value: number
   dses_change_pct: number
   market_status: string
+  status_source?: string
   advance: number
   decline: number
   unchanged: number
@@ -110,6 +111,7 @@ export interface LivePrice {
   volume: number | null
   value_bdt: number | null
   market_status: string
+  status_source?: string
   as_of: string
 }
 

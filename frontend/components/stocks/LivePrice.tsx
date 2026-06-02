@@ -29,7 +29,7 @@ function seed(initial: LatestPrice | null): LivePriceType {
     return {
       ticker: '', available: false, ltp: null, high: null, low: null,
       prev_close: null, change_pct: null, volume: null, value_bdt: null,
-      market_status: 'Closed', as_of: new Date().toISOString(),
+      market_status: 'Closed', status_source: undefined, as_of: new Date().toISOString(),
     }
   }
   return {
@@ -86,6 +86,7 @@ export default function LivePrice({
   const changePct = data.change_pct ?? 0
   const isUp = changePct >= 0
   const isLive = data.market_status === 'Open'
+  const estimated = !!data.status_source && data.status_source !== 'dse_direct'
   const asOf = new Date(data.as_of).toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
@@ -115,6 +116,7 @@ export default function LivePrice({
           />
           <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-[#6b6b80]">
             {isLive ? `live · as of ${asOf}` : 'market closed'}
+            {estimated ? ' (est.)' : ''}
           </span>
         </div>
       </div>

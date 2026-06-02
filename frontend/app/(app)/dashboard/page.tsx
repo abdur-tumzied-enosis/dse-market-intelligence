@@ -26,6 +26,7 @@ export default async function DashboardPage() {
             idx.market_status === 'Open' ? 'bg-accent-green/20 text-accent-green' : 'bg-muted/20 text-muted'
           }`}>
             {idx.market_status}
+            {idx.status_source && idx.status_source !== 'dse_direct' ? ' (est.)' : ''}
           </span>
         )}
       </div>
