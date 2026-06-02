@@ -118,4 +118,22 @@ async def job_run(
         except Exception as db_exc:
             logger.warning("job_db_update_failed", job_id=job_id, error=str(db_exc))
 
+        try:
+            from extraction.observability import fire_alert
+
+            await fire_alert(
+                severity="WARNING",
+                message=f"Job failed: {job_name}",
+                stream_name=stream_name,
+                details={
+                    "job_id": job_id,
+                    "job_name": job_name,
+                    "adapter_name": adapter_name,
+                    "error": error_msg,
+                    "duration_ms": duration_ms,
+                },
+            )
+        except Exception as alert_exc:
+            logger.warning("job_fail_alert_failed", job_id=job_id, error=str(alert_exc))
+
         raise

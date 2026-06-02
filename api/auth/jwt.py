@@ -8,7 +8,7 @@ _ALGORITHM = "HS256"
 
 def create_access_token(user_id: int, email: str, tier: str) -> str:
     settings = get_settings()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=3000)
     payload = {
         "sub": str(user_id),
         "email": email,

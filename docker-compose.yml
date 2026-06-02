@@ -204,45 +204,45 @@ services:
   # ---------------------------------------------------------------------------
   # Prometheus — metrics collection
   # ---------------------------------------------------------------------------
-  prometheus:
-    image: prom/prometheus:v2.52.0
-    container_name: dse_prometheus
-    restart: unless-stopped
-    ports:
-      - "${PROMETHEUS_PORT:-9090}:9090"
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus_data:/prometheus
-    command:
-      - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=30d"
-      - "--web.enable-lifecycle"
-    depends_on:
-      - mgmt_api
+  # prometheus:
+  #   image: prom/prometheus:v2.52.0
+  #   container_name: dse_prometheus
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${PROMETHEUS_PORT:-9090}:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - "--config.file=/etc/prometheus/prometheus.yml"
+  #     - "--storage.tsdb.path=/prometheus"
+  #     - "--storage.tsdb.retention.time=30d"
+  #     - "--web.enable-lifecycle"
+  #   depends_on:
+  #     - mgmt_api
 
   # ---------------------------------------------------------------------------
   # Grafana — pipeline health dashboard
   # ---------------------------------------------------------------------------
-  grafana:
-    image: grafana/grafana:10.4.2
-    container_name: dse_grafana
-    restart: unless-stopped
-    ports:
-      - "${GRAFANA_PORT:-3001}:3000"
-    environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
-      GF_USERS_ALLOW_SIGN_UP: "false"
-      POSTGRES_USER: ${POSTGRES_USER:-dse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
-      POSTGRES_DB: ${POSTGRES_DB:-dse_intelligence}
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      db:
-        condition: service_healthy
+  # grafana:
+  #   image: grafana/grafana:10.4.2
+  #   container_name: dse_grafana
+  #   restart: unless-stopped
+  #   ports:
+  #     - "${GRAFANA_PORT:-3001}:3000"
+  #   environment:
+  #     GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+  #     GF_USERS_ALLOW_SIGN_UP: "false"
+  #     POSTGRES_USER: ${POSTGRES_USER:-dse}
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD required}
+  #     POSTGRES_DB: ${POSTGRES_DB:-dse_intelligence}
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+  #     - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
 
 volumes:
   db_data:
