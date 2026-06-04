@@ -1072,8 +1072,12 @@ if __name__ == "__main__":
     sched = get_scheduler(sync_url)
 
     async def _run() -> None:
-        configure_scheduler(sched)
-        sched.start()
+        # Route through start_scheduler so boot-time recovery (recover_missed_jobs)
+        # runs in THIS process — the dedicated scheduler service is the canonical
+        # job-trigger owner (docker-compose `scheduler`). The mgmt API lifespan
+        # starts its own scheduler for control only and deliberately skips recovery
+        # to avoid double-firing catch-up.
+        await start_scheduler(sched)
         logger.info("scheduler: running — press Ctrl+C to stop")
         stop_event = asyncio.Event()
 
