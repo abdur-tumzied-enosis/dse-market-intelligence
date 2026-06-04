@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime
 
 import pytz
 
-from extraction.recovery import detect_gap, should_catch_up
+from extraction.recovery import CATCHUP_REGISTRY, detect_gap, should_catch_up
 from mgmt.config import get_settings
 
 BD_TZ = pytz.timezone("Asia/Dhaka")
@@ -83,3 +83,33 @@ def test_should_catch_up_exactly_at_anchor():
     """Due the instant the anchor passes (>=)."""
     now = _bd(2026, 6, 4, 22, 0)
     assert should_catch_up(now, 22, 0, True, None) is True
+
+
+def test_registry_job_names_unique():
+    names = [j.job_name for j in CATCHUP_REGISTRY]
+    assert len(names) == len(set(names))
+
+
+def test_registry_covers_expected_jobs():
+    names = {j.job_name for j in CATCHUP_REGISTRY}
+    assert names == {
+        "daily_macro", "news_sentiment", "seed_companies", "eod_snapshot",
+        "sector_pe", "nightly_ml", "weekly_fundamentals", "monthly", "quarterly",
+    }
+
+
+def test_run_day_market_days_excludes_friday_saturday():
+    entry = next(j for j in CATCHUP_REGISTRY if j.job_name == "eod_snapshot")
+    fri = BD_TZ.localize(datetime(2026, 6, 5, 15, 0))   # Friday
+    sat = BD_TZ.localize(datetime(2026, 6, 6, 15, 0))   # Saturday
+    sun = BD_TZ.localize(datetime(2026, 6, 7, 15, 0))   # Sunday
+    assert entry.run_day(fri) is False
+    assert entry.run_day(sat) is False
+    assert entry.run_day(sun) is True
+
+
+def test_run_day_quarterly_only_quarter_starts():
+    entry = next(j for j in CATCHUP_REGISTRY if j.job_name == "quarterly")
+    assert entry.run_day(BD_TZ.localize(datetime(2026, 7, 1, 4, 0))) is True
+    assert entry.run_day(BD_TZ.localize(datetime(2026, 7, 2, 4, 0))) is False
+    assert entry.run_day(BD_TZ.localize(datetime(2026, 6, 1, 4, 0))) is False

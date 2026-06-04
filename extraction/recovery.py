@@ -10,12 +10,47 @@ unit-tested offline; DB access goes through _get_pool() so it can be patched.
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
 import pytz
 
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
+
+# Python weekday(): Mon=0..Sun=6. DSE trades Sun–Thu → {6,0,1,2,3}.
+_MARKET_WEEKDAYS = {6, 0, 1, 2, 3}
+
+
+def _is_every_day(now: datetime) -> bool:
+    return True
+
+
+def _is_market_day(now: datetime) -> bool:
+    return now.weekday() in _MARKET_WEEKDAYS
+
+
+def _is_sunday(now: datetime) -> bool:
+    return now.weekday() == 6
+
+
+def _is_month_start(now: datetime) -> bool:
+    return now.day == 1
+
+
+def _is_quarter_start(now: datetime) -> bool:
+    return now.month in (1, 4, 7, 10) and now.day == 1
+
+
+@dataclass(frozen=True)
+class CatchUpJob:
+    job_name: str                              # must match the job_run() name
+    func: Callable[[], Awaitable[None]]        # the scheduler job coroutine
+    anchor_hour: int
+    anchor_minute: int
+    run_day: Callable[[datetime], bool]
+    dep_rank: int                              # lower runs first
 
 
 # ── Pure decision functions (no DB) ─────────────────────────────────────
@@ -60,3 +95,44 @@ def detect_gap(
     if now_utc - last_snapshot_time > timedelta(minutes=threshold_minutes):
         return (last_snapshot_time, now_utc)
     return None
+
+
+def _build_registry() -> list[CatchUpJob]:
+    from extraction.scheduler import (  # noqa: PLC0415
+        job_daily_macro,
+        job_eod_snapshot,
+        job_monthly,
+        job_news_sentiment,
+        job_nightly_ml,
+        job_quarterly,
+        job_sector_pe,
+        job_seed_companies,
+        job_weekly_fundamentals,
+    )
+    from mgmt.config import get_settings  # noqa: PLC0415
+
+    cfg = get_settings()
+    return [
+        CatchUpJob("daily_macro", job_daily_macro,
+                   cfg.daily_macro_hour, cfg.daily_macro_minute, _is_every_day, 0),
+        CatchUpJob("news_sentiment", job_news_sentiment,
+                   3, 30, _is_every_day, 0),
+        CatchUpJob("seed_companies", job_seed_companies,
+                   8, 0, _is_every_day, 1),
+        CatchUpJob("eod_snapshot", job_eod_snapshot,
+                   cfg.eod_snapshot_hour, cfg.eod_snapshot_minute, _is_market_day, 2),
+        CatchUpJob("sector_pe", job_sector_pe,
+                   15, 45, _is_market_day, 3),
+        CatchUpJob("nightly_ml", job_nightly_ml,
+                   22, 0, _is_every_day, 4),
+        CatchUpJob("weekly_fundamentals", job_weekly_fundamentals,
+                   cfg.weekly_fundamentals_hour, cfg.weekly_fundamentals_minute,
+                   _is_sunday, 5),
+        CatchUpJob("monthly", job_monthly,
+                   cfg.monthly_hour, cfg.monthly_minute, _is_month_start, 5),
+        CatchUpJob("quarterly", job_quarterly,
+                   cfg.quarterly_hour, cfg.quarterly_minute, _is_quarter_start, 5),
+    ]
+
+
+CATCHUP_REGISTRY: list[CatchUpJob] = _build_registry()
