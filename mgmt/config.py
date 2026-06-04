@@ -104,6 +104,14 @@ class Settings(BaseSettings):
     # health_checks: interval every N hours
     health_check_interval_hours: int = 6
 
+    # ── Crash / downtime recovery ─────────────────────────────────────────
+    # On scheduler boot, recover_missed_jobs() catches up anchored daily/EOD
+    # jobs that were due today but never ran (host was down through their time).
+    recovery_enabled: bool = True
+    # Minutes without an intraday_prices row (during market hours) before a
+    # market_gaps row is recorded. One missed */1 poll of slack.
+    intraday_gap_threshold_minutes: int = 3
+
     # ── Pipeline test mode ────────────────────────────────────────────────
     # Set PIPELINE_TEST_MODE=true to compress all intervals to minutes.
     # Lets you verify the full pipeline runs without silent failures in ~1h.

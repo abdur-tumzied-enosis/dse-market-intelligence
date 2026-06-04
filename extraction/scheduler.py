@@ -25,6 +25,9 @@ from mgmt.cache import get_redis
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
 
+# Retains the boot recovery task so it is not garbage-collected mid-run.
+_RECOVERY_TASK: asyncio.Task[dict[str, int]] | None = None
+
 
 # ── Pure helpers (unit-testable, no DB dependency) ─────────────────────
 
@@ -324,6 +327,11 @@ async def job_live_prices() -> None:
         await _invalidate_live_caches()
         return
 
+    # Record any polling gap since the last snapshot (boot, network stall, missed
+    # tick). Non-fatal; never blocks the pull.
+    from extraction.recovery import maybe_record_intraday_gap
+    await maybe_record_intraday_gap(now)
+
     async with job_run("live_price_pull", stream_name="live_prices") as ctx:
         try:
             result = await STREAMS["live_prices"].fetch()
@@ -413,13 +421,15 @@ async def _persist_index_snapshot() -> None:
 
 async def job_eod_snapshot() -> None:
     """End-of-day snapshot and calculations."""
+    from extraction.jobs import job_run
     logger.info("job_eod_snapshot: starting")
-    await _persist_index_snapshot()
-    # TODO: implement ingest_eod_snapshot()
-    # TODO: update_52week_ranges()
-    # TODO: update_circuit_breakers()
-    # TODO: update_market_pe()
-    # TODO: enqueue celery task: run_ml_inference
+    async with job_run("eod_snapshot"):
+        await _persist_index_snapshot()
+        # TODO: implement ingest_eod_snapshot()
+        # TODO: update_52week_ranges()
+        # TODO: update_circuit_breakers()
+        # TODO: update_market_pe()
+        # TODO: enqueue celery task: run_ml_inference
     logger.info("job_eod_snapshot: complete")
 
 
@@ -566,8 +576,11 @@ async def job_weekly_fundamentals() -> None:
     from extraction.bulk_load.fundamentals_historical_loader import (
         bulk_load_fundamentals_historical,
     )
+    from extraction.jobs import job_run
     logger.info("job_weekly_fundamentals: starting")
-    summary = await bulk_load_fundamentals_historical()
+    async with job_run("weekly_fundamentals") as ctx:
+        summary = await bulk_load_fundamentals_historical()
+        ctx["records_inserted"] = summary["total_upserted"]
     logger.info(
         "job_weekly_fundamentals: complete ok=%d failed=%d upserted=%d",
         summary["ok"], summary["failed"], summary["total_upserted"],
@@ -580,7 +593,7 @@ async def job_monthly() -> None:
     from extraction.jobs import job_run
     from extraction.registry import STREAMS
 
-    async with job_run("monthly_macro") as ctx:
+    async with job_run("monthly") as ctx:
         pool = await get_pool()
         total = 0
         for stream_name in (
@@ -603,8 +616,10 @@ async def job_quarterly() -> None:
     Enqueues retrain_ml_models to the Celery ml queue. Worker handles full
     retrain (outcomes catchup → accuracy check → XGBoost + LSTM retrain → alert).
     """
+    from extraction.jobs import job_run
     from extraction.tasks import retrain_ml_models
-    retrain_ml_models.delay()
+    async with job_run("quarterly"):
+        retrain_ml_models.delay()
     logger.info("job_quarterly: enqueued retrain_ml_models to ml queue")
 
 
@@ -623,8 +638,10 @@ async def job_nightly_ml() -> None:
     Enqueues run_ml_inference to the Celery ml queue so CPU-bound PyTorch/XGBoost
     work runs in the worker process — not in this scheduler event loop.
     """
+    from extraction.jobs import job_run
     from extraction.tasks import run_ml_inference
-    run_ml_inference.delay()
+    async with job_run("nightly_ml"):
+        run_ml_inference.delay()
     logger.info("job_nightly_ml: enqueued run_ml_inference to ml queue")
 
 
@@ -735,6 +752,7 @@ async def job_seed_companies() -> None:
     new listing's prices (stock_prices.ticker is FK → companies)."""
     from extraction.bulk_load.enrich_companies import enrich_companies
     from extraction.bulk_load.seed_companies import seed
+    from extraction.jobs import job_run
     from mgmt.config import get_settings
 
     cfg = get_settings()
@@ -744,8 +762,10 @@ async def job_seed_companies() -> None:
         .replace("postgresql+psycopg://", "postgresql://")
     )
     logger.info("job_seed_companies: starting")
-    roster = await seed(sync_url)
-    enriched = await enrich_companies()
+    async with job_run("seed_companies") as ctx:
+        roster = await seed(sync_url)
+        enriched = await enrich_companies()
+        ctx["records_inserted"] = roster["new"]
     logger.info(
         "job_seed_companies: complete roster_new=%d roster_total=%d enriched_ok=%d enriched_failed=%d",
         roster["new"], roster["total"], enriched["ok"], enriched["failed"],
@@ -1005,10 +1025,29 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
 
 
 async def start_scheduler(scheduler: AsyncIOScheduler) -> None:
-    """Start the scheduler."""
+    """Start the scheduler, then kick off boot-time recovery in the background."""
+    import asyncio
+
     configure_scheduler(scheduler)
     scheduler.start()
     logger.info("scheduler: started")
+
+    # Converge missed daily/EOD jobs + resume live polling. Run as a background
+    # task so a slow catch-up never blocks scheduler startup.
+    from extraction.recovery import recover_missed_jobs
+
+    def _log_recovery_done(task: asyncio.Task[dict[str, int]]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("recovery: boot task failed error=%s", exc, exc_info=exc)
+        else:
+            logger.info("recovery: boot task done summary=%s", task.result())
+
+    global _RECOVERY_TASK
+    _RECOVERY_TASK = asyncio.create_task(recover_missed_jobs())
+    _RECOVERY_TASK.add_done_callback(_log_recovery_done)
 
 
 async def stop_scheduler(scheduler: AsyncIOScheduler) -> None:
@@ -1033,8 +1072,12 @@ if __name__ == "__main__":
     sched = get_scheduler(sync_url)
 
     async def _run() -> None:
-        configure_scheduler(sched)
-        sched.start()
+        # Route through start_scheduler so boot-time recovery (recover_missed_jobs)
+        # runs in THIS process — the dedicated scheduler service is the canonical
+        # job-trigger owner (docker-compose `scheduler`). The mgmt API lifespan
+        # starts its own scheduler for control only and deliberately skips recovery
+        # to avoid double-firing catch-up.
+        await start_scheduler(sched)
         logger.info("scheduler: running — press Ctrl+C to stop")
         stop_event = asyncio.Event()
 
