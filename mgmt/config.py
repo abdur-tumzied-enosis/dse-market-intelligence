@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     live_prices_market_days: str = "mon,tue,wed,thu,sun"
     live_prices_market_open_hour: int = 10
     live_prices_market_close_hour: int = 14
-    live_prices_minutes: str = "*/2"
+    live_prices_minutes: str = "*/1"  # 1-min poll → clean 5m intraday OHLCV base
 
     # market_status: scrape DSE Open/Closed. Morning window polls until open,
     # afternoon window polls until closed. day_of_week reuses live_prices_market_days.

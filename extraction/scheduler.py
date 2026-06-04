@@ -66,6 +66,17 @@ _LIVE_UPSERT_SQL = """
 """
 
 
+# Append-only raw intraday snapshot — one row PER POLL (not per day). Feeds the
+# 5/10/30/60m continuous aggregates (migration 034). cum_* stored raw; the
+# *_final views diff them into per-bar deltas. No ON CONFLICT — every poll is a
+# distinct (time, ticker) instant.
+_INTRADAY_INSERT_SQL = """
+    INSERT INTO intraday_prices
+        (time, ticker, ltp, cum_volume, cum_value, cum_trades, source)
+    VALUES ($1,$2,$3,$4,$5,$6,$7)
+"""
+
+
 def _live_records_to_rows(
     records: list[dict[str, object]], bucket_time: datetime, source: str
 ) -> list[tuple[object, ...]]:
@@ -113,6 +124,46 @@ def _live_records_to_rows(
             change_pct,                     # $11 change_pct
             source,                         # $12 source
             "live",                         # $13 quality_flag
+        ))
+    return rows
+
+
+def _live_records_to_intraday_rows(
+    records: list[dict[str, object]], snapshot_time: datetime, source: str
+) -> list[tuple[object, ...]]:
+    """Map live_prices snapshot records to intraday_prices INSERT tuples.
+
+    One tuple per ticker, stamped with the real snapshot instant (NOT a day
+    bucket) so 5/10/30/60m time_buckets get intraday detail. ltp = ltp or close;
+    skips rows with no ticker or no ltp. Cumulative volume/value/trades stored
+    AS-IS (value_mn*1e6 → value_bdt fallback); the *_final views diff them.
+    """
+    rows = []
+    for rec in records:
+        ticker = str(rec.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        ltp = rec.get("ltp")
+        if ltp is None:
+            ltp = rec.get("close")
+        ltp = _to_float(ltp)
+        if ltp is None:
+            continue
+
+        cum_value = _to_float(rec.get("value_bdt"))
+        if cum_value is None:
+            value_mn = _to_float(rec.get("value_mn"))
+            if value_mn is not None:
+                cum_value = value_mn * 1_000_000
+
+        rows.append((
+            snapshot_time,                  # $1 time (real snapshot instant, UTC)
+            ticker,                         # $2 ticker
+            ltp,                            # $3 ltp
+            _to_int(rec.get("volume")),     # $4 cum_volume (session-cumulative)
+            cum_value,                      # $5 cum_value
+            _to_int(rec.get("trades")),     # $6 cum_trades
+            source,                         # $7 source
         ))
     return rows
 
@@ -292,6 +343,14 @@ async def job_live_prices() -> None:
         bucket_time = datetime(d.year, d.month, d.day, tzinfo=UTC)
         rows = _live_records_to_rows(records, bucket_time, result.source_name)
 
+        # Real snapshot instant for the append-only intraday feed (drives the
+        # 5/10/30/60m CAs); the day bucket above is only for the stock_prices
+        # converging daily bar.
+        snapshot_time = now.astimezone(UTC)
+        intraday_rows = _live_records_to_intraday_rows(
+            records, snapshot_time, result.source_name
+        )
+
         kept = rows
         if rows:
             pool = await get_pool()
@@ -304,8 +363,16 @@ async def job_live_prices() -> None:
                 )
             if kept:
                 await pool.executemany(_LIVE_UPSERT_SQL, kept)
+            # Same FK (intraday_prices.ticker → companies); reuse the known filter.
+            intraday_kept, _ = _split_known_tickers(intraday_rows, known)
+            if intraday_kept:
+                await pool.executemany(_INTRADAY_INSERT_SQL, intraday_kept)
+            ctx["intraday_inserted"] = len(intraday_kept)
         ctx["records_inserted"] = len(kept)
-        logger.info("job_live_prices: upserted=%d source=%s", len(kept), result.source_name)
+        logger.info(
+            "job_live_prices: upserted=%d intraday=%d source=%s",
+            len(kept), len(intraday_rows) if rows else 0, result.source_name,
+        )
 
     await _invalidate_live_caches()
     logger.info("job_live_prices: complete")
