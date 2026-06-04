@@ -11,6 +11,7 @@ from extraction.recovery import (
     CATCHUP_REGISTRY,
     CatchUpJob,
     _is_every_day,
+    _skip_reason,
     detect_gap,
     maybe_record_intraday_gap,
     recover_missed_jobs,
@@ -293,3 +294,24 @@ async def test_start_scheduler_kicks_off_recovery(monkeypatch):
 
     assert started["started"] is True
     fake_recover.assert_awaited_once()
+
+
+# ── _skip_reason ───────────────────────────────────────────────────────
+def test_skip_reason_not_run_day():
+    now = _bd(2026, 6, 4, 23, 0)
+    assert _skip_reason(now, 22, 0, False, None) == "not a run-day today"
+
+
+def test_skip_reason_not_due_yet():
+    now = _bd(2026, 6, 4, 21, 0)
+    assert _skip_reason(now, 22, 0, True, None) == "not due yet (anchor 22:00)"
+
+
+def test_skip_reason_already_today():
+    now = _bd(2026, 6, 4, 23, 0)
+    assert _skip_reason(now, 22, 0, True, date(2026, 6, 4)) == "already succeeded today"
+
+
+def test_skip_reason_none_when_should_run():
+    now = _bd(2026, 6, 4, 23, 0)
+    assert _skip_reason(now, 22, 0, True, None) is None
