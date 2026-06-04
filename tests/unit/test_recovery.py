@@ -9,8 +9,11 @@ import pytz
 
 from extraction.recovery import (
     CATCHUP_REGISTRY,
+    CatchUpJob,
+    _is_every_day,
     detect_gap,
     maybe_record_intraday_gap,
+    recover_missed_jobs,
     should_catch_up,
 )
 from mgmt.config import get_settings
@@ -157,3 +160,90 @@ async def test_maybe_record_intraday_gap_noop_when_closed():
     assert recorded is False
     pool.execute.assert_not_awaited()
     pool.fetchrow.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_recover_runs_overdue_job_not_done_today():
+    """daily_macro (anchor 02:00) at 23:00 BD with no success today → runs once."""
+    pool = AsyncMock()
+    pool.fetchrow.return_value = {"d": None}      # never succeeded → last_success None
+    ran: list[str] = []
+
+    async def fake_macro():
+        ran.append("daily_macro")
+
+    now_bd = BD_TZ.localize(datetime(2026, 6, 4, 23, 0))
+    entry = CatchUpJob("daily_macro", fake_macro, 2, 0, _is_every_day, 0)
+
+    with patch("extraction.recovery._get_pool", return_value=pool), \
+         patch("extraction.recovery.CATCHUP_REGISTRY", [entry]), \
+         patch("extraction.recovery._now_bd", return_value=now_bd), \
+         patch("extraction.recovery.maybe_record_intraday_gap",
+               new=AsyncMock(return_value=False)), \
+         patch("extraction.recovery._maybe_resume_live_prices", new=AsyncMock()):
+        summary = await recover_missed_jobs()
+
+    assert ran == ["daily_macro"]
+    assert summary["ran"] == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_skips_job_already_done_today():
+    pool = AsyncMock()
+    pool.fetchrow.return_value = {"d": date(2026, 6, 4)}   # ran today
+    ran: list[str] = []
+
+    async def fake_macro():
+        ran.append("daily_macro")
+
+    now_bd = BD_TZ.localize(datetime(2026, 6, 4, 23, 0))
+    entry = CatchUpJob("daily_macro", fake_macro, 2, 0, _is_every_day, 0)
+
+    with patch("extraction.recovery._get_pool", return_value=pool), \
+         patch("extraction.recovery.CATCHUP_REGISTRY", [entry]), \
+         patch("extraction.recovery._now_bd", return_value=now_bd), \
+         patch("extraction.recovery.maybe_record_intraday_gap",
+               new=AsyncMock(return_value=False)), \
+         patch("extraction.recovery._maybe_resume_live_prices", new=AsyncMock()):
+        summary = await recover_missed_jobs()
+
+    assert ran == []
+    assert summary["skipped"] == 1
+
+
+@pytest.mark.asyncio
+async def test_recover_disabled_is_noop():
+    with patch("extraction.recovery.get_settings") as gs:
+        gs.return_value.recovery_enabled = False
+        summary = await recover_missed_jobs()
+    assert summary["checked"] == 0
+
+
+@pytest.mark.asyncio
+async def test_recover_one_failing_job_does_not_stop_others():
+    pool = AsyncMock()
+    pool.fetchrow.return_value = {"d": None}
+    ran: list[str] = []
+
+    async def boom():
+        raise RuntimeError("kaboom")
+
+    async def ok():
+        ran.append("ok")
+
+    now_bd = BD_TZ.localize(datetime(2026, 6, 4, 23, 0))
+    registry = [
+        CatchUpJob("boom", boom, 2, 0, _is_every_day, 0),
+        CatchUpJob("ok", ok, 2, 0, _is_every_day, 1),
+    ]
+    with patch("extraction.recovery._get_pool", return_value=pool), \
+         patch("extraction.recovery.CATCHUP_REGISTRY", registry), \
+         patch("extraction.recovery._now_bd", return_value=now_bd), \
+         patch("extraction.recovery.maybe_record_intraday_gap",
+               new=AsyncMock(return_value=False)), \
+         patch("extraction.recovery._maybe_resume_live_prices", new=AsyncMock()):
+        summary = await recover_missed_jobs()
+
+    assert ran == ["ok"]
+    assert summary["ran"] == 1
+    assert summary["failed"] == 1

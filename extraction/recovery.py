@@ -22,6 +22,7 @@ import pytz
 
 from extraction.market_status import get_market_status
 from extraction.observability import fire_alert
+from mgmt.config import get_settings
 
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
@@ -122,7 +123,6 @@ def _build_registry() -> list[CatchUpJob]:
         job_seed_companies,
         job_weekly_fundamentals,
     )
-    from mgmt.config import get_settings  # noqa: PLC0415
 
     cfg = get_settings()
     return [
@@ -186,7 +186,6 @@ async def maybe_record_intraday_gap(now_bd: datetime) -> bool:
         if (await get_market_status())["status"] != "Open":
             return False
         pool = await _get_pool()
-        from mgmt.config import get_settings  # noqa: PLC0415
         threshold = get_settings().intraday_gap_threshold_minutes
 
         row = await pool.fetchrow(
@@ -214,3 +213,68 @@ async def maybe_record_intraday_gap(now_bd: datetime) -> bool:
     except Exception as exc:
         logger.warning("recovery: gap check failed error=%s", exc, exc_info=True)
         return False
+
+
+def _now_bd() -> datetime:
+    """Current time in BD tz. Wrapped so tests can patch it."""
+    return datetime.now(BD_TZ)
+
+
+async def _last_success_date(pool: asyncpg.Pool, job_name: str) -> date | None:
+    """BD date of the job's most recent successful pipeline_jobs run, or None."""
+    row = await pool.fetchrow(
+        "SELECT MAX((started_at AT TIME ZONE 'Asia/Dhaka')::date) AS d "
+        "FROM pipeline_jobs WHERE job_name = $1 AND status = 'success'",
+        job_name,
+    )
+    return row["d"] if row and row["d"] else None
+
+
+async def _maybe_resume_live_prices(now_bd: datetime) -> None:
+    """If the market is open, fire one live pull immediately so polling resumes
+    without waiting for the next cron tick (also mitigates a lost open-trigger).
+    The pull's own per-poll gap check records any market_gaps row."""
+    try:
+        if (await get_market_status())["status"] != "Open":
+            return
+        from extraction.scheduler import job_live_prices  # noqa: PLC0415
+        logger.info("recovery: market open on boot — triggering live_prices")
+        await job_live_prices()
+    except Exception as exc:
+        logger.warning("recovery: live resume failed error=%s", exc, exc_info=True)
+
+
+async def recover_missed_jobs() -> dict[str, int]:
+    """Boot-time reconciler. For each anchored job that was due earlier today on a
+    valid run-day but has no success recorded today, run it once in dep_rank order.
+    Then resume live polling if the market is open. Never raises."""
+    summary = {"checked": 0, "ran": 0, "skipped": 0, "failed": 0}
+    cfg = get_settings()
+    if not cfg.recovery_enabled:
+        logger.info("recovery: disabled (recovery_enabled=False)")
+        return summary
+
+    now = _now_bd()
+    pool = await _get_pool()
+
+    for job in sorted(CATCHUP_REGISTRY, key=lambda j: j.dep_rank):
+        summary["checked"] += 1
+        last = await _last_success_date(pool, job.job_name)
+        if not should_catch_up(now, job.anchor_hour, job.anchor_minute,
+                               job.run_day(now), last):
+            summary["skipped"] += 1
+            continue
+        logger.info("recovery: catching up job=%s (last_success=%s)", job.job_name, last)
+        try:
+            await job.func()
+            summary["ran"] += 1
+        except Exception as exc:
+            summary["failed"] += 1
+            logger.error("recovery: catch-up failed job=%s error=%s", job.job_name, exc, exc_info=True)
+
+    await _maybe_resume_live_prices(now)
+    logger.info(
+        "recovery_summary checked=%d ran=%d skipped=%d failed=%d",
+        summary["checked"], summary["ran"], summary["skipped"], summary["failed"],
+    )
+    return summary
