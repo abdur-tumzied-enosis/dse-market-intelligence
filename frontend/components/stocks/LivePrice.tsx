@@ -46,6 +46,71 @@ function seed(initial: LatestPrice | null): LivePriceType {
   }
 }
 
+// ─── Day range bar ─────────────────────────────────────────────────────────
+// Low ——•—— High track with the current price as a glowing marker and the
+// previous close (when known) as a faint tick. Degenerates gracefully when
+// high == low or either bound is missing.
+function DayRangeBar({
+  low,
+  high,
+  ltp,
+  prevClose,
+  up,
+}: {
+  low: number | null
+  high: number | null
+  ltp: number | null
+  prevClose: number | null
+  up: boolean
+}) {
+  if (low == null || high == null || ltp == null) return null
+  const span = high - low
+  const clamp = (v: number) => Math.max(0, Math.min(100, v))
+  const pos = span > 0 ? clamp(((ltp - low) / span) * 100) : 50
+  const prevPos =
+    prevClose != null && span > 0 ? clamp(((prevClose - low) / span) * 100) : null
+  const accent = up ? '#00d4a4' : '#ff4d6a'
+
+  return (
+    <div className="mt-3 w-full">
+      <div className="flex items-end justify-between mb-1">
+        <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-[#6b6b80]">
+          Day Range
+        </span>
+        {prevClose != null && (
+          <span className="text-[9px] font-mono text-[#6b6b80]">
+            prev <span className="text-[#9b9bb0] tabular-nums">{fmtBDT(prevClose)}</span>
+          </span>
+        )}
+      </div>
+      <div className="relative h-1.5 rounded-full bg-[#1a1a24] overflow-visible">
+        {/* filled portion from low up to current price */}
+        <div
+          className="absolute inset-y-0 left-0 rounded-full"
+          style={{ width: `${pos}%`, background: `linear-gradient(90deg, ${accent}33, ${accent})` }}
+        />
+        {/* previous close tick */}
+        {prevPos != null && (
+          <div
+            className="absolute top-1/2 h-3 w-px -translate-y-1/2 bg-[#6b6b80]"
+            style={{ left: `${prevPos}%` }}
+            title={`Prev close ${fmtBDT(prevClose)}`}
+          />
+        )}
+        {/* current price marker */}
+        <div
+          className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[#0a0a0f]"
+          style={{ left: `${pos}%`, background: accent, boxShadow: `0 0 8px ${accent}99` }}
+        />
+      </div>
+      <div className="flex justify-between mt-1">
+        <span className="text-[10px] font-mono tabular-nums text-[#ff4d6a]">{fmtBDT(low)}</span>
+        <span className="text-[10px] font-mono tabular-nums text-[#00d4a4]">{fmtBDT(high)}</span>
+      </div>
+    </div>
+  )
+}
+
 export default function LivePrice({
   ticker,
   initial,
@@ -87,6 +152,7 @@ export default function LivePrice({
   const isUp = changePct >= 0
   const isLive = data.market_status === 'Open'
   const estimated = !!data.status_source && data.status_source !== 'dse_direct'
+  const accent = isUp ? '#00d4a4' : '#ff4d6a'
   const asOf = new Date(data.as_of).toLocaleTimeString('en-GB', {
     hour: '2-digit',
     minute: '2-digit',
@@ -94,42 +160,45 @@ export default function LivePrice({
   })
 
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 flex-1 min-w-0">
-      <div>
-        <div className="flex items-baseline gap-3">
-          <span className="text-[42px] font-mono font-bold tabular-nums leading-none text-white">
-            {price != null ? `৳${price.toFixed(2)}` : '—'}
-          </span>
-          {price != null && (
-            <span
-              className="text-[18px] font-mono font-semibold tabular-nums"
-              style={{ color: isUp ? '#00d4a4' : '#ff4d6a' }}
-            >
-              {isUp ? '+' : ''}
-              {changePct.toFixed(2)}%
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5 mt-1.5">
+    <div className="flex flex-col items-start sm:items-end gap-1 min-w-[260px]">
+      {/* Price + change */}
+      <div className="flex items-baseline gap-3">
+        <span className="text-[44px] font-mono font-bold tabular-nums leading-none text-white">
+          {price != null ? `৳${price.toFixed(2)}` : '—'}
+        </span>
+        {price != null && (
           <span
-            className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-[#00d4a4] animate-pulse' : 'bg-[#6b6b80]'}`}
-          />
-          <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-[#6b6b80]">
-            {isLive ? `live · as of ${asOf}` : 'market closed'}
-            {estimated ? ' (est.)' : ''}
+            className="inline-flex items-center gap-1 text-[15px] font-mono font-semibold tabular-nums rounded-md px-2 py-0.5"
+            style={{ color: accent, backgroundColor: `${accent}1a` }}
+          >
+            <span aria-hidden>{isUp ? '▲' : '▼'}</span>
+            {isUp ? '+' : ''}
+            {changePct.toFixed(2)}%
           </span>
-        </div>
+        )}
       </div>
 
+      {/* Live status */}
+      <div className="flex items-center gap-1.5">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-[#00d4a4] animate-pulse' : 'bg-[#6b6b80]'}`}
+        />
+        <span className="text-[9px] font-mono uppercase tracking-[0.18em] text-[#6b6b80]">
+          {isLive ? `live · as of ${asOf}` : 'market closed'}
+          {estimated ? ' (est.)' : ''}
+        </span>
+      </div>
+
+      {/* OHLV stat strip */}
       {price != null && (
-        <div className="flex gap-5 self-end pb-1">
+        <div className="flex gap-5 mt-2">
           {[
             { l: 'HIGH', v: fmtBDT(data.high), c: '#00d4a4' },
             { l: 'LOW', v: fmtBDT(data.low), c: '#ff4d6a' },
             { l: 'VOLUME', v: fmtVol(data.volume), c: null },
             { l: 'VALUE', v: fmtCap(data.value_bdt), c: null },
           ].map(({ l, v, c }) => (
-            <div key={l} className="text-center">
+            <div key={l} className="text-left sm:text-right">
               <div className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#6b6b80] mb-0.5">
                 {l}
               </div>
@@ -142,6 +211,17 @@ export default function LivePrice({
             </div>
           ))}
         </div>
+      )}
+
+      {/* Day range */}
+      {price != null && (
+        <DayRangeBar
+          low={data.low}
+          high={data.high}
+          ltp={price}
+          prevClose={data.prev_close}
+          up={isUp}
+        />
       )}
     </div>
   )
