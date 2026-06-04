@@ -69,6 +69,25 @@ class CatchUpJob:
 
 # ── Pure decision functions (no DB) ─────────────────────────────────────
 
+def _skip_reason(
+    now: datetime,
+    anchor_hour: int,
+    anchor_minute: int,
+    is_run_day: bool,
+    last_success_date: date | None,
+) -> str | None:
+    """Why a job should NOT be caught up, or None if it should run. The three
+    skip conditions, in the same order should_catch_up evaluates them."""
+    if not is_run_day:
+        return "not a run-day today"
+    anchor = now.replace(hour=anchor_hour, minute=anchor_minute, second=0, microsecond=0)
+    if now < anchor:
+        return f"not due yet (anchor {anchor_hour:02d}:{anchor_minute:02d})"
+    if last_success_date == now.date():
+        return "already succeeded today"
+    return None
+
+
 def should_catch_up(
     now: datetime,
     anchor_hour: int,
@@ -82,12 +101,7 @@ def should_catch_up(
     now must be tz-aware (BD). last_success_date is the BD date of the job's most
     recent successful run, or None if it has never succeeded.
     """
-    if not is_run_day:
-        return False
-    anchor = now.replace(hour=anchor_hour, minute=anchor_minute, second=0, microsecond=0)
-    overdue = now >= anchor
-    not_done = last_success_date != now.date()
-    return overdue and not_done
+    return _skip_reason(now, anchor_hour, anchor_minute, is_run_day, last_success_date) is None
 
 
 def detect_gap(
@@ -260,9 +274,12 @@ async def recover_missed_jobs() -> dict[str, int]:
         for job in sorted(CATCHUP_REGISTRY, key=lambda j: j.dep_rank):
             summary["checked"] += 1
             last = await _last_success_date(pool, job.job_name)
-            if not should_catch_up(now, job.anchor_hour, job.anchor_minute,
-                                   job.run_day(now), last):
+            reason = _skip_reason(now, job.anchor_hour, job.anchor_minute,
+                                  job.run_day(now), last)
+            if reason is not None:
                 summary["skipped"] += 1
+                logger.debug("recovery: skip job=%s reason=%s last_success=%s",
+                             job.job_name, reason, last)
                 continue
             logger.info("recovery: catching up job=%s (last_success=%s)", job.job_name, last)
             try:
