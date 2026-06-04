@@ -70,3 +70,16 @@ def test_detect_gap_none_when_market_closed():
 def test_detect_gap_none_when_no_prior_snapshot():
     now = datetime(2026, 6, 4, 6, 30, tzinfo=UTC)
     assert detect_gap(None, now, 3, True) is None
+
+
+def test_detect_gap_none_exactly_at_threshold():
+    """Exactly at threshold is not a gap (strict >)."""
+    last = datetime(2026, 6, 4, 6, 0, tzinfo=UTC)
+    now = datetime(2026, 6, 4, 6, 3, tzinfo=UTC)  # exactly 3 min
+    assert detect_gap(last, now, 3, True) is None
+
+
+def test_should_catch_up_exactly_at_anchor():
+    """Due the instant the anchor passes (>=)."""
+    now = _bd(2026, 6, 4, 22, 0)
+    assert should_catch_up(now, 22, 0, True, None) is True

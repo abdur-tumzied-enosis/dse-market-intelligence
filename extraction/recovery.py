@@ -55,6 +55,8 @@ def detect_gap(
     """
     if not market_open or last_snapshot_time is None:
         return None
+    if now_utc.tzinfo is None or last_snapshot_time.tzinfo is None:
+        raise ValueError("detect_gap requires tz-aware datetimes")
     if now_utc - last_snapshot_time > timedelta(minutes=threshold_minutes):
         return (last_snapshot_time, now_utc)
     return None
