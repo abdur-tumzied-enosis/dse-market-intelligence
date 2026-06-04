@@ -178,8 +178,6 @@ async def test_recover_runs_overdue_job_not_done_today():
     with patch("extraction.recovery._get_pool", return_value=pool), \
          patch("extraction.recovery.CATCHUP_REGISTRY", [entry]), \
          patch("extraction.recovery._now_bd", return_value=now_bd), \
-         patch("extraction.recovery.maybe_record_intraday_gap",
-               new=AsyncMock(return_value=False)), \
          patch("extraction.recovery._maybe_resume_live_prices", new=AsyncMock()):
         summary = await recover_missed_jobs()
 
@@ -202,8 +200,6 @@ async def test_recover_skips_job_already_done_today():
     with patch("extraction.recovery._get_pool", return_value=pool), \
          patch("extraction.recovery.CATCHUP_REGISTRY", [entry]), \
          patch("extraction.recovery._now_bd", return_value=now_bd), \
-         patch("extraction.recovery.maybe_record_intraday_gap",
-               new=AsyncMock(return_value=False)), \
          patch("extraction.recovery._maybe_resume_live_prices", new=AsyncMock()):
         summary = await recover_missed_jobs()
 
@@ -239,8 +235,6 @@ async def test_recover_one_failing_job_does_not_stop_others():
     with patch("extraction.recovery._get_pool", return_value=pool), \
          patch("extraction.recovery.CATCHUP_REGISTRY", registry), \
          patch("extraction.recovery._now_bd", return_value=now_bd), \
-         patch("extraction.recovery.maybe_record_intraday_gap",
-               new=AsyncMock(return_value=False)), \
          patch("extraction.recovery._maybe_resume_live_prices", new=AsyncMock()):
         summary = await recover_missed_jobs()
 

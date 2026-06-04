@@ -255,22 +255,25 @@ async def recover_missed_jobs() -> dict[str, int]:
         return summary
 
     now = _now_bd()
-    pool = await _get_pool()
-
-    for job in sorted(CATCHUP_REGISTRY, key=lambda j: j.dep_rank):
-        summary["checked"] += 1
-        last = await _last_success_date(pool, job.job_name)
-        if not should_catch_up(now, job.anchor_hour, job.anchor_minute,
-                               job.run_day(now), last):
-            summary["skipped"] += 1
-            continue
-        logger.info("recovery: catching up job=%s (last_success=%s)", job.job_name, last)
-        try:
-            await job.func()
-            summary["ran"] += 1
-        except Exception as exc:
-            summary["failed"] += 1
-            logger.error("recovery: catch-up failed job=%s error=%s", job.job_name, exc, exc_info=True)
+    try:
+        pool = await _get_pool()
+        for job in sorted(CATCHUP_REGISTRY, key=lambda j: j.dep_rank):
+            summary["checked"] += 1
+            last = await _last_success_date(pool, job.job_name)
+            if not should_catch_up(now, job.anchor_hour, job.anchor_minute,
+                                   job.run_day(now), last):
+                summary["skipped"] += 1
+                continue
+            logger.info("recovery: catching up job=%s (last_success=%s)", job.job_name, last)
+            try:
+                await job.func()
+                summary["ran"] += 1
+            except Exception as exc:
+                summary["failed"] += 1
+                logger.error("recovery: catch-up failed job=%s error=%s",
+                             job.job_name, exc, exc_info=True)
+    except Exception as exc:
+        logger.error("recovery: aborted before completing error=%s", exc, exc_info=True)
 
     await _maybe_resume_live_prices(now)
     logger.info(
