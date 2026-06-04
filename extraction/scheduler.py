@@ -324,6 +324,11 @@ async def job_live_prices() -> None:
         await _invalidate_live_caches()
         return
 
+    # Record any polling gap since the last snapshot (boot, network stall, missed
+    # tick). Non-fatal; never blocks the pull.
+    from extraction.recovery import maybe_record_intraday_gap
+    await maybe_record_intraday_gap(now)
+
     async with job_run("live_price_pull", stream_name="live_prices") as ctx:
         try:
             result = await STREAMS["live_prices"].fetch()
@@ -1017,10 +1022,17 @@ def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
 
 
 async def start_scheduler(scheduler: AsyncIOScheduler) -> None:
-    """Start the scheduler."""
+    """Start the scheduler, then kick off boot-time recovery in the background."""
+    import asyncio
+
     configure_scheduler(scheduler)
     scheduler.start()
     logger.info("scheduler: started")
+
+    # Converge missed daily/EOD jobs + resume live polling. Run as a background
+    # task so a slow catch-up never blocks scheduler startup.
+    from extraction.recovery import recover_missed_jobs
+    asyncio.create_task(recover_missed_jobs())
 
 
 async def stop_scheduler(scheduler: AsyncIOScheduler) -> None:

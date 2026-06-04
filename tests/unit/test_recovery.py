@@ -241,3 +241,55 @@ async def test_recover_one_failing_job_does_not_stop_others():
     assert ran == ["ok"]
     assert summary["ran"] == 1
     assert summary["failed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_job_live_prices_calls_gap_check_when_open(monkeypatch):
+    """job_live_prices invokes maybe_record_intraday_gap after the Open check."""
+    import extraction.scheduler as sched
+
+    called = {}
+
+    async def fake_gap(now_bd):
+        called["gap"] = True
+        return False
+
+    monkeypatch.setattr(sched, "get_market_status",
+                        AsyncMock(return_value={"status": "Open"}))
+    monkeypatch.setattr("extraction.recovery.maybe_record_intraday_gap", fake_gap)
+    monkeypatch.setattr("extraction.recovery._get_pool", AsyncMock())
+
+    from extraction.base import AllAdaptersFailedError
+    from extraction.registry import STREAMS
+    monkeypatch.setitem(
+        STREAMS, "live_prices",
+        type("S", (), {"fetch": AsyncMock(side_effect=AllAdaptersFailedError("live_prices", []))})(),
+    )
+
+    with pytest.raises(AllAdaptersFailedError):
+        await sched.job_live_prices()
+
+    assert called.get("gap") is True
+
+
+@pytest.mark.asyncio
+async def test_start_scheduler_kicks_off_recovery(monkeypatch):
+    import asyncio
+
+    import extraction.scheduler as sched
+
+    started = {}
+    monkeypatch.setattr(sched, "configure_scheduler", lambda s: None)
+
+    fake_recover = AsyncMock(return_value={"checked": 0})
+    monkeypatch.setattr("extraction.recovery.recover_missed_jobs", fake_recover)
+
+    class FakeScheduler:
+        def start(self):
+            started["started"] = True
+
+    await sched.start_scheduler(FakeScheduler())
+    await asyncio.sleep(0)  # let the created task run
+
+    assert started["started"] is True
+    fake_recover.assert_awaited_once()
