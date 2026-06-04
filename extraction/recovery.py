@@ -12,12 +12,21 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytz
 
+from extraction.market_status import get_market_status
+from extraction.observability import fire_alert
+
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
+
+
+async def _get_pool():
+    """Indirection so tests can patch the DB pool without a live database."""
+    from db.pool import get_pool
+    return await get_pool()
 
 # Python weekday(): Mon=0..Sun=6. DSE trades Sun–Thu → {6,0,1,2,3}.
 _MARKET_WEEKDAYS = {6, 0, 1, 2, 3}
@@ -136,3 +145,68 @@ def _build_registry() -> list[CatchUpJob]:
 
 
 CATCHUP_REGISTRY: list[CatchUpJob] = _build_registry()
+
+
+def _today_utc_start(now_bd: datetime) -> datetime:
+    """00:00 UTC of the current Dhaka date — lower bound for today's intraday rows."""
+    d = now_bd.date()
+    return datetime(d.year, d.month, d.day, tzinfo=UTC)
+
+
+async def _record_gap(
+    pool, session_date: date, gap_start: datetime, gap_end: datetime, reason: str
+) -> bool:
+    """Insert a market_gaps row unless an unrecovered row with the same
+    (session_date, gap_start) already exists. Returns True if a row was inserted."""
+    existing = await pool.fetchrow(
+        "SELECT 1 FROM market_gaps "
+        "WHERE session_date = $1 AND gap_start = $2 AND recovered = FALSE",
+        session_date, gap_start,
+    )
+    if existing:
+        return False
+    await pool.execute(
+        "INSERT INTO market_gaps (session_date, gap_start, gap_end, reason) "
+        "VALUES ($1, $2, $3, $4)",
+        session_date, gap_start, gap_end, reason,
+    )
+    return True
+
+
+async def maybe_record_intraday_gap(now_bd: datetime) -> bool:
+    """If the market is open and intraday_prices has no recent row, record a
+    market_gaps entry and fire a WARNING alert. Returns True if a gap was
+    recorded. Never raises — recovery must not crash the caller.
+    """
+    try:
+        if (await get_market_status())["status"] != "Open":
+            return False
+        pool = await _get_pool()
+        from mgmt.config import get_settings  # noqa: PLC0415
+        threshold = get_settings().intraday_gap_threshold_minutes
+
+        row = await pool.fetchrow(
+            "SELECT MAX(time) AS t FROM intraday_prices WHERE time >= $1",
+            _today_utc_start(now_bd),
+        )
+        last_t = row["t"] if row else None
+        now_utc = now_bd.astimezone(UTC)
+        gap = detect_gap(last_t, now_utc, threshold, True)
+        if gap is None:
+            return False
+
+        recorded = await _record_gap(
+            pool, now_bd.date(), gap[0], gap[1], "scheduler_downtime"
+        )
+        if recorded:
+            logger.warning("recovery: intraday gap %s..%s", gap[0], gap[1])
+            await fire_alert(
+                severity="WARNING",
+                message=f"Intraday polling gap detected: {gap[0]} .. {gap[1]}",
+                stream_name="live_prices",
+                details={"gap_start": gap[0].isoformat(), "gap_end": gap[1].isoformat()},
+            )
+        return recorded
+    except Exception as exc:
+        logger.warning("recovery: gap check failed error=%s", exc)
+        return False

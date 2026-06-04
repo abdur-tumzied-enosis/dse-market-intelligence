@@ -2,10 +2,17 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from unittest.mock import AsyncMock, patch
 
+import pytest
 import pytz
 
-from extraction.recovery import CATCHUP_REGISTRY, detect_gap, should_catch_up
+from extraction.recovery import (
+    CATCHUP_REGISTRY,
+    detect_gap,
+    maybe_record_intraday_gap,
+    should_catch_up,
+)
 from mgmt.config import get_settings
 
 BD_TZ = pytz.timezone("Asia/Dhaka")
@@ -113,3 +120,39 @@ def test_run_day_quarterly_only_quarter_starts():
     assert entry.run_day(BD_TZ.localize(datetime(2026, 7, 1, 4, 0))) is True
     assert entry.run_day(BD_TZ.localize(datetime(2026, 7, 2, 4, 0))) is False
     assert entry.run_day(BD_TZ.localize(datetime(2026, 6, 1, 4, 0))) is False
+
+
+@pytest.mark.asyncio
+async def test_maybe_record_intraday_gap_inserts_and_alerts():
+    # last snapshot 10 min ago → gap; market Open
+    last = datetime(2026, 6, 4, 6, 0, tzinfo=UTC)
+    pool = AsyncMock()
+    pool.fetchrow.side_effect = [
+        {"t": last},   # MAX(time) lookup
+        None,          # dedup guard: no existing unrecovered row
+    ]
+    now_bd = BD_TZ.localize(datetime(2026, 6, 4, 12, 10))  # 06:10 UTC
+
+    with patch("extraction.recovery._get_pool", return_value=pool), \
+         patch("extraction.recovery.get_market_status",
+               new=AsyncMock(return_value={"status": "Open"})), \
+         patch("extraction.recovery.fire_alert", new=AsyncMock()) as alert:
+        recorded = await maybe_record_intraday_gap(now_bd)
+
+    assert recorded is True
+    insert_calls = [c for c in pool.execute.await_args_list
+                    if "market_gaps" in c.args[0]]
+    assert len(insert_calls) == 1
+    alert.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_maybe_record_intraday_gap_noop_when_closed():
+    pool = AsyncMock()
+    now_bd = BD_TZ.localize(datetime(2026, 6, 4, 18, 0))
+    with patch("extraction.recovery._get_pool", return_value=pool), \
+         patch("extraction.recovery.get_market_status",
+               new=AsyncMock(return_value={"status": "Closed"})):
+        recorded = await maybe_record_intraday_gap(now_bd)
+    assert recorded is False
+    pool.execute.assert_not_awaited()
