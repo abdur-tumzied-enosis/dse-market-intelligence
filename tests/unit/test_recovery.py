@@ -156,3 +156,4 @@ async def test_maybe_record_intraday_gap_noop_when_closed():
         recorded = await maybe_record_intraday_gap(now_bd)
     assert recorded is False
     pool.execute.assert_not_awaited()
+    pool.fetchrow.assert_not_awaited()

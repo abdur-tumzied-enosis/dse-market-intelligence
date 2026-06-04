@@ -13,6 +13,10 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import asyncpg
 
 import pytz
 
@@ -23,7 +27,7 @@ logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
 
 
-async def _get_pool():
+async def _get_pool() -> asyncpg.Pool:
     """Indirection so tests can patch the DB pool without a live database."""
     from db.pool import get_pool
     return await get_pool()
@@ -154,7 +158,7 @@ def _today_utc_start(now_bd: datetime) -> datetime:
 
 
 async def _record_gap(
-    pool, session_date: date, gap_start: datetime, gap_end: datetime, reason: str
+    pool: asyncpg.Pool, session_date: date, gap_start: datetime, gap_end: datetime, reason: str
 ) -> bool:
     """Insert a market_gaps row unless an unrecovered row with the same
     (session_date, gap_start) already exists. Returns True if a row was inserted."""
@@ -208,5 +212,5 @@ async def maybe_record_intraday_gap(now_bd: datetime) -> bool:
             )
         return recorded
     except Exception as exc:
-        logger.warning("recovery: gap check failed error=%s", exc)
+        logger.warning("recovery: gap check failed error=%s", exc, exc_info=True)
         return False
