@@ -25,6 +25,9 @@ from mgmt.cache import get_redis
 logger = logging.getLogger(__name__)
 BD_TZ = pytz.timezone("Asia/Dhaka")
 
+# Retains the boot recovery task so it is not garbage-collected mid-run.
+_RECOVERY_TASK: asyncio.Task[dict[str, int]] | None = None
+
 
 # ── Pure helpers (unit-testable, no DB dependency) ─────────────────────
 
@@ -1032,7 +1035,19 @@ async def start_scheduler(scheduler: AsyncIOScheduler) -> None:
     # Converge missed daily/EOD jobs + resume live polling. Run as a background
     # task so a slow catch-up never blocks scheduler startup.
     from extraction.recovery import recover_missed_jobs
-    asyncio.create_task(recover_missed_jobs())
+
+    def _log_recovery_done(task: asyncio.Task[dict[str, int]]) -> None:
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc:
+            logger.error("recovery: boot task failed error=%s", exc, exc_info=exc)
+        else:
+            logger.info("recovery: boot task done summary=%s", task.result())
+
+    global _RECOVERY_TASK
+    _RECOVERY_TASK = asyncio.create_task(recover_missed_jobs())
+    _RECOVERY_TASK.add_done_callback(_log_recovery_done)
 
 
 async def stop_scheduler(scheduler: AsyncIOScheduler) -> None:
