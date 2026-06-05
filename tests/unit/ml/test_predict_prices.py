@@ -1,53 +1,45 @@
-"""Tests for ml.inference.predict_prices."""
+"""Tests for ml.inference.predict_prices (cross-sectional inference)."""
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 import pytest
-import torch
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
-def _make_feature_matrix(n: int = 70) -> pd.DataFrame:
-    cols = [
-        "rsi_14", "macd_diff", "bb_pband", "atr_norm", "adx_14",
-        "return_1d", "return_5d", "return_20d", "volume_zscore", "obv",
-        "close",
-    ]
-    rng = np.random.default_rng(0)
-    idx = pd.date_range("2024-01-01", periods=n, freq="D")
-    return pd.DataFrame(rng.standard_normal((n, len(cols))), columns=cols, index=idx)
+def _make_panel(n_tickers: int = 25, seq_len: int = 60) -> pd.DataFrame:
+    from ml.constants import PRICE_FEATURE_COLS
+
+    rng = np.random.default_rng(1)
+    rows = []
+    for ti in range(n_tickers):
+        ticker = f"TK{ti:02d}"
+        for step in range(seq_len):
+            row = {"step": step, "ticker": ticker}
+            for col in PRICE_FEATURE_COLS:
+                row[col] = rng.standard_normal()
+            rows.append(row)
+    return pd.DataFrame(rows)
 
 
-@pytest.mark.asyncio
-async def test_predict_writes_three_horizons():
-    from ml.inference.predict_prices import predict_ticker
-    pool = MagicMock()
-    pool.execute = AsyncMock()
+def test_cross_sectional_zscore_by_step_normalizes_each_step():
+    """Inference path z-scores features across tickers per aligned `step`.
+    Exercise that production call and assert each step is zero-mean."""
+    from ml.constants import PRICE_FEATURE_COLS, SEQ_LEN
+    from ml.features.cross_sectional import cross_sectional_zscore
 
-    feat_df = _make_feature_matrix(70)
-    model = MagicMock()
-    model.predict_proba = MagicMock(
-        return_value=torch.tensor([[0.6, 0.55, 0.52]])
-    )
-
-    with patch("ml.inference.predict_prices.build_price_feature_matrix",
-               AsyncMock(return_value=feat_df)):
-        await predict_ticker(pool, model, "GP")
-
-    # Should call pool.execute 3 times (one per horizon: 5d, 10d, 20d)
-    assert pool.execute.call_count == 3
+    panel = _make_panel(n_tickers=25, seq_len=SEQ_LEN)
+    normed = cross_sectional_zscore(panel, PRICE_FEATURE_COLS, by="step")
+    # every step's cross-section is mean-centered for each feature
+    per_step_mean = normed.groupby("step")[PRICE_FEATURE_COLS].mean().abs()
+    assert (per_step_mean < 1e-9).all().all()
+    assert not normed[PRICE_FEATURE_COLS].isna().any().any()
 
 
 @pytest.mark.asyncio
-async def test_predict_skips_ticker_no_data():
-    from ml.inference.predict_prices import predict_ticker
-    pool = MagicMock()
-    pool.execute = AsyncMock()
-    model = MagicMock()
+async def test_module_importable():
+    """Module-level import must succeed (checks constants + new API shape)."""
+    import ml.inference.predict_prices as pp
 
-    with patch("ml.inference.predict_prices.build_price_feature_matrix",
-               AsyncMock(return_value=pd.DataFrame())):
-        await predict_ticker(pool, model, "NOBDATA")
-
-    pool.execute.assert_not_called()
+    assert hasattr(pp, "main")
+    assert hasattr(pp, "MODEL_VERSION")
+    assert pp.MODEL_VERSION == "lstm_v1"

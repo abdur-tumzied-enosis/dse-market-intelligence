@@ -26,7 +26,7 @@ async def build_price_feature_matrix(
 
     rows = await pool.fetch(
         """
-        SELECT time, close, high, low, volume
+        SELECT time, open, close, high, low, volume
         FROM stock_prices
         WHERE ticker = $1 AND time >= $2 AND time <= $3
           AND close IS NOT NULL AND quality_flag != 'bad'
@@ -38,12 +38,17 @@ async def build_price_feature_matrix(
     if not rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(list(rows), columns=["time", "close", "high", "low", "volume"])
+    df = pd.DataFrame(list(rows), columns=["time", "open", "close", "high", "low", "volume"])
     df = df.set_index("time").sort_index()
     df = df.astype(float)
 
+    from ml.constants import EMA_SPAN, PRICE_FEATURE_COLS
+    from ml.features.cross_sectional import clean_and_smooth
+
     features = compute_price_features(df)
-    features = features.ffill().fillna(0)
+    # Identical cleaning + EMA smoothing as training (per ticker) to avoid
+    # train/serve skew; build_price_feature_matrix is called once per ticker.
+    features[PRICE_FEATURE_COLS] = clean_and_smooth(features, PRICE_FEATURE_COLS, EMA_SPAN)
     return features.tail(lookback_days)
 
 

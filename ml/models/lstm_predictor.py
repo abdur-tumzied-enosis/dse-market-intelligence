@@ -1,36 +1,52 @@
-"""2-layer LSTM for DSE price direction prediction."""
+"""Attention-pooled LSTM for DSE cross-sectional return ranking."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
 
-# 3 output heads: P(up) for 5d / 10d / 20d horizons
-N_HORIZONS = 3
+# Regression heads: predicted rank-return for [1,2,3,5,8,13]d horizons
+N_HORIZONS = 6
+
+
+class AttentionPool(nn.Module):
+    """Learned-query attention pooling over the time dimension."""
+
+    def __init__(self, hidden_size: int) -> None:
+        super().__init__()
+        self.score = nn.Linear(hidden_size, 1)
+
+    def forward(self, seq: torch.Tensor) -> torch.Tensor:
+        # seq: (batch, time, hidden) -> (batch, hidden)
+        weights = torch.softmax(self.score(seq).squeeze(-1), dim=1)  # (B, T)
+        return torch.bmm(weights.unsqueeze(1), seq).squeeze(1)
 
 
 class LSTMPredictor(nn.Module):
-    """
-    2-layer LSTM predicting probability of price increase over 3 horizons.
+    """Front-end -> LSTM -> attention pool -> linear heads.
 
-    Input: (batch, seq_len, input_size) tensor of normalized price features.
-    Output: (batch, 3) logits for [5d_up, 10d_up, 20d_up].
+    Input:  (batch, seq_len, input_size) normalized features.
+    Output: (batch, N_HORIZONS) regression of cross-sectional rank-return.
+
+    `front_end` is a swappable slot (default nn.Identity) so a Conv1d block can
+    be added later without changing the LSTM/attention/heads.
     """
 
     def __init__(
         self,
-        input_size: int = 10,
+        input_size: int = 13,
         hidden_size: int = 64,
         num_layers: int = 2,
-        dropout: float = 0.2,
+        dropout: float = 0.4,
     ) -> None:
         super().__init__()
         self._input_size = input_size
         self._hidden_size = hidden_size
         self._num_layers = num_layers
 
+        self.front_end: nn.Module = nn.Identity()
         self.lstm = nn.LSTM(
             input_size=input_size,
             hidden_size=hidden_size,
@@ -38,21 +54,34 @@ class LSTMPredictor(nn.Module):
             batch_first=True,
             dropout=dropout if num_layers > 1 else 0.0,
         )
+        self.pool = AttentionPool(hidden_size)
         self.head = nn.Linear(hidden_size, N_HORIZONS)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Returns logits (batch, 3). Apply sigmoid for probabilities."""
-        _, (h_n, _) = self.lstm(x)
-        last_hidden = h_n[-1]  # (batch, hidden_size)
-        return self.head(last_hidden)
+        x = self.front_end(x)
+        seq_out, _ = self.lstm(x)          # (batch, seq_len, hidden)
+        pooled = self.pool(seq_out)        # (batch, hidden)
+        return self.head(pooled)           # (batch, N_HORIZONS)
 
-    def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
-        """Returns probabilities (batch, 3) in [0, 1]."""
+    def predict(self, x: torch.Tensor) -> torch.Tensor:
+        """Returns raw regression outputs (batch, N_HORIZONS).
+
+        Restores the prior train/eval mode so calling predict() mid-training
+        does not silently disable dropout for the rest of the epoch.
+        """
+        was_training = self.training
         self.eval()
-        with torch.no_grad():
-            return torch.sigmoid(self(x))
+        try:
+            with torch.no_grad():
+                return self(x)
+        finally:
+            if was_training:
+                self.train()
 
-    def save(self, path: Path, scaler: Optional[Any] = None) -> None:
+    def save(self, path: Path, scaler: Any = None) -> None:
+        # `scaler` is accepted for call-site compatibility but intentionally
+        # NOT persisted — normalization is cross-sectional at inference, not a
+        # stored scaler. Callers must not rely on it being saved.
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
@@ -60,15 +89,17 @@ class LSTMPredictor(nn.Module):
                 "input_size": self._input_size,
                 "hidden_size": self._hidden_size,
                 "num_layers": self._num_layers,
-                "scaler": scaler,
             },
             path,
         )
 
     @classmethod
-    def load(cls, path: Path) -> "tuple[LSTMPredictor, Any]":
-        """Returns (model, scaler). scaler is None if checkpoint predates scaling."""
-        checkpoint: dict[str, Any] = torch.load(path, map_location="cpu", weights_only=False)
+    def load(cls, path: Path) -> "LSTMPredictor":
+        # weights_only=False: checkpoint holds only tensors + primitives written
+        # by save(); safe for our own internal checkpoints.
+        checkpoint: dict[str, Any] = torch.load(
+            path, map_location="cpu", weights_only=False
+        )
         model = cls(
             input_size=checkpoint["input_size"],
             hidden_size=checkpoint["hidden_size"],
@@ -76,4 +107,4 @@ class LSTMPredictor(nn.Module):
         )
         model.load_state_dict(checkpoint["state_dict"])
         model.eval()
-        return model, checkpoint.get("scaler")
+        return model

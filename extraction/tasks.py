@@ -104,23 +104,13 @@ async def _run_ml_inference_async() -> dict:
         lstm_path = Path("models/v1/lstm_v0.pt")
         lstm_ok = 0
         if lstm_path.exists():
-            from ml.models.lstm_predictor import LSTMPredictor
-            from ml.inference.predict_prices import predict_ticker
+            # New model is cross-sectional (ranks all tickers together), so we
+            # delegate to the batch inference entrypoint instead of per-ticker.
+            from ml.inference.predict_prices import main as run_lstm_inference
 
-            model = LSTMPredictor.load(lstm_path)
-            model.eval()
-            tickers = await pool.fetch(
-                "SELECT ticker FROM companies WHERE is_active = true"
-            )
-            for row in tickers:
-                try:
-                    await predict_ticker(pool, model, row["ticker"])
-                    lstm_ok += 1
-                except Exception as exc:
-                    logger.warning(
-                        "run_ml_inference: lstm skip ticker=%s error=%s", row["ticker"], exc
-                    )
-            logger.info("run_ml_inference: LSTM inference done n=%d", lstm_ok)
+            await run_lstm_inference()
+            lstm_ok = 1
+            logger.info("run_ml_inference: LSTM inference done")
         else:
             logger.warning("run_ml_inference: lstm_v0.pt not found — skipping")
 
@@ -271,73 +261,19 @@ async def _retrain_ml_models_async() -> dict:
             logger.error("retrain_ml_models: XGBoost failed: %s", exc)
             errors.append(f"XGBoost: {exc}")
 
-        # LSTM retrain
+        # LSTM retrain — delegates to the cross-sectional training entrypoint,
+        # which builds sequences, trains (Huber regression on rank-return), and
+        # saves to models/v1/lstm_v0.pt. We then archive a copy into the
+        # versioned dir for that run.
         try:
-            import torch
-            import torch.nn as nn
-            from torch.utils.data import DataLoader, TensorDataset
+            from ml.train.train_lstm import MODEL_PATH as LSTM_MODEL_PATH
+            from ml.train.train_lstm import main as train_lstm_main
 
-            from ml.models.lstm_predictor import LSTMPredictor
-            from ml.train.train_lstm import PRICE_FEATURE_COLS, build_sequences
-
-            X_arr, y_arr = await build_sequences(pool)
-            if len(X_arr) >= 200:
-                split = int(len(X_arr) * 0.8)
-                train_dl = DataLoader(
-                    TensorDataset(
-                        torch.from_numpy(X_arr[:split]),
-                        torch.from_numpy(y_arr[:split]),
-                    ),
-                    batch_size=64,
-                    shuffle=True,
-                )
-                val_dl = DataLoader(
-                    TensorDataset(
-                        torch.from_numpy(X_arr[split:]),
-                        torch.from_numpy(y_arr[split:]),
-                    ),
-                    batch_size=256,
-                    shuffle=False,
-                )
-                model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS))
-                optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-                criterion = nn.BCEWithLogitsLoss()
-                best_val_loss = float("inf")
-                patience_count = 0
-                lstm_path = versioned_dir / "lstm_v0.pt"
-
-                for _ in range(30):
-                    model.train()
-                    for xb, yb in train_dl:
-                        optimizer.zero_grad()
-                        loss = criterion(model(xb), yb)
-                        loss.backward()
-                        nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                        optimizer.step()
-                    model.eval()
-                    val_losses = []
-                    with torch.no_grad():
-                        for xb, yb in val_dl:
-                            val_losses.append(criterion(model(xb), yb).item())
-                    val_loss = sum(val_losses) / len(val_losses)
-                    if val_loss < best_val_loss:
-                        best_val_loss = val_loss
-                        patience_count = 0
-                        model.save(lstm_path)
-                    else:
-                        patience_count += 1
-                        if patience_count >= 5:
-                            break
-
-                if lstm_path.exists():
-                    shutil.copy(lstm_path, current_dir / "lstm_v0.pt")
-                logger.info(
-                    "retrain_ml_models: LSTM retrained best_val_loss=%.4f", best_val_loss
-                )
-            else:
-                logger.warning(
-                    "retrain_ml_models: LSTM skipped — only %d sequences", len(X_arr)
-                )
+            await train_lstm_main()
+            if LSTM_MODEL_PATH.exists():
+                versioned_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy(LSTM_MODEL_PATH, versioned_dir / "lstm_v0.pt")
+            logger.info("retrain_ml_models: LSTM retrained -> %s", LSTM_MODEL_PATH)
         except Exception as exc:
             logger.error("retrain_ml_models: LSTM failed: %s", exc)
             errors.append(f"LSTM: {exc}")
@@ -361,9 +297,10 @@ async def _retrain_ml_models_async() -> dict:
 def run_ml_inference(self) -> dict:
     """Nightly ML inference: fundamental scoring, LSTM price direction, DCF valuation.
 
-    max_retries=0: write_scores and predict_ticker use plain INSERT — automatic
-    retry after partial completion would produce duplicate rows in stock_scores
-    and ml_predictions. Set to >0 once those writes use ON CONFLICT DO UPDATE.
+    max_retries=0: write_scores (fundamental scoring) still uses plain INSERT, so
+    automatic retry after partial completion would produce duplicate rows in
+    stock_scores. The LSTM path now upserts (ON CONFLICT DO UPDATE) and is
+    retry-safe; raise max_retries once write_scores also upserts.
     """
     logger.info("task: run_ml_inference: starting")
     try:
