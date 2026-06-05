@@ -11,7 +11,8 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
     Compute technical indicators from OHLCV DataFrame.
 
     Args:
-        df: DataFrame with columns [close, high, low, volume], DatetimeIndex.
+        df: DataFrame with columns [open, close, high, low, volume], DatetimeIndex.
+            ``open`` is required; it is used to compute gap_open, body, and mid_return.
             Minimum 26 rows recommended for indicator warmup.
 
     Returns:
@@ -23,6 +24,7 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
     high = df["high"].astype(float)
     low = df["low"].astype(float)
     volume = df["volume"].astype(float)
+    open_ = df["open"].astype(float)
 
     result = df.copy()
 
@@ -49,5 +51,11 @@ def compute_price_features(df: pd.DataFrame) -> pd.DataFrame:
 
     obv = ta.volume.OnBalanceVolumeIndicator(close, volume).on_balance_volume()
     result["obv"] = obv.pct_change(1)
+
+    prev_close = close.shift(1)
+    result["gap_open"] = open_ / prev_close - 1.0
+    result["body"] = (close - open_) / open_.replace(0, np.nan)
+    mid = (high + low) / 2.0
+    result["mid_return"] = mid.pct_change(1)
 
     return result
