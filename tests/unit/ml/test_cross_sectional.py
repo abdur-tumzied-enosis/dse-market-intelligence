@@ -75,3 +75,15 @@ def test_cross_sectional_zscore_single_member_group_is_zero():
     d1 = out[out["time"] == "d1"]["f"]
     assert (d1 == 0.0).all()
     assert not out["f"].isna().any()
+
+
+def test_clean_and_smooth_scrubs_inf_and_smooths():
+    from ml.features.cross_sectional import clean_and_smooth
+    df = pd.DataFrame({"a": [1.0, np.inf, 3.0, 4.0], "b": [np.nan, 2.0, -np.inf, 4.0]})
+    out = clean_and_smooth(df, ["a", "b"], ema_span=3)
+    # no inf/nan survive
+    assert np.isfinite(out.to_numpy()).all()
+    # output is the causal EMA of the cleaned series (matches manual ewm)
+    cleaned = df[["a", "b"]].replace([np.inf, -np.inf], np.nan).ffill().fillna(0.0)
+    expected = cleaned.ewm(span=3, adjust=False).mean()
+    pd.testing.assert_frame_equal(out, expected)

@@ -5,6 +5,24 @@ import numpy as np
 import pandas as pd
 
 
+def clean_and_smooth(feats: pd.DataFrame, cols: list[str], ema_span: int) -> pd.DataFrame:
+    """Per-ticker feature cleaning + causal EMA smoothing.
+
+    Shared by training (build_sequences) and inference (build_price_feature_matrix)
+    so the served feature distribution matches training exactly. Steps, in order:
+    scrub +/-inf -> forward-fill -> fillna(0) -> causal EMA (adjust=False).
+    Operates on a single ticker's time-ordered rows; the caller groups by ticker.
+    Returns a DataFrame of just `cols`.
+    """
+    out = (
+        feats[cols]
+        .replace([np.inf, -np.inf], np.nan)
+        .ffill()
+        .fillna(0.0)
+    )
+    return out.ewm(span=ema_span, adjust=False).mean()
+
+
 def forward_returns(close: pd.Series, horizons: list[int]) -> pd.DataFrame:
     """Forward return per horizon: fwd_ret_h[t] = close[t+h]/close[t] - 1.
 

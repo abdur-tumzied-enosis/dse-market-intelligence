@@ -56,3 +56,28 @@ async def test_build_price_feature_matrix_no_nans_after_fill():
     result = await build_price_feature_matrix(pool, "GP", lookback_days=30)
     if not result.empty:
         assert not result.isnull().any().any()
+
+
+@pytest.mark.asyncio
+async def test_price_features_smoothed_like_training():
+    """build_price_feature_matrix must EMA-smooth features identically to the
+    training pipeline (clean_and_smooth), preventing train/serve skew."""
+    from ml.constants import EMA_SPAN, PRICE_FEATURE_COLS
+    from ml.features.cross_sectional import clean_and_smooth
+    from ml.features.feature_store import build_price_feature_matrix
+    from ml.features.price_features import compute_price_features
+
+    records = _make_price_records(90)
+    pool = _mock_pool_price(records)
+    result = await build_price_feature_matrix(pool, "GP", lookback_days=30)
+
+    # Recompute the expected training-side features from the same raw records
+    raw = pd.DataFrame(records).set_index("time").sort_index().astype(float)
+    feats_full = compute_price_features(raw)
+    expected = clean_and_smooth(feats_full, PRICE_FEATURE_COLS, EMA_SPAN).tail(len(result))
+
+    pd.testing.assert_frame_equal(
+        result[PRICE_FEATURE_COLS].reset_index(drop=True),
+        expected[PRICE_FEATURE_COLS].reset_index(drop=True),
+        check_dtype=False,
+    )

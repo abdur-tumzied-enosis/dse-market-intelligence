@@ -42,8 +42,13 @@ async def build_price_feature_matrix(
     df = df.set_index("time").sort_index()
     df = df.astype(float)
 
+    from ml.constants import EMA_SPAN, PRICE_FEATURE_COLS
+    from ml.features.cross_sectional import clean_and_smooth
+
     features = compute_price_features(df)
-    features = features.ffill().fillna(0)
+    # Identical cleaning + EMA smoothing as training (per ticker) to avoid
+    # train/serve skew; build_price_feature_matrix is called once per ticker.
+    features[PRICE_FEATURE_COLS] = clean_and_smooth(features, PRICE_FEATURE_COLS, EMA_SPAN)
     return features.tail(lookback_days)
 
 

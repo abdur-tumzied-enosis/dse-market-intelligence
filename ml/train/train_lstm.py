@@ -32,6 +32,7 @@ from ml.constants import (
 from ml.eval.metrics import rank_ic, top_n_hit_rate
 from ml.features.cross_sectional import (
     build_windows,
+    clean_and_smooth,
     cross_sectional_zscore,
     forward_returns,
 )
@@ -90,17 +91,11 @@ def build_sequences(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFr
         missing = set(PRICE_FEATURE_COLS) - set(feats_full.columns)
         if missing:
             raise KeyError(f"compute_price_features missing columns: {sorted(missing)}")
-        # ffill warmup NaNs, then fillna(0) — early indicator-warmup rows (~26 bars)
-        # become 0.0; harmless because windows start at t>=SEQ_LEN-1 and the
-        # SEQ_LEN+max_horizon length filter excludes most warmup contamination.
-        feats = (
-            feats_full[PRICE_FEATURE_COLS]
-            .replace([np.inf, -np.inf], np.nan)
-            .ffill()
-            .fillna(0.0)
-        )
-        # EMA smoothing (causal: adjust=False depends only on rows <= t) to cut noise
-        feats = feats.ewm(span=EMA_SPAN, adjust=False).mean()
+        # Clean + causal EMA smooth (shared with inference to avoid train/serve
+        # skew). Early indicator-warmup rows become 0.0; harmless because windows
+        # start at t>=SEQ_LEN-1 and the SEQ_LEN+max_horizon length filter excludes
+        # most warmup contamination.
+        feats = clean_and_smooth(feats_full, PRICE_FEATURE_COLS, EMA_SPAN)
 
         fwd = forward_returns(grp.set_index("time")["close"], HORIZONS)
 
