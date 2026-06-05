@@ -297,9 +297,10 @@ async def _retrain_ml_models_async() -> dict:
 def run_ml_inference(self) -> dict:
     """Nightly ML inference: fundamental scoring, LSTM price direction, DCF valuation.
 
-    max_retries=0: write_scores and predict_ticker use plain INSERT — automatic
-    retry after partial completion would produce duplicate rows in stock_scores
-    and ml_predictions. Set to >0 once those writes use ON CONFLICT DO UPDATE.
+    max_retries=0: write_scores (fundamental scoring) still uses plain INSERT, so
+    automatic retry after partial completion would produce duplicate rows in
+    stock_scores. The LSTM path now upserts (ON CONFLICT DO UPDATE) and is
+    retry-safe; raise max_retries once write_scores also upserts.
     """
     logger.info("task: run_ml_inference: starting")
     try:
