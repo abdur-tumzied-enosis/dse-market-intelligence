@@ -64,12 +64,24 @@ class LSTMPredictor(nn.Module):
         return self.head(pooled)           # (batch, N_HORIZONS)
 
     def predict(self, x: torch.Tensor) -> torch.Tensor:
-        """Returns raw regression outputs (batch, N_HORIZONS)."""
+        """Returns raw regression outputs (batch, N_HORIZONS).
+
+        Restores the prior train/eval mode so calling predict() mid-training
+        does not silently disable dropout for the rest of the epoch.
+        """
+        was_training = self.training
         self.eval()
-        with torch.no_grad():
-            return self(x)
+        try:
+            with torch.no_grad():
+                return self(x)
+        finally:
+            if was_training:
+                self.train()
 
     def save(self, path: Path, scaler: Any = None) -> None:
+        # `scaler` is accepted for call-site compatibility but intentionally
+        # NOT persisted — normalization is cross-sectional at inference, not a
+        # stored scaler. Callers must not rely on it being saved.
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
@@ -83,6 +95,8 @@ class LSTMPredictor(nn.Module):
 
     @classmethod
     def load(cls, path: Path) -> "LSTMPredictor":
+        # weights_only=False: checkpoint holds only tensors + primitives written
+        # by save(); safe for our own internal checkpoints.
         checkpoint: dict[str, Any] = torch.load(
             path, map_location="cpu", weights_only=False
         )

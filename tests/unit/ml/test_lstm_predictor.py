@@ -52,3 +52,42 @@ def test_save_load_roundtrip():
         loaded = LSTMPredictor.load(path)
         after = loaded.predict(x)
     np.testing.assert_array_almost_equal(before.numpy(), after.numpy(), decimal=5)
+
+
+def test_attention_weights_sum_to_one():
+    import torch
+    from ml.models.lstm_predictor import AttentionPool
+    pool = AttentionPool(hidden_size=8)
+    seq = torch.randn(4, 20, 8)
+    scores = pool.score(seq).squeeze(-1)
+    weights = torch.softmax(scores, dim=1)
+    assert torch.allclose(weights.sum(dim=1), torch.ones(4))
+
+
+def test_front_end_is_applied_in_forward():
+    import torch
+    import torch.nn as nn
+    from ml.models.lstm_predictor import LSTMPredictor
+
+    class _Recorder(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.called = False
+
+        def forward(self, x):
+            self.called = True
+            return x
+
+    model = LSTMPredictor(input_size=13)
+    model.front_end = _Recorder()
+    model(torch.randn(2, 60, 13))
+    assert model.front_end.called
+
+
+def test_predict_restores_training_mode():
+    import torch
+    from ml.models.lstm_predictor import LSTMPredictor
+    model = LSTMPredictor(input_size=13)
+    model.train()
+    model.predict(torch.randn(2, 60, 13))
+    assert model.training is True
