@@ -21,15 +21,18 @@ def _make_panel(n_tickers: int = 25, seq_len: int = 60) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-@pytest.mark.asyncio
-async def test_panel_has_expected_shape():
-    """_build_latest_panel result has one row per (ticker, step)."""
+def test_cross_sectional_zscore_by_step_normalizes_each_step():
+    """Inference path z-scores features across tickers per aligned `step`.
+    Exercise that production call and assert each step is zero-mean."""
     from ml.constants import PRICE_FEATURE_COLS, SEQ_LEN
+    from ml.features.cross_sectional import cross_sectional_zscore
 
     panel = _make_panel(n_tickers=25, seq_len=SEQ_LEN)
-    assert set(panel.columns) >= {"step", "ticker", *PRICE_FEATURE_COLS}
-    assert panel["ticker"].nunique() == 25
-    assert len(panel) == 25 * SEQ_LEN
+    normed = cross_sectional_zscore(panel, PRICE_FEATURE_COLS, by="step")
+    # every step's cross-section is mean-centered for each feature
+    per_step_mean = normed.groupby("step")[PRICE_FEATURE_COLS].mean().abs()
+    assert (per_step_mean < 1e-9).all().all()
+    assert not normed[PRICE_FEATURE_COLS].isna().any().any()
 
 
 @pytest.mark.asyncio
