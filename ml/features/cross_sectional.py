@@ -9,6 +9,7 @@ def forward_returns(close: pd.Series, horizons: list[int]) -> pd.DataFrame:
     """Forward return per horizon: fwd_ret_h[t] = close[t+h]/close[t] - 1.
 
     Tail rows where close[t+h] is unavailable are NaN.
+    Caller must ensure close > 0; a zero close yields inf.
     """
     out = pd.DataFrame(index=close.index)
     close = close.astype(float)
@@ -27,8 +28,12 @@ def cross_sectional_zscore(
     out = df.copy()
     grp = df.groupby(by)[cols]
     mean = grp.transform("mean")
-    std = grp.transform("std").replace(0.0, np.nan)
+    # ddof=0 (population std): we normalize over the full observed cross-section,
+    # not estimating a population from a sample.
+    std = grp.transform(lambda x: x.std(ddof=0)).replace(0.0, np.nan)
     z = (df[cols] - mean) / std
+    # NaN covers two cases: single-member group (std=NaN) and zero-variance group
+    # (std=0.0 -> replaced with NaN above). Both are clamped to 0.0 here.
     out[cols] = z.replace([np.inf, -np.inf], np.nan).fillna(0.0)
     return out
 
@@ -45,7 +50,9 @@ def build_windows(
     Args:
         panel: long DataFrame, already cross-sectionally normalized, with a
             `time` and `ticker` column plus feature/label/raw columns.
-        feature_cols: model inputs.
+        feature_cols: model inputs. Caller must guarantee `feature_cols` contain
+            no NaN — only label NaN is filtered here; NaN features would silently
+            corrupt training.
         label_cols: training targets (cross-sectional z of forward returns).
         raw_cols: raw forward returns, carried into meta for IC/backtest.
         seq_len: window length.

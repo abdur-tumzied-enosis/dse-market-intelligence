@@ -14,6 +14,9 @@ def test_forward_returns_formula():
     assert out["fwd_ret_2"].iloc[0] == 12.0 / 10.0 - 1.0
     # tail rows have no future -> NaN
     assert np.isnan(out["fwd_ret_1"].iloc[-1])
+    assert np.isnan(out["fwd_ret_2"].iloc[-1])
+    assert np.isnan(out["fwd_ret_2"].iloc[-2])
+    assert not np.isnan(out["fwd_ret_2"].iloc[-3])
 
 
 def test_cross_sectional_zscore_zero_mean():
@@ -59,5 +62,16 @@ def test_build_windows_shapes_and_alignment():
     assert set(meta["ticker"]) == {"A", "B"}
     assert "raw_1" in meta.columns
     # first A window covers days 0,1,2 in feature 1
-    a0 = X[0, :, 0]
-    np.testing.assert_array_equal(a0, np.array([0.0, 1.0, 2.0], dtype=np.float32))
+    a_mask = (meta["ticker"] == "A").to_numpy()
+    a_X = X[a_mask]
+    np.testing.assert_array_equal(a_X[0, :, 0], np.array([0.0, 1.0, 2.0], dtype=np.float32))
+
+
+def test_cross_sectional_zscore_single_member_group_is_zero():
+    from ml.features.cross_sectional import cross_sectional_zscore
+    df = pd.DataFrame({"time": ["d1", "d2", "d2"], "f": [99.0, 1.0, 3.0]})
+    out = cross_sectional_zscore(df, ["f"], by="time")
+    # d1 has a single member -> z-score 0.0, never NaN
+    d1 = out[out["time"] == "d1"]["f"]
+    assert (d1 == 0.0).all()
+    assert not out["f"].isna().any()
