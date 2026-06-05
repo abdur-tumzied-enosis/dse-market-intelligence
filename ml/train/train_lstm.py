@@ -87,25 +87,34 @@ def build_sequences(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFr
         if len(grp) < SEQ_LEN + max_h:
             continue
 
-        feats = compute_price_features(grp.set_index("time"))
+        feats_full = compute_price_features(grp.set_index("time"))
+        missing = set(PRICE_FEATURE_COLS) - set(feats_full.columns)
+        if missing:
+            raise KeyError(f"compute_price_features missing columns: {sorted(missing)}")
+        # ffill warmup NaNs, then fillna(0) — early indicator-warmup rows (~26 bars)
+        # become 0.0; harmless because windows start at t>=SEQ_LEN-1 and the
+        # SEQ_LEN+max_horizon length filter excludes most warmup contamination.
         feats = (
-            feats[PRICE_FEATURE_COLS]
+            feats_full[PRICE_FEATURE_COLS]
             .replace([np.inf, -np.inf], np.nan)
             .ffill()
             .fillna(0.0)
         )
-        # EMA smoothing (causal, per ticker) to cut daily noise
+        # EMA smoothing (causal: adjust=False depends only on rows <= t) to cut noise
         feats = feats.ewm(span=EMA_SPAN, adjust=False).mean()
 
         fwd = forward_returns(grp.set_index("time")["close"], HORIZONS)
 
+        # feats and fwd share the same time index (both from this sorted grp);
+        # assign by label so a future row-drop in compute_price_features can't
+        # silently misalign labels with features.
+        assert feats.index.equals(fwd.index), f"feature/label index mismatch for {ticker}"
         panel = feats.copy()
         for h in HORIZONS:
-            panel[f"fwd_ret_{h}"] = fwd[f"fwd_ret_{h}"].to_numpy()
+            panel[f"fwd_ret_{h}"] = fwd[f"fwd_ret_{h}"]
         panel["ticker"] = ticker
-        panel = panel.reset_index().rename(columns={"index": "time"})
-        if "time" not in panel.columns:  # index name was already "time"
-            panel = panel.rename(columns={panel.columns[0]: "time"})
+        panel = panel.reset_index()  # index named "time" -> column "time"
+        assert "time" in panel.columns, f"expected 'time' column, got {list(panel.columns)}"
         panels.append(panel)
 
     if not panels:
