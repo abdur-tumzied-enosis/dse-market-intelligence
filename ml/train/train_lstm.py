@@ -18,7 +18,6 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from sklearn.preprocessing import StandardScaler
 from torch.utils.data import DataLoader, TensorDataset
 
 from db.pool import get_pool
@@ -138,7 +137,7 @@ def build_sequences(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFr
         # restore NaN where the raw forward return was missing (no future)
         long_df.loc[long_df[f"fwd_ret_{h}"].isna(), f"y_{h}"] = np.nan
 
-    X, y, meta = build_windows(
+    X, y, meta = build_windows(  # noqa: N806
         long_df,
         feature_cols=PRICE_FEATURE_COLS,
         label_cols=LABEL_COLS,
@@ -151,40 +150,59 @@ def build_sequences(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFr
     return X, y, meta
 
 
+def _epoch_metrics(model, X_val, meta_val) -> dict[str, float]:  # noqa: N803
+    """Compute per-horizon mean rank IC and top-N hit rate over val dates."""
+    model.eval()
+    with torch.no_grad():
+        preds = model(torch.from_numpy(X_val)).numpy()  # (N, n_horizons)
+    out: dict[str, float] = {}
+    df = meta_val.reset_index(drop=True)
+    for hi, h in enumerate(HORIZONS):
+        ics, hits = [], []
+        actual_col = f"fwd_ret_{h}"
+        df_h = df.assign(_pred=preds[:, hi])
+        for _, g in df_h.groupby("time"):
+            a = g[actual_col].to_numpy()
+            p = g["_pred"].to_numpy()
+            ic = rank_ic(p, a)
+            if not np.isnan(ic):
+                ics.append(ic)
+            hits.append(top_n_hit_rate(p, a, n=TOP_N))
+        out[f"ic_{h}"] = float(np.mean(ics)) if ics else float("nan")
+        out[f"hit_{h}"] = float(np.mean(hits)) if hits else float("nan")
+    return out
+
+
 async def main() -> None:
     pool = await get_pool()
-
+    log.info("Loading price rows...")
+    df = await load_price_rows(pool)
     log.info("Building training sequences (may take 1–2 min)...")
-    X, y = await build_sequences(pool)
+    X, y, meta = build_sequences(df)  # noqa: N806
     log.info(f"Sequences: {X.shape}, Labels: {y.shape}")
-    log.info(f"Label distribution (5d/10d/20d up): {y.mean(axis=0)}")
 
-    # Train/val split (80/20 chronological — do NOT shuffle to avoid leakage)
+    # Chronological split by sample time (no shuffle — avoids leakage)
+    order = np.argsort(meta["time"].to_numpy(), kind="stable")
+    X, y, meta = X[order], y[order], meta.iloc[order].reset_index(drop=True)  # noqa: N806
     split = int(len(X) * 0.8)
-    X_train, X_val = X[:split], X[split:]
+    X_train, X_val = X[:split], X[split:]  # noqa: N806
     y_train, y_val = y[:split], y[split:]
-
-    # Fit scaler on train rows only; apply to both (no leakage)
-    n_train, seq_len, n_feat = X_train.shape
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train.reshape(-1, n_feat)).reshape(n_train, seq_len, n_feat).astype(np.float32)
-    n_val = X_val.shape[0]
-    X_val = scaler.transform(X_val.reshape(-1, n_feat)).reshape(n_val, seq_len, n_feat).astype(np.float32)
-    log.info(f"Feature means (train): {scaler.mean_.round(3)}")
-    log.info(f"Feature stds  (train): {scaler.scale_.round(3)}")
+    meta_val = meta.iloc[split:].reset_index(drop=True)
 
     train_ds = TensorDataset(torch.from_numpy(X_train), torch.from_numpy(y_train))
-    val_ds   = TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val))
     train_dl = DataLoader(train_ds, batch_size=64, shuffle=True)
-    val_dl   = DataLoader(val_ds, batch_size=256, shuffle=False)
+    val_ds = TensorDataset(torch.from_numpy(X_val), torch.from_numpy(y_val))
+    val_dl = DataLoader(val_ds, batch_size=256, shuffle=False)
 
     model = LSTMPredictor(input_size=len(PRICE_FEATURE_COLS), dropout=0.4)
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4, weight_decay=1e-4)
-    criterion = nn.BCEWithLogitsLoss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode="min", factor=0.5, patience=3
+    )
+    criterion = nn.HuberLoss()
 
     best_val_loss = float("inf")
-    patience = 5
-    patience_count = 0
+    patience, patience_count = 5, 0
 
     for epoch in range(50):
         model.train()
@@ -204,13 +222,19 @@ async def main() -> None:
                 val_losses.append(criterion(model(xb), yb).item())
 
         train_loss = sum(train_losses) / len(train_losses)
-        val_loss   = sum(val_losses) / len(val_losses)
-        log.info(f"Epoch {epoch+1:02d} | train={train_loss:.4f} val={val_loss:.4f}")
+        val_loss = sum(val_losses) / len(val_losses)
+        scheduler.step(val_loss)
+
+        m = _epoch_metrics(model, X_val, meta_val)
+        ic_str = " ".join(f"IC{h}={m[f'ic_{h}']:+.3f}" for h in HORIZONS)
+        log.info(
+            f"Epoch {epoch+1:02d} | train={train_loss:.4f} val={val_loss:.4f} | {ic_str}"
+        )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             patience_count = 0
-            model.save(MODEL_PATH, scaler=scaler)
+            model.save(MODEL_PATH)
             log.info(f"  → saved (val_loss={val_loss:.4f})")
         else:
             patience_count += 1
@@ -224,22 +248,21 @@ async def main() -> None:
 
 async def dump(out_path: Path) -> None:
     pool = await get_pool()
+    log.info("Loading price rows...")
+    df = await load_price_rows(pool)
     log.info("Building sequences...")
-    X, y = await build_sequences(pool)
-    split = int(len(X) * 0.8)
-    n_train, seq_len, n_feat = X[:split].shape
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X.reshape(-1, n_feat)).reshape(len(X), seq_len, n_feat).astype("float32")
+    X, y, meta = build_sequences(df)  # noqa: N806
     np.savez_compressed(
         out_path,
-        X=X_scaled,
+        X=X,
         y=y,
         feature_names=np.array(PRICE_FEATURE_COLS),
-        scaler_mean=scaler.mean_,
-        scaler_scale=scaler.scale_,
+        horizons=np.array(HORIZONS),
+        meta_time=meta["time"].to_numpy().astype("datetime64[ns]"),
+        meta_ticker=meta["ticker"].to_numpy().astype(str),
     )
-    log.info(f"Saved → {out_path}  (X={X_scaled.shape}, y={y.shape})")
-    log.info("Load with: data = np.load('dataset.npz'); X=data['X']; y=data['y']")
+    log.info(f"Saved → {out_path}  (X={X.shape}, y={y.shape})")
+    log.info("Load with: d = np.load('dataset.npz', allow_pickle=True)")
 
 
 if __name__ == "__main__":
