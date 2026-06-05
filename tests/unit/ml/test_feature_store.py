@@ -22,6 +22,7 @@ def _make_price_records(n: int = 70) -> list[dict]:
     return [
         {
             "time": base + datetime.timedelta(days=i),
+            "open": float(price[i]),
             "close": float(price[i]),
             "high": float(price[i] + 1),
             "low": float(price[i] - 1),
