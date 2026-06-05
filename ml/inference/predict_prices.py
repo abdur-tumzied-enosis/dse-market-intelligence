@@ -1,5 +1,6 @@
 """
-Run LSTM inference on all active tickers and write to ml_predictions.
+Run LSTM inference across all active tickers (cross-sectional) and write
+ranked predictions to ml_predictions.
 
 Run: python -m ml.inference.predict_prices
 """
@@ -7,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -15,65 +16,36 @@ import pandas as pd
 import torch
 
 from db.pool import get_pool
+from ml.constants import HORIZONS, MIN_TICKERS_PER_DATE, PRICE_FEATURE_COLS, SEQ_LEN
+from ml.features.cross_sectional import cross_sectional_zscore
 from ml.features.feature_store import build_price_feature_matrix
 from ml.models.lstm_predictor import LSTMPredictor
 
 MODEL_PATH = Path("models/v1/lstm_v0.pt")
-MODEL_VERSION = "lstm_v0"
-SEQ_LEN = 60
-HORIZONS = [5, 10, 20]
-PRICE_FEATURE_COLS = [
-    "rsi_14", "macd_diff", "bb_pband", "atr_norm", "adx_14",
-    "return_1d", "return_5d", "return_20d", "volume_zscore", "obv",
-]
+MODEL_VERSION = "lstm_v1"
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 
-async def predict_ticker(pool, model: LSTMPredictor, ticker: str) -> None:
-    """Run LSTM for one ticker and write 3 rows (one per horizon) to ml_predictions."""
-    feat_df = await build_price_feature_matrix(pool, ticker, lookback_days=SEQ_LEN + 5)
-
-    if feat_df.empty or len(feat_df) < SEQ_LEN:
-        log.debug(f"skip {ticker}: insufficient price data ({len(feat_df)} rows)")
-        return
-
-    available_cols = [c for c in PRICE_FEATURE_COLS if c in feat_df.columns]
-    window = feat_df[available_cols].tail(SEQ_LEN).values.astype(np.float32)
-
-    # Pad features to match model input_size if columns differ
-    if window.shape[1] < len(PRICE_FEATURE_COLS):
-        pad = np.zeros((SEQ_LEN, len(PRICE_FEATURE_COLS) - window.shape[1]), dtype=np.float32)
-        window = np.hstack([window, pad])
-
-    x = torch.from_numpy(window).unsqueeze(0)  # (1, 60, n_features)
-    proba = model.predict_proba(x).squeeze(0)  # (3,)
-
-    predicted_at = datetime.now(timezone.utc)
-    prediction_date = predicted_at.date()
-    last_close = float(feat_df["close"].iloc[-1]) if "close" in feat_df.columns else None
-
-    for i, horizon in enumerate(HORIZONS):
-        p = float(proba[i])
-        predicted_direction = "up" if p >= 0.5 else "down"
-        confidence = p if predicted_direction == "up" else 1.0 - p
-        target_price = (last_close * (1 + (p - 0.5) * 0.1)) if last_close else None
-
-        await pool.execute(
-            """
-            INSERT INTO ml_predictions
-                (ticker, predicted_at, prediction_date, horizon_days,
-                 predicted_direction, confidence, target_price, model_version)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            ON CONFLICT (ticker, horizon_days, model_version, prediction_date) DO UPDATE
-                SET predicted_direction = EXCLUDED.predicted_direction,
-                    confidence          = EXCLUDED.confidence,
-                    target_price        = EXCLUDED.target_price,
-                    predicted_at        = EXCLUDED.predicted_at
-            """,
-            ticker, predicted_at, prediction_date, horizon, predicted_direction, confidence,
-            target_price, MODEL_VERSION,
-        )
+async def _build_latest_panel(pool, tickers: list[str]) -> pd.DataFrame:
+    """For each ticker, fetch the last SEQ_LEN+buffer days of features, tag with
+    a per-day index so we can cross-sectionally z-score across tickers."""
+    frames = []
+    for tk in tickers:
+        feat_df = await build_price_feature_matrix(pool, tk, lookback_days=SEQ_LEN + 30)
+        avail = [c for c in PRICE_FEATURE_COLS if c in feat_df.columns]
+        if feat_df.empty or len(feat_df) < SEQ_LEN or len(avail) < len(PRICE_FEATURE_COLS):
+            continue
+        g = feat_df.tail(SEQ_LEN).copy()
+        g = g.reset_index().rename(columns={g.index.name or "index": "time"})
+        if "time" not in g.columns:
+            g = g.rename(columns={g.columns[0]: "time"})
+        g["ticker"] = tk
+        g["step"] = range(len(g))  # 0..SEQ_LEN-1, aligns dates across tickers
+        frames.append(g[["step", "ticker", *PRICE_FEATURE_COLS]])
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
 
 async def main() -> None:
@@ -83,25 +55,61 @@ async def main() -> None:
         )
 
     pool = await get_pool()
-    model, _scaler = LSTMPredictor.load(MODEL_PATH)
+    model = LSTMPredictor.load(MODEL_PATH)
     model.eval()
 
-    tickers = await pool.fetch(
+    rows = await pool.fetch(
         "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker"
     )
-    log.info(f"Running LSTM inference on {len(tickers)} tickers...")
+    tickers = [r["ticker"] for r in rows]
+    log.info(f"Building cross-sectional panel for {len(tickers)} tickers...")
 
-    ok, skipped = 0, 0
-    for row in tickers:
-        ticker = row["ticker"]
-        try:
-            await predict_ticker(pool, model, ticker)
-            ok += 1
-        except Exception as exc:
-            log.warning(f"skip {ticker}: {exc}")
-            skipped += 1
+    panel = await _build_latest_panel(pool, tickers)
+    if panel.empty or panel["ticker"].nunique() < MIN_TICKERS_PER_DATE:
+        log.warning("Insufficient tickers for cross-sectional inference; aborting.")
+        return
 
-    log.info(f"Done. ok={ok} skipped={skipped}")
+    # Cross-sectional z-score per aligned step, then window per ticker.
+    panel = cross_sectional_zscore(panel, PRICE_FEATURE_COLS, by="step")
+
+    windows, kept = [], []
+    for tk, g in panel.groupby("ticker", sort=False):
+        g = g.sort_values("step")
+        if len(g) < SEQ_LEN:
+            continue
+        windows.append(g[PRICE_FEATURE_COLS].tail(SEQ_LEN).to_numpy(np.float32))
+        kept.append(tk)
+
+    x = torch.from_numpy(np.stack(windows))           # (n_tickers, SEQ_LEN, n_feat)
+    preds = model.predict(x).numpy()                  # (n_tickers, n_horizons)
+
+    predicted_at = datetime.now(UTC)
+    prediction_date = predicted_at.date()
+
+    for hi, horizon in enumerate(HORIZONS):
+        scores = preds[:, hi]
+        # cross-sectional percentile rank -> confidence in [0,1]
+        pct = pd.Series(scores).rank(pct=True).to_numpy()
+        for ti, ticker in enumerate(kept):
+            direction = "up" if scores[ti] >= 0 else "down"
+            confidence = float(pct[ti])
+            await pool.execute(
+                """
+                INSERT INTO ml_predictions
+                    (ticker, predicted_at, prediction_date, horizon_days,
+                     predicted_direction, confidence, target_price, model_version)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (ticker, horizon_days, model_version, prediction_date) DO UPDATE
+                    SET predicted_direction = EXCLUDED.predicted_direction,
+                        confidence          = EXCLUDED.confidence,
+                        target_price        = EXCLUDED.target_price,
+                        predicted_at        = EXCLUDED.predicted_at
+                """,
+                ticker, predicted_at, prediction_date, horizon,
+                direction, confidence, None, MODEL_VERSION,
+            )
+
+    log.info(f"Done. wrote {len(kept)} tickers × {len(HORIZONS)} horizons.")
 
 
 if __name__ == "__main__":
