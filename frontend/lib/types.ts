@@ -238,6 +238,46 @@ export interface WyckoffResponse {
   ranges: WyckoffRange[]
 }
 
+// ─── AI analysis (api/routers/analyze.py :: _fetch_ticker_analysis) ───────────
+export interface MlPrediction {
+  horizon_days: number
+  predicted_direction: string | null   // e.g. "UP" | "DOWN"
+  confidence: number | null            // 0..1
+  target_price: number | null
+  predicted_at: string
+}
+
+export interface AnalyzeNews {
+  title: string
+  published_at: string
+  sentiment_score: number | null
+  url: string | null
+}
+
+export interface AnalyzeResponse {
+  ticker: string
+  company: {
+    ticker: string
+    name: string
+    sector: string
+    category: string | null
+    market_cap_bdt: number | null
+  }
+  latest_price: {
+    close: number
+    change_pct: number | null
+    high: number | null
+    low: number | null
+    volume: number | null
+    time: string
+  } | null
+  fundamentals: FundamentalsRow[]
+  predictions: MlPrediction[]
+  health_score: HealthScore | null
+  recent_news: AnalyzeNews[]
+  narrative?: string | null            // not yet produced by backend; optional
+}
+
 // ─── Sectors ───────────────────────────────────────────────────────────────
 export interface SectorRow {
   sector: string

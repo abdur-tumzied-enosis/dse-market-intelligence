@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import type {
   MarketIndices, MarketRegime, MarketMovers, MarketSummary, HeatmapItem,
   StockDetail, FundamentalsResponse, PagedResponse, StockListItem,
-  AnnouncementsResponse, SectorRow, SectorDetail,
+  AnnouncementsResponse, SectorRow, SectorDetail, AnalyzeResponse,
 } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000'
@@ -41,6 +41,8 @@ export const serverApi = {
       serverGet<FundamentalsResponse>(`/api/stocks/${ticker.toUpperCase()}/fundamentals`),
     announcements: (ticker: string) =>
       serverGet<AnnouncementsResponse>(`/api/stocks/${ticker.toUpperCase()}/announcements`),
+    analyze: (ticker: string) =>
+      serverGet<AnalyzeResponse>(`/api/analyze/${ticker.toUpperCase()}`),
   },
   sectors: {
     list: () => serverGet<SectorRow[]>('/api/sectors'),
