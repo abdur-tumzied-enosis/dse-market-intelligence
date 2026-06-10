@@ -267,7 +267,7 @@ export default async function StockDetailPage({
       {/* ── Company info (highlighted) ─────────────────────────────────────── */}
       <Reveal delay={200}>
         <Panel title="Company Info" accent="#6b6b80">
-          <div className="grid gap-6 px-4 pb-4 md:grid-cols-2">
+          <div className={`grid gap-6 px-4 pb-4 ${hasOwnership ? 'md:grid-cols-2' : ''}`}>
             {/* Profile */}
             <div className="space-y-1.5">
               {profile.map(({ label, value }) => (
