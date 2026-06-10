@@ -18,7 +18,7 @@ function dirArrow(dir: string | null): string {
 
 function PredictionCard({ p }: { p: MlPrediction }) {
   const color = (p.predicted_direction && DIR_COLOR[p.predicted_direction]) ?? '#6b6b80'
-  const conf = p.confidence != null ? `${Math.round(p.confidence * 100)}%` : '—'
+  const conf = p.confidence != null ? `${Math.round(Math.min(1, Math.max(0, p.confidence)) * 100)}%` : '—'
   const target = p.target_price != null ? `৳${Number(p.target_price).toFixed(2)}` : '—'
   return (
     <div className="rounded-lg border border-[#2a2a3a] bg-[#111118] px-4 py-3">

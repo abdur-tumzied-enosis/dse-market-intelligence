@@ -22,7 +22,7 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
         <span className="text-[#e8e8f0] tabular-nums">{value != null ? n.toFixed(0) : '—'}</span>
       </div>
       <div className="h-1.5 rounded-full bg-[#1a1a24] overflow-hidden">
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+        <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>
     </div>
   )

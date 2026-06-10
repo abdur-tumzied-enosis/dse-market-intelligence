@@ -115,6 +115,8 @@ export default async function StockDetailPage({
     serverApi.stocks.detail(ticker),
     serverApi.stocks.fundamentals(ticker),
     serverApi.stocks.announcements(ticker),
+    // NOTE: analyze returns more than predictions+narrative; only those are used here.
+    // When real ML inference lands, consider a slimmer endpoint or client-side lazy fetch to avoid blocking SSR.
     serverApi.stocks.analyze(ticker),
   ])
 
