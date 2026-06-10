@@ -56,13 +56,11 @@ export default function KeyMetricsStrip({
   score,
   fundamentalScore,
   momentumScore,
-  ratingColor,
 }: {
   groups: MetricGroupData[]
   score: number | null
   fundamentalScore: number | null
   momentumScore: number | null
-  ratingColor: string
 }) {
   return (
     <div className="grid gap-6 px-4 pb-4 md:grid-cols-[220px_1fr]">

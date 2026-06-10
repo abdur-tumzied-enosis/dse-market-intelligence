@@ -14,7 +14,6 @@ describe('KeyMetricsStrip', () => {
         score={68}
         fundamentalScore={70}
         momentumScore={55}
-        ratingColor="#f5c842"
       />,
     )
     expect(screen.getByText('Valuation')).toBeInTheDocument()
@@ -30,21 +29,19 @@ describe('KeyMetricsStrip', () => {
         score={68}
         fundamentalScore={70}
         momentumScore={55}
-        ratingColor="#f5c842"
       />,
     )
     expect(screen.getByText('Fundamental')).toBeInTheDocument()
     expect(screen.getByText('Momentum')).toBeInTheDocument()
   })
 
-  it('shows the gauge dash when score is null', () => {
+  it('renders without crashing when scores are null', () => {
     render(
       <KeyMetricsStrip
         groups={groups}
         score={null}
         fundamentalScore={null}
         momentumScore={null}
-        ratingColor="#6b6b80"
       />,
     )
     expect(screen.getByText('Fundamental')).toBeInTheDocument()
