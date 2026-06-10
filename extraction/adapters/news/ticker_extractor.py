@@ -334,9 +334,9 @@ async def load_company_map(db_pool: object) -> dict[str, str]:
     import asyncpg  # type: ignore[import]
 
     pool: asyncpg.Pool = db_pool  # type: ignore[assignment]
-    rows = await pool.fetch("SELECT ticker, company_name FROM companies WHERE is_active = true")
+    rows = await pool.fetch("SELECT ticker, name FROM companies WHERE is_active = true")
     result: dict[str, str] = {}
     for row in rows:
-        result[row["company_name"].lower()] = row["ticker"]
+        result[row["name"].lower()] = row["ticker"]
         result[row["ticker"].lower()] = row["ticker"]
     return result

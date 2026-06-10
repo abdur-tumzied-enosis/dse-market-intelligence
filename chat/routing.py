@@ -48,5 +48,15 @@ def make_routed_llm(provider: str, model: str, settings, is_complex: bool):
             max_retries=3,
             generation_config={"thinking_config": {"thinking_budget": thinking_budget}},
         )
+    if provider == "vertex":
+        from langchain_google_vertexai import ChatVertexAI
+        thinking_budget = get_thinking_budget(is_complex)
+        return ChatVertexAI(
+            model=model or "gemini-2.5-flash",
+            project=settings.gcp_project,
+            location=settings.gcp_location,
+            max_retries=3,
+            thinking_budget=thinking_budget,
+        )
     from mgmt.agent.llm import make_llm
     return make_llm(provider, model, settings)

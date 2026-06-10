@@ -51,6 +51,7 @@ dependencies = [
     "langchain-openai>=0.2.0",
     "langchain-ollama>=0.2.0",
     "langchain-google-genai>=2.0.0",
+    "langchain-google-vertexai>=2.0.0",
 
     # Observability
     "prometheus-client>=0.20.0",

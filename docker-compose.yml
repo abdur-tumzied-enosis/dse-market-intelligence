@@ -103,6 +103,9 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       BDSHARE_CACHE_TTL: ${BDSHARE_CACHE_TTL:-60}
       AMARSTOCK_REQUEST_DELAY: ${AMARSTOCK_REQUEST_DELAY:-2.0}
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa.json
+      GCP_PROJECT: ${GCP_PROJECT}
+      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -111,6 +114,7 @@ services:
     volumes:
       - ./:/app
       - playwright_browsers:/ms-playwright
+      - ./gcp-sa.json:/secrets/gcp-sa.json:ro
 
   # ---------------------------------------------------------------------------
   # APScheduler — time-based job trigger (runs inside scheduler process)
@@ -129,7 +133,7 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
       SCHEDULER_TIMEZONE: ${SCHEDULER_TIMEZONE:-Asia/Dhaka}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL: ${LOG_LEVEL:-debug}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       LIVE_PRICES_INTERVAL_MINUTES: ${LIVE_PRICES_INTERVAL_MINUTES:-5}
       MARKET_INDICES_INTERVAL_MINUTES: ${MARKET_INDICES_INTERVAL_MINUTES:-5}
@@ -138,6 +142,9 @@ services:
       NEWS_INTERVAL_MINUTES: ${NEWS_INTERVAL_MINUTES:-30}
       MACRO_INTERVAL_HOURS: ${MACRO_INTERVAL_HOURS:-24}
       HEALTH_CHECK_INTERVAL_HOURS: ${HEALTH_CHECK_INTERVAL_HOURS:-6}
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa.json
+      GCP_PROJECT: ${GCP_PROJECT}
+      GCP_LOCATION: ${GCP_LOCATION:-us-central1}
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -145,6 +152,7 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
+      - ./gcp-sa.json:/secrets/gcp-sa.json:ro
 
   # ---------------------------------------------------------------------------
   # Management API (FastAPI — extraction layer admin)
@@ -168,6 +176,8 @@ services:
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
+      # override host path from .env with in-container mount path
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa.json
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -175,6 +185,7 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
+      - ./gcp-sa.json:/secrets/gcp-sa.json:ro
 
   # ---------------------------------------------------------------------------
   # Product API (FastAPI — user-facing stock data + auth)
@@ -193,6 +204,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-dse}:${POSTGRES_PASSWORD}@pgbouncer:6432/${POSTGRES_DB:-dse_intelligence}
       REDIS_URL: redis://redis:6379/0
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/gcp-sa.json
     depends_on:
       pgbouncer:
         condition: service_healthy
@@ -200,6 +212,7 @@ services:
         condition: service_healthy
     volumes:
       - ./:/app
+      - ./gcp-sa.json:/secrets/gcp-sa.json:ro
 
   # ---------------------------------------------------------------------------
   # Prometheus — metrics collection

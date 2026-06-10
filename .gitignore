@@ -94,3 +94,5 @@ playwright-browsers/
 
 data/amarstock_csv/*
 test-data/*
+
+gcp-sa.json

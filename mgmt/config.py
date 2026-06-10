@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     ops_agent_auto_execute_risk: str = "low"
 
     # ── Chat Agent ────────────────────────────────────────────────────────────────
-    chat_agent_provider: str = "google"
+    chat_agent_provider: str = "vertex"
     chat_agent_model: str = "gemini-2.5-flash"
     chat_default_tier: str = "free"
     gemini_context_cache_enabled: bool = False
@@ -48,8 +48,12 @@ class Settings(BaseSettings):
     # Ollama (local)
     ollama_base_url: str = "http://localhost:11434"
 
-    # Google Generative AI (Gemini)
+    # Google Generative AI (Gemini) — AI Studio Developer API, prepay credits
     google_api_key: str = ""
+
+    # Google Vertex AI — GCP project billing; auth via GOOGLE_APPLICATION_CREDENTIALS
+    gcp_project: str = ""
+    gcp_location: str = "us-central1"
 
     # Google Cloud Natural Language API GOOGLE_CLOUD_API_KEY (NER for news ticker extraction)
     google_cloud_api_key: str = ""
