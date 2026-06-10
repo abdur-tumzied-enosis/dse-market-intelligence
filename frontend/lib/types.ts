@@ -256,21 +256,8 @@ export interface AnalyzeNews {
 
 export interface AnalyzeResponse {
   ticker: string
-  company: {
-    ticker: string
-    name: string
-    sector: string
-    category: string | null
-    market_cap_bdt: number | null
-  }
-  latest_price: {
-    close: number
-    change_pct: number | null
-    high: number | null
-    low: number | null
-    volume: number | null
-    time: string
-  } | null
+  company: Omit<CompanyInfo, 'is_active' | 'listing_date' | 'isin'>
+  latest_price: Omit<LatestPrice, 'value_bdt'> | null
   fundamentals: FundamentalsRow[]
   predictions: MlPrediction[]
   health_score: HealthScore | null
