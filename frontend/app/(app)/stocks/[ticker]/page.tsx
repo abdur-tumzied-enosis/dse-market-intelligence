@@ -3,12 +3,12 @@ import Link from 'next/link'
 import { serverApi } from '@/lib/server-api'
 import { getRating, type Rating } from '@/lib/rating'
 import PriceChart from '@/components/stocks/PriceChart'
-import HealthGauge from '@/components/stocks/HealthGauge'
-import RatingBadge from '@/components/stocks/RatingBadge'
 import FundamentalsCharts from '@/components/stocks/FundamentalsCharts'
 import LivePrice from '@/components/stocks/LivePrice'
 import Announcements from '@/components/stocks/Announcements'
 import PaywallOverlay from '@/components/ui/PaywallOverlay'
+import KeyMetricsStrip from '@/components/stocks/KeyMetricsStrip'
+import AiAnalysis from '@/components/stocks/AiAnalysis'
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -102,35 +102,6 @@ function Panel({
   )
 }
 
-function MetricGroup({
-  title,
-  rows,
-}: {
-  title: string
-  rows: { label: string; value: string; accent?: string }[]
-}) {
-  return (
-    <div>
-      <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#56566a] mb-1.5">
-        {title}
-      </p>
-      <div className="space-y-1.5">
-        {rows.map(({ label, value, accent }) => (
-          <div key={label} className="flex justify-between items-baseline gap-2">
-            <span className="text-[11px] text-[#8a8a9e] font-mono shrink-0">{label}</span>
-            <span
-              className="text-[12px] font-mono font-medium tabular-nums text-right"
-              style={{ color: accent ?? '#e8e8f0' }}
-            >
-              {value}
-            </span>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function StockDetailPage({
@@ -140,10 +111,11 @@ export default async function StockDetailPage({
 }) {
   const { ticker } = await params
 
-  const [detailResult, fundsResult, annResult] = await Promise.allSettled([
+  const [detailResult, fundsResult, annResult, analyzeResult] = await Promise.allSettled([
     serverApi.stocks.detail(ticker),
     serverApi.stocks.fundamentals(ticker),
     serverApi.stocks.announcements(ticker),
+    serverApi.stocks.analyze(ticker),
   ])
 
   if (detailResult.status === 'rejected') notFound()
@@ -151,6 +123,7 @@ export default async function StockDetailPage({
   const { company, latest_price, health_score, fundamentals: lf } = detailResult.value
   const fundsData = fundsResult.status === 'fulfilled' ? fundsResult.value : null
   const annData = annResult.status === 'fulfilled' ? annResult.value : null
+  const analyzeData = analyzeResult.status === 'fulfilled' ? analyzeResult.value : null
 
   const scoreNum = health_score?.health_score != null ? Number(health_score.health_score) : null
   const rating = getRating(scoreNum)
@@ -181,6 +154,12 @@ export default async function StockDetailPage({
     { label: 'ISIN', value: company.isin ?? '—' },
     { label: 'Listed', value: fmtDate(company.listing_date) },
     { label: 'Fiscal Yr', value: lf?.fiscal_year != null ? String(lf.fiscal_year) : '—' },
+  ]
+
+  const metricGroups = [
+    { title: 'Valuation', rows: valuation },
+    { title: 'Per Share', rows: perShare },
+    { title: 'Dividends', rows: dividends },
   ]
 
   return (
@@ -259,160 +238,110 @@ export default async function StockDetailPage({
         </header>
       </Reveal>
 
-      {/* ── Main grid: chart + sidebar ───────────────────────────────────────── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
+      {/* ── Chart (full width) ─────────────────────────────────────────────── */}
+      <Reveal delay={80}>
+        <Panel className="h-[560px] flex flex-col" title="Price · Volume" accent="#4d9eff">
+          <div className="flex-1 min-h-0 px-4 pb-4">
+            <PriceChart ticker={company.ticker} />
+          </div>
+        </Panel>
+      </Reveal>
 
-        {/* Chart */}
-        <Reveal delay={80}>
-          <Panel className="h-[560px] flex flex-col" title="Price · Volume" accent="#4d9eff">
-            <div className="flex-1 min-h-0 px-4 pb-4">
-              <PriceChart ticker={company.ticker} />
-            </div>
-          </Panel>
-        </Reveal>
-
-        {/* Sidebar */}
-        <div className="space-y-4">
-
-          {/* Signal — gauge + rating + breakdown unified */}
-          <Reveal delay={140}>
-            <Panel title="Signal" accent={ratingColor}>
-              <div className="px-4 pb-4">
-                <HealthGauge score={scoreNum} />
-                <div className="flex justify-center -mt-1 mb-1">
-                  <RatingBadge score={scoreNum} />
-                </div>
-                {health_score?.scored_at && (
-                  <p className="text-[9px] font-mono text-[#6b6b80] text-center mb-3">
-                    scored {fmtDate(health_score.scored_at)}
-                  </p>
-                )}
-                {health_score && (
-                  <div className="space-y-2.5 pt-3 border-t border-[#2a2a3a]">
-                    {[
-                      { label: 'Fundamental', value: health_score.fundamental_score },
-                      { label: 'Momentum', value: health_score.momentum_score },
-                    ].map(({ label, value }) => {
-                      const n = Number(value ?? 0)
-                      const pct = Math.min(100, Math.max(0, n))
-                      return (
-                        <div key={label}>
-                          <div className="flex justify-between text-[10px] font-mono mb-1">
-                            <span className="text-[#8a8a9e]">{label}</span>
-                            <span className="text-[#e8e8f0] tabular-nums">
-                              {value != null ? n.toFixed(0) : '—'}
-                            </span>
-                          </div>
-                          <div className="h-1.5 rounded-full bg-[#1a1a24] overflow-hidden">
-                            <div
-                              className="h-full rounded-full transition-all duration-700"
-                              style={{
-                                width: `${pct}%`,
-                                backgroundColor: pct >= 70 ? '#00d4a4' : pct >= 40 ? '#f5c842' : '#ff4d6a',
-                              }}
-                            />
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            </Panel>
-          </Reveal>
-
-          {/* Key metrics — grouped */}
-          <Reveal delay={200}>
-            <Panel title="Key Metrics" accent="#00d4a4">
-              <div className="px-4 pb-4 space-y-3.5">
-                <MetricGroup title="Valuation" rows={valuation} />
-                <div className="border-t border-[#1f1f2b]" />
-                <MetricGroup title="Per Share" rows={perShare} />
-                <div className="border-t border-[#1f1f2b]" />
-                <MetricGroup title="Dividends" rows={dividends} />
-              </div>
-            </Panel>
-          </Reveal>
-
-          {/* Ownership split */}
-          {hasOwnership && (
-            <Reveal delay={250}>
-              <Panel title="Ownership" accent="#a78bfa">
-                <div className="px-4 pb-4">
-                  <div className="flex h-2.5 rounded-full overflow-hidden bg-[#1a1a24]">
-                    {sponsor != null && (
-                      <div
-                        className="h-full"
-                        style={{ width: `${(sponsor / ownTotal) * 100}%`, background: '#a78bfa' }}
-                      />
-                    )}
-                    {publicPct != null && (
-                      <div
-                        className="h-full"
-                        style={{ width: `${(publicPct / ownTotal) * 100}%`, background: '#4d9eff' }}
-                      />
-                    )}
-                  </div>
-                  <div className="flex justify-between mt-2 text-[10px] font-mono">
-                    <span className="text-[#a78bfa]">
-                      Sponsor <span className="tabular-nums">{fmtPct(sponsor)}</span>
-                    </span>
-                    <span className="text-[#4d9eff]">
-                      Public <span className="tabular-nums">{fmtPct(publicPct)}</span>
-                    </span>
-                  </div>
-                </div>
-              </Panel>
-            </Reveal>
+      {/* ── Key metrics + signal (highlighted) ─────────────────────────────── */}
+      <Reveal delay={140}>
+        <Panel title="Key Metrics" accent="#00d4a4">
+          <KeyMetricsStrip
+            groups={metricGroups}
+            score={scoreNum}
+            fundamentalScore={health_score?.fundamental_score ?? null}
+            momentumScore={health_score?.momentum_score ?? null}
+          />
+          {health_score?.scored_at && (
+            <p className="text-[9px] font-mono text-[#6b6b80] px-4 pb-3">
+              scored {fmtDate(health_score.scored_at)}
+            </p>
           )}
+        </Panel>
+      </Reveal>
 
-          {/* Company profile */}
-          <Reveal delay={300}>
-            <Panel title="Profile" accent="#6b6b80">
-              <div className="px-4 pb-4 space-y-1.5">
-                {profile.map(({ label, value }) => (
-                  <div key={label} className="flex justify-between items-baseline gap-2">
-                    <span className="text-[11px] text-[#8a8a9e] font-mono shrink-0">{label}</span>
-                    <span className="text-[11px] font-mono text-[#d8d8e4] text-right truncate">
-                      {value}
-                    </span>
-                  </div>
-                ))}
+      {/* ── Company info (highlighted) ─────────────────────────────────────── */}
+      <Reveal delay={200}>
+        <Panel title="Company Info" accent="#6b6b80">
+          <div className="grid gap-6 px-4 pb-4 md:grid-cols-2">
+            {/* Profile */}
+            <div className="space-y-1.5">
+              {profile.map(({ label, value }) => (
+                <div key={label} className="flex justify-between items-baseline gap-2">
+                  <span className="text-[11px] text-[#8a8a9e] font-mono shrink-0">{label}</span>
+                  <span className="text-[11px] font-mono text-[#d8d8e4] text-right truncate">
+                    {value}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {/* Ownership */}
+            {hasOwnership && (
+              <div>
+                <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#56566a] mb-2">
+                  Ownership
+                </p>
+                <div className="flex h-2.5 rounded-full overflow-hidden bg-[#1a1a24]">
+                  {sponsor != null && (
+                    <div className="h-full" style={{ width: `${(sponsor / ownTotal) * 100}%`, background: '#a78bfa' }} />
+                  )}
+                  {publicPct != null && (
+                    <div className="h-full" style={{ width: `${(publicPct / ownTotal) * 100}%`, background: '#4d9eff' }} />
+                  )}
+                </div>
+                <div className="flex justify-between mt-2 text-[10px] font-mono">
+                  <span className="text-[#a78bfa]">
+                    Sponsor <span className="tabular-nums">{fmtPct(sponsor)}</span>
+                  </span>
+                  <span className="text-[#4d9eff]">
+                    Public <span className="tabular-nums">{fmtPct(publicPct)}</span>
+                  </span>
+                </div>
               </div>
-            </Panel>
-          </Reveal>
-        </div>
-      </div>
+            )}
+          </div>
+        </Panel>
+      </Reveal>
 
-      {/* ── Fundamentals + Announcements ─────────────────────────────────────── */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: 'minmax(0,1fr) 320px' }}>
-        {fundsData && fundsData.items.length > 0 ? (
-          <Reveal delay={360}>
-            <Panel title="Historical Fundamentals" accent="#00d4a4">
-              <div className="p-4 pt-1">
-                {fundsData.is_truncated ? (
-                  <PaywallOverlay feature="Unlock 10 years of fundamentals with Pro">
-                    <FundamentalsCharts items={fundsData.items} />
-                  </PaywallOverlay>
-                ) : (
+      {/* ── Historical fundamentals (highlighted, full width) ──────────────── */}
+      {fundsData && fundsData.items.length > 0 && (
+        <Reveal delay={260}>
+          <Panel title="Historical Fundamentals" accent="#00d4a4">
+            <div className="p-4 pt-1">
+              {fundsData.is_truncated ? (
+                <PaywallOverlay feature="Unlock 10 years of fundamentals with Pro">
                   <FundamentalsCharts items={fundsData.items} />
-                )}
-              </div>
-            </Panel>
-          </Reveal>
-        ) : (
-          <div />
-        )}
-
-        {/* Announcements */}
-        <Reveal delay={400}>
-          <Panel title="Announcements" accent="#f5c842" className="h-full">
-            <div className="px-4 pb-3 max-h-[360px] overflow-y-auto">
-              <Announcements items={annData?.items ?? []} />
+                </PaywallOverlay>
+              ) : (
+                <FundamentalsCharts items={fundsData.items} />
+              )}
             </div>
           </Panel>
         </Reveal>
-      </div>
+      )}
+
+      {/* ── AI analysis (closing verdict) ──────────────────────────────────── */}
+      <Reveal delay={320}>
+        <Panel title="AI Analysis" accent="#a78bfa">
+          <AiAnalysis
+            predictions={analyzeData?.predictions ?? []}
+            narrative={analyzeData?.narrative ?? null}
+          />
+        </Panel>
+      </Reveal>
+
+      {/* ── Announcements (full width) ─────────────────────────────────────── */}
+      <Reveal delay={380}>
+        <Panel title="Announcements" accent="#f5c842">
+          <div className="px-4 pb-3 max-h-[360px] overflow-y-auto">
+            <Announcements items={annData?.items ?? []} />
+          </div>
+        </Panel>
+      </Reveal>
 
       {/* Disclaimer */}
       <p className="text-[10px] font-mono text-[#6b6b80] text-center py-2">
