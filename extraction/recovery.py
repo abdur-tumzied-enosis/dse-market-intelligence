@@ -152,7 +152,7 @@ def _build_registry() -> list[CatchUpJob]:
         CatchUpJob("sector_pe", job_sector_pe,
                    15, 45, _is_market_day, 3),
         CatchUpJob("price_gap_backfill", job_price_gap_backfill,
-                   cfg.gap_backfill_hour, cfg.gap_backfill_minute, _is_every_day, 3),
+                   cfg.gap_backfill_hour, cfg.gap_backfill_minute, _is_every_day, 3),  # rank tie with sector_pe intentional — no data dependency
         CatchUpJob("nightly_ml", job_nightly_ml,
                    22, 0, _is_every_day, 4),
         CatchUpJob("weekly_fundamentals", job_weekly_fundamentals,

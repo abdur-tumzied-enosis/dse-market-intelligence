@@ -438,10 +438,14 @@ async def job_price_gap_backfill() -> None:
     (see extraction/gap_backfill.py)."""
     from extraction.gap_backfill import backfill_missing_dates
     from extraction.jobs import job_run
+    # backfill_missing_dates never raises, so `summary` is always bound below.
     logger.info("job_price_gap_backfill: starting")
     async with job_run("price_gap_backfill") as ctx:
         summary = await backfill_missing_dates()
         ctx.update(summary)
+        # pipeline_jobs only persists the records_* keys — map the backfill
+        # count so the ops row doesn't report 0 for a run that inserted bars.
+        ctx["records_inserted"] = summary["rows_inserted"]
     logger.info("job_price_gap_backfill: complete %s", summary)
 
 
