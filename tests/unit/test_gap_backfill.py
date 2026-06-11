@@ -146,15 +146,18 @@ def test_rows_from_frame_empty_frame():
 
 
 class FakePool:
-    """Answers pool.fetch by SQL keyword; records execute/executemany calls."""
+    """Answers pool.fetch/fetchrow by SQL keyword; records execute/executemany calls."""
 
     def __init__(self, present: list[date], skip: list[date], tickers: list[str],
-                 present_after: list[date]):
+                 present_after: list[date], *,
+                 no_data_already_recorded: set[date] | None = None):
         self._present_calls = 0
         self._present = present
         self._present_after = present_after
         self._skip = skip
         self._tickers = tickers
+        # dates for which the existence-check fetchrow should return a truthy row
+        self._no_data_already_recorded: set[date] = no_data_already_recorded or set()
         self.executed: list[tuple] = []        # (sql, args)
         self.executemany_calls: list[tuple] = []
 
@@ -168,6 +171,14 @@ class FakePool:
         if "companies" in sql:                 # active tickers
             return [{"ticker": t} for t in self._tickers]
         raise AssertionError(f"unexpected fetch: {sql}")
+
+    async def fetchrow(self, sql: str, *args):
+        """Existence check in _record_no_data_date: returns a truthy object when
+        the date (first positional arg) is in _no_data_already_recorded."""
+        if "market_gaps" in sql and args and isinstance(args[0], date):
+            if args[0] in self._no_data_already_recorded:
+                return {"exists": 1}
+        return None
 
     async def execute(self, sql: str, *args):
         self.executed.append((sql, args))
@@ -218,7 +229,7 @@ def test_backfill_disabled_short_circuits():
     pool = FakePool([], [], [], [])
     summary, _ = _run(pool, _fake_stream({}), enabled=False)
     assert summary == {"missing": 0, "recovered_dates": 0, "no_data_dates": 0,
-                       "rows_inserted": 0, "tickers_failed": 0}
+                       "rows_inserted": 0, "tickers_failed": 0, "ca_refresh_failed": 0}
     assert pool.executed == [] and pool.executemany_calls == []
 
 
@@ -300,3 +311,63 @@ def test_backfill_never_raises_on_db_error():
         gs.return_value.gap_backfill_window_days = 7
         summary = _asyncio.run(backfill_missing_dates())
     assert summary["missing"] == 0
+
+
+def test_backfill_no_data_insert_skipped_when_already_recorded():
+    """_record_no_data_date must skip the INSERT when the existence-check fetchrow
+    returns a row — prevents duplicate market_gaps entries on overlapping boot +
+    cron backfill passes."""
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+    # fetchrow will return a truthy row for this date (already recorded)
+    pool = FakePool(present, [], ["GP"], present,
+                    no_data_already_recorded={gap})
+    stream = _fake_stream({"GP": pd.DataFrame()})   # still empty after fetch
+    summary, alert = _run(pool, stream)
+
+    assert summary["no_data_dates"] == 1
+    # No INSERT into market_gaps should have been executed
+    gap_inserts = [(sql, args) for sql, args in pool.executed if "market_gaps" in sql]
+    assert gap_inserts == [], "INSERT must be skipped when row already recorded"
+    alert.assert_called_once()
+
+
+def test_backfill_ca_refresh_failures_counted():
+    """CA refresh failures must be counted in summary and included in the alert
+    details; the run must still complete and fire_alert must still be called."""
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+
+    class BrokenRefreshPool(FakePool):
+        async def execute(self, sql: str, *args):
+            if "refresh_continuous_aggregate" in sql:
+                raise RuntimeError("CA refresh boom")
+            await super().execute(sql, *args)
+
+    pool = BrokenRefreshPool(present, [], ["GP"], WINDOW)
+    stream = _fake_stream({"GP": pd.DataFrame([_bar("GP", gap)])})
+    summary, alert = _run(pool, stream)
+
+    # All 4 CA views fail
+    assert summary["ca_refresh_failed"] == 4
+    # Run still completes with a recovered date
+    assert summary["recovered_dates"] == 1
+    # alert was still fired and includes the count
+    alert.assert_called_once()
+    call_kwargs = alert.call_args.kwargs
+    assert call_kwargs["details"]["ca_refresh_failed"] == 4
+
+
+def test_rows_from_frame_single_side_mid_decimal_coercion():
+    """rows_from_frame must coerce the _mid fallback to Decimal even when only
+    one side (high or low) is present and _mid returns the raw float/int."""
+    df = _frame([{
+        "ticker": "GP", "date": datetime(2026, 6, 8, tzinfo=UTC),
+        "low": 308.0,          # float, high absent → _mid returns raw float
+        "source": "amarstock_historical",
+    }])
+    rows = rows_from_frame(df, {date(2026, 6, 8)}, INGESTED)
+    assert len(rows) == 1
+    assert rows[0][5] == Decimal("308.0")
+    assert isinstance(rows[0][5], Decimal)
+    assert rows[0][13] == "no_ohlc"

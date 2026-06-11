@@ -127,6 +127,8 @@ def rows_from_frame(
         close: Decimal | None
         if raw_close is None:
             close = _mid(row.get("high"), row.get("low"))
+            if close is not None:
+                close = Decimal(str(close))
             quality = "no_ohlc"
         else:
             close = Decimal(str(raw_close))
@@ -205,12 +207,36 @@ async def _fetch_ticker_rows(
     return rows_from_frame(result.data, missing, datetime.now(UTC))
 
 
-async def _refresh_aggregates(pool: asyncpg.Pool, lo: date, hi: date) -> None:
+async def _record_no_data_date(pool: asyncpg.Pool, d: date) -> bool:
+    """Insert a market_gaps row for a holiday/no-data date unless one already
+    exists for (session_date, NO_DATA_REASON).  Returns True if inserted.
+
+    recovered=TRUE is deliberate: it means "nothing left to recover", so these
+    holiday rows never surface in the idx_market_gaps_unrecovered partial index
+    that drives the intraday-gap recovery target list.
+    """
+    existing = await pool.fetchrow(
+        "SELECT 1 FROM market_gaps WHERE session_date = $1 AND reason = $2",
+        d, NO_DATA_REASON,
+    )
+    if existing:
+        return False
+    await pool.execute(
+        "INSERT INTO market_gaps (session_date, gap_start, gap_end, reason, recovered) "
+        "VALUES ($1, $2, $3, $4, TRUE)",
+        d, _day_start_utc(d), _day_start_utc(d) + timedelta(days=1), NO_DATA_REASON,
+    )
+    return True
+
+
+async def _refresh_aggregates(pool: asyncpg.Pool, lo: date, hi: date) -> int:
     """Materialize backfilled rows into the CA chain. daily_ohlcv's policy has
     start_offset='3 days', so older inserts never refresh on their own.
-    Per-view failures are logged, not raised — data is safe in stock_prices."""
+    Per-view failures are logged, not raised — data is safe in stock_prices.
+    Returns the number of views that failed to refresh."""
     lo_ts = _day_start_utc(lo)
     hi_ts = _day_start_utc(hi) + timedelta(days=1)
+    failed = 0
     for view in _CA_VIEWS:
         try:
             await pool.execute(
@@ -218,6 +244,8 @@ async def _refresh_aggregates(pool: asyncpg.Pool, lo: date, hi: date) -> None:
             )
         except Exception as exc:
             logger.warning("gap_backfill: CA refresh failed view=%s error=%s", view, exc)
+            failed += 1
+    return failed
 
 
 async def backfill_missing_dates() -> dict[str, int]:
@@ -228,7 +256,7 @@ async def backfill_missing_dates() -> dict[str, int]:
     actually landed (a partial day would dedupe silently — acceptable)."""
     summary: dict[str, int] = {
         "missing": 0, "recovered_dates": 0, "no_data_dates": 0,
-        "rows_inserted": 0, "tickers_failed": 0,
+        "rows_inserted": 0, "tickers_failed": 0, "ca_refresh_failed": 0,
     }
     cfg = get_settings()
     if not cfg.gap_backfill_enabled:
@@ -282,15 +310,12 @@ async def backfill_missing_dates() -> dict[str, int]:
         summary["no_data_dates"] = len(still_empty)
 
         for d in still_empty:
-            await pool.execute(
-                "INSERT INTO market_gaps (session_date, gap_start, gap_end, reason, recovered) "
-                "VALUES ($1, $2, $3, $4, TRUE)",
-                d, _day_start_utc(d), _day_start_utc(d) + timedelta(days=1),
-                NO_DATA_REASON,
-            )
+            await _record_no_data_date(pool, d)
 
         if recovered:
-            await _refresh_aggregates(pool, recovered[0], recovered[-1])
+            summary["ca_refresh_failed"] = await _refresh_aggregates(
+                pool, recovered[0], recovered[-1]
+            )
 
         await fire_alert(
             severity="WARNING",
@@ -303,6 +328,7 @@ async def backfill_missing_dates() -> dict[str, int]:
                 "no_data": [d.isoformat() for d in still_empty],
                 "rows_inserted": summary["rows_inserted"],
                 "tickers_failed": summary["tickers_failed"],
+                "ca_refresh_failed": summary["ca_refresh_failed"],
             },
         )
     except Exception as exc:
