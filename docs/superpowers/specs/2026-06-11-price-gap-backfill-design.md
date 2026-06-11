@@ -83,8 +83,8 @@ backfill_missing_dates()                    extraction/gap_backfill.py
   index) — backfill must never clobber rows written by live/EOD jobs.
 - `time` convention: trading date at 00:00 UTC (matches bdshare/amarstock
   historical adapters and `daily_ohlcv` bucketing).
-- Quality rules: fetched frames pass through the same `historical_ohlcv`
-  required-column check as the bulk loaders (`extraction/quality.py`).
+- Quality: same implicit validation as the bulk loaders — rows without any
+  price are dropped; close-less bars get `quality_flag='no_ohlc'`.
 
 ### Holiday handling
 
