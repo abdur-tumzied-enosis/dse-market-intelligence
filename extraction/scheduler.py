@@ -433,6 +433,18 @@ async def job_eod_snapshot() -> None:
     logger.info("job_eod_snapshot: complete")
 
 
+async def job_price_gap_backfill() -> None:
+    """Scan the last N days for missing daily bars and refill them
+    (see extraction/gap_backfill.py)."""
+    from extraction.gap_backfill import backfill_missing_dates
+    from extraction.jobs import job_run
+    logger.info("job_price_gap_backfill: starting")
+    async with job_run("price_gap_backfill") as ctx:
+        summary = await backfill_missing_dates()
+        ctx.update(summary)
+    logger.info("job_price_gap_backfill: complete %s", summary)
+
+
 async def job_announcements() -> None:
     """Fetch DSE company announcements for all active tickers (daily after market close)."""
     from extraction.bulk_load.announcement_loader import bulk_load_announcements
@@ -865,6 +877,16 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
     )
 
     scheduler.add_job(
+        job_price_gap_backfill,
+        trigger="cron",
+        hour=cfg.gap_backfill_hour,
+        minute=cfg.gap_backfill_minute,
+        id="price_gap_backfill",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
+    scheduler.add_job(
         job_announcements,
         trigger="interval",
         hours=cfg.announcements_interval_hours,
@@ -976,7 +998,7 @@ def _configure_production_mode(scheduler: AsyncIOScheduler, cfg: object) -> None
         misfire_grace_time=3600,
     )
 
-    logger.info("scheduler: all 15 jobs registered (production mode)")
+    logger.info("scheduler: all 16 jobs registered (production mode)")
 
 
 def _configure_test_mode(scheduler: AsyncIOScheduler, cfg: object) -> None:
