@@ -3,10 +3,16 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 
-from extraction.gap_backfill import find_missing_dates, rows_from_frame
+from extraction.gap_backfill import (
+    NO_DATA_REASON,
+    backfill_missing_dates,
+    find_missing_dates,
+    rows_from_frame,
+)
 from mgmt.config import get_settings
 
 
@@ -134,3 +140,163 @@ def test_rows_from_frame_nan_volume_becomes_none():
 
 def test_rows_from_frame_empty_frame():
     assert rows_from_frame(pd.DataFrame(), {date(2026, 6, 8)}, INGESTED) == []
+
+
+# ── Orchestrator tests ────────────────────────────────────────────────────────
+
+
+class FakePool:
+    """Answers pool.fetch by SQL keyword; records execute/executemany calls."""
+
+    def __init__(self, present: list[date], skip: list[date], tickers: list[str],
+                 present_after: list[date]):
+        self._present_calls = 0
+        self._present = present
+        self._present_after = present_after
+        self._skip = skip
+        self._tickers = tickers
+        self.executed: list[tuple] = []        # (sql, args)
+        self.executemany_calls: list[tuple] = []
+
+    async def fetch(self, sql: str, *args):
+        if "DISTINCT" in sql:                  # present dates
+            self._present_calls += 1
+            src = self._present if self._present_calls == 1 else self._present_after
+            return [{"d": d} for d in src]
+        if "market_gaps" in sql:               # skip dates
+            return [{"session_date": d} for d in self._skip]
+        if "companies" in sql:                 # active tickers
+            return [{"ticker": t} for t in self._tickers]
+        raise AssertionError(f"unexpected fetch: {sql}")
+
+    async def execute(self, sql: str, *args):
+        self.executed.append((sql, args))
+
+    async def executemany(self, sql: str, rows):
+        self.executemany_calls.append((sql, list(rows)))
+
+
+def _fake_stream(frames_by_ticker: dict[str, pd.DataFrame], fail: set[str] = frozenset()):
+    async def fetch(ticker: str, **kwargs):
+        if ticker in fail:
+            raise RuntimeError(f"all adapters failed for {ticker}")
+        result = MagicMock()
+        result.data = frames_by_ticker.get(ticker, pd.DataFrame())
+        return result
+    stream = MagicMock()
+    stream.fetch = AsyncMock(side_effect=fetch)
+    return stream
+
+
+WINDOW = [date(2026, 6, 4), date(2026, 6, 7), date(2026, 6, 8),
+          date(2026, 6, 9), date(2026, 6, 10)]
+
+
+def _bar(ticker: str, d: date) -> dict:
+    return {"ticker": ticker, "date": datetime(d.year, d.month, d.day, tzinfo=UTC),
+            "close": Decimal("100"), "source": "bdshare_historical"}
+
+
+def _run(pool, stream, **settings_overrides):
+    """Run backfill_missing_dates with all collaborators patched."""
+    import asyncio as _asyncio
+    cfg = MagicMock()
+    cfg.gap_backfill_enabled = settings_overrides.get("enabled", True)
+    cfg.gap_backfill_window_days = settings_overrides.get("window_days", 7)
+
+    with patch("extraction.gap_backfill._get_pool", AsyncMock(return_value=pool)), \
+         patch("extraction.gap_backfill.get_settings", return_value=cfg), \
+         patch("extraction.gap_backfill.fire_alert", AsyncMock()) as alert, \
+         patch("extraction.gap_backfill._now_bd_date", return_value=date(2026, 6, 11)), \
+         patch.dict("extraction.registry.STREAMS", {"historical_ohlcv": stream}), \
+         patch("extraction.gap_backfill._FETCH_DELAY_SECONDS", 0):
+        summary = _asyncio.run(backfill_missing_dates())
+    return summary, alert
+
+
+def test_backfill_disabled_short_circuits():
+    pool = FakePool([], [], [], [])
+    summary, _ = _run(pool, _fake_stream({}), enabled=False)
+    assert summary == {"missing": 0, "recovered_dates": 0, "no_data_dates": 0,
+                       "rows_inserted": 0, "tickers_failed": 0}
+    assert pool.executed == [] and pool.executemany_calls == []
+
+
+def test_backfill_no_missing_dates_no_fetch():
+    pool = FakePool(WINDOW, [], ["GP"], WINDOW)
+    stream = _fake_stream({})
+    summary, alert = _run(pool, stream)
+    assert summary["missing"] == 0
+    stream.fetch.assert_not_called()
+    alert.assert_not_called()
+
+
+def test_backfill_recovers_missing_date():
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+    pool = FakePool(present, [], ["GP", "BRACBANK"], WINDOW)
+    stream = _fake_stream({"GP": pd.DataFrame([_bar("GP", gap)]),
+                           "BRACBANK": pd.DataFrame([_bar("BRACBANK", gap)])})
+    summary, alert = _run(pool, stream)
+
+    assert summary["missing"] == 1
+    assert summary["recovered_dates"] == 1
+    assert summary["no_data_dates"] == 0
+    assert summary["rows_inserted"] == 2
+    # one executemany per ticker with rows
+    assert len(pool.executemany_calls) == 2
+    # CA refresh: daily, weekly, monthly, sector
+    refresh_calls = [sql for sql, _ in pool.executed if "refresh_continuous_aggregate" in sql]
+    assert len(refresh_calls) == 4
+    assert any("daily_ohlcv" in sql for sql in refresh_calls)
+    alert.assert_called_once()
+
+
+def test_backfill_holiday_recorded_not_refreshed():
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+    # fetch returns nothing for the gap date; present-after unchanged
+    pool = FakePool(present, [], ["GP"], present)
+    stream = _fake_stream({"GP": pd.DataFrame()})
+    summary, alert = _run(pool, stream)
+
+    assert summary["no_data_dates"] == 1
+    assert summary["recovered_dates"] == 0
+    gap_inserts = [(sql, args) for sql, args in pool.executed if "market_gaps" in sql]
+    assert len(gap_inserts) == 1
+    assert gap_inserts[0][1][0] == gap                 # session_date
+    assert NO_DATA_REASON in gap_inserts[0][1]
+    refresh_calls = [sql for sql, _ in pool.executed if "refresh_continuous_aggregate" in sql]
+    assert refresh_calls == []
+    alert.assert_called_once()
+
+
+def test_backfill_skip_dates_excluded():
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+    pool = FakePool(present, [gap], ["GP"], present)   # gap already recorded
+    stream = _fake_stream({})
+    summary, _ = _run(pool, stream)
+    assert summary["missing"] == 0
+    stream.fetch.assert_not_called()
+
+
+def test_backfill_ticker_failure_counted_continues():
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+    pool = FakePool(present, [], ["FAILCO", "GP"], WINDOW)
+    stream = _fake_stream({"GP": pd.DataFrame([_bar("GP", gap)])}, fail={"FAILCO"})
+    summary, _ = _run(pool, stream)
+    assert summary["tickers_failed"] == 1
+    assert summary["rows_inserted"] == 1
+    assert summary["recovered_dates"] == 1
+
+
+def test_backfill_never_raises_on_db_error():
+    import asyncio as _asyncio
+    with patch("extraction.gap_backfill._get_pool", AsyncMock(side_effect=RuntimeError("db down"))), \
+         patch("extraction.gap_backfill.get_settings") as gs:
+        gs.return_value.gap_backfill_enabled = True
+        gs.return_value.gap_backfill_window_days = 7
+        summary = _asyncio.run(backfill_missing_dates())
+    assert summary["missing"] == 0
