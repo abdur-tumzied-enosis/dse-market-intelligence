@@ -116,6 +116,14 @@ class Settings(BaseSettings):
     # market_gaps row is recorded. One missed */1 poll of slack.
     intraday_gap_threshold_minutes: int = 3
 
+    # ── Daily-bar gap backfill ────────────────────────────────────────────
+    # job_price_gap_backfill scans the last N days for Sun–Thu dates with zero
+    # stock_prices rows and refills them from the historical_ohlcv chain.
+    gap_backfill_enabled: bool = True
+    gap_backfill_window_days: int = 30
+    gap_backfill_hour: int = 18      # 18:00 Asia/Dhaka — after EOD + CA refresh chain
+    gap_backfill_minute: int = 0
+
     # ── Pipeline test mode ────────────────────────────────────────────────
     # Set PIPELINE_TEST_MODE=true to compress all intervals to minutes.
     # Lets you verify the full pipeline runs without silent failures in ~1h.
