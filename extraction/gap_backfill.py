@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import TYPE_CHECKING
+from decimal import Decimal
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import asyncpg
@@ -36,7 +37,7 @@ _FETCH_CONCURRENCY = 3
 _FETCH_DELAY_SECONDS = 1.5
 
 
-async def _get_pool() -> "asyncpg.Pool":
+async def _get_pool() -> asyncpg.Pool:
     """Indirection so tests can patch the DB pool without a live database."""
     from db.pool import get_pool
     return await get_pool()
@@ -73,22 +74,23 @@ _INSERT_SQL = """
 """
 
 
-def _opt_int(val: object) -> int | None:
-    if val is None or (isinstance(val, float) and pd.isna(val)):
+def _opt_int(val: Any) -> int | None:
+    """Return int(val) or None when val is None/NaN."""
+    if val is None:
         return None
     try:
-        if pd.isna(val):  # type: ignore[arg-type]
+        if pd.isna(val):
             return None
     except (TypeError, ValueError):
         pass
-    return int(val)  # type: ignore[arg-type]
+    return int(val)
 
 
 def rows_from_frame(
     df: pd.DataFrame,
     missing: set[date],
     ingested_at: datetime,
-) -> list[tuple]:
+) -> list[tuple[Any, ...]]:
     """_INSERT_SQL tuples for bars whose trading date is in `missing`.
 
     Bars without a close (amarstock_historical carries only high/low) get
@@ -97,7 +99,7 @@ def rows_from_frame(
     """
     from extraction.bulk_load.historical_loader import _mid  # noqa: PLC0415
 
-    rows: list[tuple] = []
+    rows: list[tuple[Any, ...]] = []
     if df.empty:
         return rows
     for _, row in df.iterrows():
@@ -107,17 +109,21 @@ def rows_from_frame(
         ts = pd.Timestamp(ts).to_pydatetime()
         if ts.date() not in missing:
             continue
-        close = row.get("close")
+        raw_close: Any = row.get("close")
         quality = "ok"
         # NaN from mixed-dict DataFrame construction counts as absent
-        if close is None or (isinstance(close, float) and pd.isna(close)):
+        if raw_close is not None:
             try:
-                if pd.isna(close):  # type: ignore[arg-type]
-                    close = None
+                if pd.isna(raw_close):
+                    raw_close = None
             except (TypeError, ValueError):
                 pass
+        close: Decimal | None
+        if raw_close is None:
             close = _mid(row.get("high"), row.get("low"))
             quality = "no_ohlc"
+        else:
+            close = raw_close
         if close is None:
             continue
         rows.append((
