@@ -106,6 +106,7 @@ def test_registry_covers_expected_jobs():
     assert names == {
         "daily_macro", "news_sentiment", "seed_companies", "eod_snapshot",
         "sector_pe", "nightly_ml", "weekly_fundamentals", "monthly", "quarterly",
+        "price_gap_backfill",
     }
 
 
