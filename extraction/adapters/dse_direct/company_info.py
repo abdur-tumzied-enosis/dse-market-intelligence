@@ -163,6 +163,29 @@ def _expand_header_grid(table: Any) -> list[str]:
     return labels
 
 
+def _grid_cell(cells: list[str], grid_idx: int | None, col_offset: int) -> Any:
+    """Value at a header-grid column, mapped to the data row (the 'Year' header
+    often spans 2 grid columns while data rows have one year cell — offset
+    corrects the index). None for '-', '', 'N/A', or out-of-range."""
+    if grid_idx is None:
+        return None
+    idx = grid_idx - col_offset
+    if idx < 0 or idx >= len(cells):
+        return None
+    v = cells[idx].replace(",", "").strip()
+    return to_decimal(v) if v not in ("-", "", "N/A") else None
+
+
+def _year_col_offset(labels: list[str]) -> int:
+    """Grid→data index offset for the Year column.
+
+    The 'Year' header cell often has colspan=2 while each data row contains
+    only one year cell.  The offset corrects grid column indices so they map
+    to the correct data-row cell index."""
+    year_grid_cols = sum(1 for lab in labels if lab == "year")
+    return max(year_grid_cols - 1, 0)
+
+
 def _find_col(labels: list[str], *needle_sets: tuple[str, ...]) -> int | None:
     """Index of the first label containing ALL needles; needle sets tried in
     preference order. None when nothing matches."""
@@ -275,7 +298,15 @@ def _parse_quarterly_eps(soup: BeautifulSoup) -> dict[str, Any]:
 
 def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
     """All year rows from the EPS+NAV table via header-grid column mapping.
-    → [{fiscal_year, eps, eps_basis, eps_diluted, nav, net_profit_mn, tci_mn}, ...]"""
+    → [{fiscal_year, eps, eps_basis, eps_diluted, nav, net_profit_mn, tci_mn}, ...]
+
+    Table absent (legitimately missing on sparse pages) → returns [].
+    Table found but grid unparseable → raises ValueError (layout change).
+
+    CO-fallback rationale: on current DSE layouts the plain-EPS columns are
+    often all '-' and real values live under 'EPS - Continuing Operations'
+    columns; the candidate list handles this via fallback, matching the
+    Task 4 approach."""
     tbl = _find_eps_nav_table(soup)
     if tbl is None:
         return []
@@ -283,11 +314,7 @@ def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
     if not labels:
         raise ValueError("EPS/NAV table header grid unparseable — layout changed?")
 
-    # The 'Year' header cell often has colspan>1 (e.g. colspan=2) while each data
-    # row contains only one year cell.  Compute the offset so that grid column
-    # indices can be translated to data-row cell indices correctly.
-    year_grid_cols = sum(1 for lab in labels if lab == "year")
-    col_offset = max(year_grid_cols - 1, 0)  # data index = grid_col - col_offset
+    col_offset = _year_col_offset(labels)
 
     # (column, basis-tag) preference: restated over original, basic before diluted,
     # non-continuing before continuing-operations columns.
@@ -314,15 +341,6 @@ def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
     profit_col = _find_col(labels, ("profit for the year",))
     tci_col = _find_col(labels, ("tci",))
 
-    def _cell(cells: list[str], grid_idx: int | None) -> Any:
-        if grid_idx is None:
-            return None
-        data_idx = grid_idx - col_offset
-        if data_idx < 0 or data_idx >= len(cells):
-            return None
-        v = cells[data_idx].replace(",", "").strip()
-        return to_decimal(v) if v not in ("-", "", "N/A") else None
-
     rows_out: list[dict[str, Any]] = []
     for row in tbl.find_all("tr"):
         cells = [td.get_text(strip=True) for td in row.find_all("td")]
@@ -330,7 +348,7 @@ def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
             continue
         eps_val, eps_basis = None, None
         for needles, basis in eps_candidates:
-            v = _cell(cells, _find_col(labels, needles))
+            v = _grid_cell(cells, _find_col(labels, needles), col_offset)
             if v is not None:
                 eps_val, eps_basis = v, basis
                 break
@@ -338,10 +356,10 @@ def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
             "fiscal_year":   int(cells[0]),
             "eps":           eps_val,
             "eps_basis":     eps_basis,
-            "eps_diluted":   _cell(cells, dil_col),   # D3: no basic fallback
-            "nav":           _cell(cells, nav_col),
-            "net_profit_mn": _cell(cells, profit_col),  # D1 fix
-            "tci_mn":        _cell(cells, tci_col),
+            "eps_diluted":   _grid_cell(cells, dil_col, col_offset),   # D3: no basic fallback
+            "nav":           _grid_cell(cells, nav_col, col_offset),
+            "net_profit_mn": _grid_cell(cells, profit_col, col_offset),  # D1 fix
+            "tci_mn":        _grid_cell(cells, tci_col, col_offset),
         })
     return rows_out
 
@@ -385,12 +403,9 @@ def _parse_pe_dividend_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
 
     labels = _expand_header_grid(tbl)
     if not labels:
-        return []
+        raise ValueError("P/E Dividend table header grid unparseable — layout changed?")
 
-    # Compute col_offset: Year header cell may have colspan=2 while data rows
-    # have only one year cell — same pattern as the EPS/NAV table.
-    year_grid_cols = sum(1 for lab in labels if lab == "year")
-    col_offset = max(year_grid_cols - 1, 0)  # data index = grid_col - col_offset
+    col_offset = _year_col_offset(labels)
 
     # PE preference: restated > original, main EPS section > continuing operations
     pe_candidates = [
@@ -403,15 +418,6 @@ def _parse_pe_dividend_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
     ]
     div_yield_col = _find_col(labels, ("dividend yield",))
 
-    def _cell(cells: list[str], grid_idx: int | None) -> Any:
-        if grid_idx is None:
-            return None
-        data_idx = grid_idx - col_offset
-        if data_idx < 0 or data_idx >= len(cells):
-            return None
-        v = cells[data_idx].replace(",", "").strip()
-        return to_decimal(v) if v not in ("-", "", "N/A") else None
-
     rows_out = []
     for row in tbl.find_all("tr"):
         cells = [td.get_text(strip=True) for td in row.find_all("td")]
@@ -420,7 +426,7 @@ def _parse_pe_dividend_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
 
         pe_val = None
         for needles in pe_candidates:
-            v = _cell(cells, _find_col(labels, needles))
+            v = _grid_cell(cells, _find_col(labels, needles), col_offset)
             if v is not None:
                 pe_val = v
                 break
@@ -428,7 +434,7 @@ def _parse_pe_dividend_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
         rows_out.append({
             "fiscal_year":    int(cells[0]),
             "pe":             pe_val,
-            "dividend_yield": _cell(cells, div_yield_col),
+            "dividend_yield": _grid_cell(cells, div_yield_col, col_offset),
         })
 
     return rows_out
