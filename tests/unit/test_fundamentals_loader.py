@@ -38,12 +38,16 @@ class FakePool:
         return [sql.lower() for sql, _ in self.calls]
 
     def tables_touched(self) -> set[str]:
-        """Set of table names that appear in INSERT INTO statements."""
+        """Set of table names that appear in INSERT INTO or UPDATE statements."""
         out: set[str] = set()
         for sql in self.sqls():
             if "insert into" in sql:
                 after = sql.split("insert into", 1)[1].strip()
                 table = after.split()[0].strip("(")
+                out.add(table)
+            elif sql.lstrip().startswith("update "):
+                after = sql.lstrip()[len("update "):].strip()
+                table = after.split()[0].strip()
                 out.add(table)
         return out
 

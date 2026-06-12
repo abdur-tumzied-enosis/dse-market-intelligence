@@ -209,42 +209,43 @@ async def _write_bundle(pool: Any, bundle: CompanyBundle, job_id: str) -> dict[s
     meta = bundle.company_meta
     if meta:
         ticker = meta["ticker"]
-        # debut_trading_date: the page prints strings like "20-Jan-2009" — store
-        # as TEXT (companies.debut_trading_date is DATE; pass None when unparseable)
+        # debut_trading_date: the page prints strings like "20-Jan-2009" or
+        # "Jan 20, 2009" — parse directly; fall back to None when unparseable.
         from datetime import date as _date
         ddt = meta.get("debut_trading_date")
         if isinstance(ddt, str):
-            # Try parse "DD-Mon-YYYY" or "YYYY-MM-DD"; fall back to None
-            from extraction.adapters.dse_direct.company_info import _parse_as_on_date
-            ddt = _parse_as_on_date(ddt)  # returns date | None
+            from datetime import datetime as _dt
+            ddt_parsed = None
+            for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%b %d, %Y"):
+                try:
+                    ddt_parsed = _dt.strptime(ddt.strip(), fmt).date()
+                    break
+                except ValueError:
+                    continue
+            ddt = ddt_parsed
         elif not isinstance(ddt, _date):
             ddt = None
 
+        # COALESCE = transiently blank page section must not wipe stored values;
+        # consequence: a removed value can't clear itself (accepted, design §3.5).
         await pool.execute(
             """
-            INSERT INTO companies (ticker,
-                face_value, market_lot, scrip_code, electronic_share,
-                debut_trading_date, operational_status,
-                short_loan_mn, long_loan_mn, loan_as_on,
-                credit_rating_st, credit_rating_lt, delisting_remark,
-                ir_url, psi_url)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-            ON CONFLICT (ticker)
-            DO UPDATE SET
-                face_value         = EXCLUDED.face_value,
-                market_lot         = EXCLUDED.market_lot,
-                scrip_code         = EXCLUDED.scrip_code,
-                electronic_share   = EXCLUDED.electronic_share,
-                debut_trading_date = EXCLUDED.debut_trading_date,
-                operational_status = EXCLUDED.operational_status,
-                short_loan_mn      = EXCLUDED.short_loan_mn,
-                long_loan_mn       = EXCLUDED.long_loan_mn,
-                loan_as_on         = EXCLUDED.loan_as_on,
-                credit_rating_st   = EXCLUDED.credit_rating_st,
-                credit_rating_lt   = EXCLUDED.credit_rating_lt,
-                delisting_remark   = EXCLUDED.delisting_remark,
-                ir_url             = EXCLUDED.ir_url,
-                psi_url            = EXCLUDED.psi_url
+            UPDATE companies SET
+                face_value         = COALESCE($2,  face_value),
+                market_lot         = COALESCE($3,  market_lot),
+                scrip_code         = COALESCE($4,  scrip_code),
+                electronic_share   = COALESCE($5,  electronic_share),
+                debut_trading_date = COALESCE($6,  debut_trading_date),
+                operational_status = COALESCE($7,  operational_status),
+                short_loan_mn      = COALESCE($8,  short_loan_mn),
+                long_loan_mn       = COALESCE($9,  long_loan_mn),
+                loan_as_on         = COALESCE($10, loan_as_on),
+                credit_rating_st   = COALESCE($11, credit_rating_st),
+                credit_rating_lt   = COALESCE($12, credit_rating_lt),
+                delisting_remark   = COALESCE($13, delisting_remark),
+                ir_url             = COALESCE($14, ir_url),
+                psi_url            = COALESCE($15, psi_url)
+            WHERE ticker = $1
             """,
             ticker,
             _num(float(meta["face_value"])) if meta.get("face_value") is not None else None,
@@ -281,7 +282,6 @@ async def _load_one(
                 "quarterly": 0, "shareholding": 0, "actions": 0}
 
     counts = await _write_bundle(pool, bundle, job_id)
-    total = sum(counts.values())
     return {
         "ticker": ticker,
         "status": "ok",
