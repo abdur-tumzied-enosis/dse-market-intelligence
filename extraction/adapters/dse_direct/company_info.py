@@ -568,9 +568,9 @@ _AS_ON_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Matches right issue strings like "1R:1", "1R:2"
-# Format on page: "NR:D YYYY" where N=numerator, D=denominator
-_RIGHT_RE = re.compile(r"(\d+)R:(\d+)\s+(\d{4})", re.IGNORECASE)
+# Matches right issue strings like "1R:1 2010", "1R:2 2003"
+# Format on page: "NR:D YYYY" where N=new shares, D=existing shares held
+_RIGHT_RE = re.compile(r"(\d+)R:(\d+)\s*(\d{4})")
 
 
 def _parse_as_on_date(text: str) -> date | None:
@@ -599,7 +599,7 @@ def _parse_as_on_date(text: str) -> date | None:
 def _parse_shareholding_all(soup: BeautifulSoup) -> list[dict[str, Any]]:
     """Return ALL shareholding period rows (oldest → newest) as a list of dicts.
 
-    Each dict has keys: shareholding_date (date | None), sponsor_pct,
+    Each dict has keys: as_on_date (date | None), sponsor_pct,
     govt_pct, institution_pct, foreign_pct, public_pct.
 
     Unlike _parse_shareholding (which keeps only the last row), this returns
@@ -625,14 +625,14 @@ def _parse_shareholding_all(soup: BeautifulSoup) -> list[dict[str, Any]]:
     for row in share_rows:
         tds = row.find_all("td")
         rec: dict[str, Any] = {
-            "shareholding_date": None,
+            "as_on_date": None,
             "sponsor_pct": None, "govt_pct": None,
             "institution_pct": None, "foreign_pct": None, "public_pct": None,
         }
         # Date from first td
         date_m = re.search(r"as on\s+(.+?)(?:\s*\(|$|\])", tds[0].get_text(strip=True), re.IGNORECASE)
         if date_m:
-            rec["shareholding_date"] = _parse_as_on_date(date_m.group(1).strip())
+            rec["as_on_date"] = _parse_as_on_date(date_m.group(1).strip())
 
         # Values from tds[2:] — each td text like "Sponsor/Director:30.37"
         for td in tds[2:]:
@@ -647,47 +647,59 @@ def _parse_shareholding_all(soup: BeautifulSoup) -> list[dict[str, Any]]:
     return out
 
 
-def _parse_right_issues(soup: BeautifulSoup) -> list[dict[str, Any]]:
-    """Parse right-issue history from the 'Right Issue' th/td pair.
+def _right_issue_raw(soup: BeautifulSoup) -> str | None:
+    """Extract the raw 'Right Issue' th/td cell text from soup.
 
-    Input cell text example: '1R:1 2010, 1R:1 2004,1R:2  2003'
-    Each match yields {'year': int, 'ratio': str} where ratio is 'N:D'
-    normalised (numerator:denominator, e.g. '1:1', '1:2').
-    Returns an empty list if the cell is absent or empty.
+    Used by Task 7's _build_bundle so it can call _parse_right_issues(raw).
+    Returns None if the row is absent or empty.
     """
-    raw = ""
     for row in soup.find_all("tr"):
-        ths = row.find_all("th")
-        for th in ths:
-            if th.get_text(strip=True).lower() == "right issue":
-                tds = row.find_all("td")
-                if tds:
-                    raw = tds[0].get_text(strip=True)
-                break
-        if raw:
-            break
+        cells = [c.get_text(strip=True) for c in row.find_all(["th", "td"])]
+        for i, cell in enumerate(cells):
+            if cell.lower().rstrip("*").strip() == "right issue" and i + 1 < len(cells):
+                return cells[i + 1] or None
+    return None
 
+
+def _parse_right_issues(raw: str | None) -> list[dict[str, Any]]:
+    """Parse right-issue history from the raw th/td cell string.
+
+    Input: '1R:1 2010, 1R:1 2004,1R:2  2003'
+    Returns: [{fiscal_year: int, ratio_text: str, ratio: float}, ...]
+    ratio = new shares per existing share held (1R:2 → 0.5).
+    None or '' → [].
+    """
     out: list[dict[str, Any]] = []
-    for m in _RIGHT_RE.finditer(raw):
-        numerator, denominator, year = m.group(1), m.group(2), int(m.group(3))
-        out.append({"year": year, "ratio": f"{numerator}:{denominator}"})
+    for m in _RIGHT_RE.finditer(raw or ""):
+        new, base, yr = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        out.append({
+            "fiscal_year": yr,
+            "ratio_text":  f"{new}R:{base}",
+            "ratio":       new / base if base else None,
+        })
     return out
 
 
 def _parse_status_table(soup: BeautifulSoup) -> dict[str, Any]:
-    """Parse the 'Present Operational Status / Loan Status' table.
+    """Parse the 'Present Operational Status / Loan Status / Credit Rating' table.
 
     Returns:
-        status        – e.g. 'Active'
-        short_loan_mn – Decimal or None
-        long_loan_mn  – Decimal or None
-        loan_as_on    – date | None  (from 'Present Loan Status as on ...' header row)
+        operational_status – e.g. 'Active'
+        short_loan_mn      – Decimal or None
+        long_loan_mn       – Decimal or None
+        loan_as_on         – date | None  (from 'Present Loan Status as on ...' header row)
+        credit_rating_st   – short-term credit rating string or None
+        credit_rating_lt   – long-term credit rating string or None
+        delisting_remark   – remark from OTC/Delisting/Relisting row, or None
     """
     result: dict[str, Any] = {
-        "status": None,
+        "operational_status": None,
         "short_loan_mn": None,
         "long_loan_mn": None,
         "loan_as_on": None,
+        "credit_rating_st": None,
+        "credit_rating_lt": None,
+        "delisting_remark": None,
     }
     for tbl in soup.find_all("table"):
         text = tbl.get_text(" ", strip=True).lower()
@@ -695,13 +707,14 @@ def _parse_status_table(soup: BeautifulSoup) -> dict[str, Any]:
             continue
         rows = tbl.find_all("tr")
         for row in rows:
-            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+            cells = [c.get_text(" ", strip=True) for c in row.find_all(["td", "th"])]
             if not cells:
                 continue
             first = cells[0].lower()
             # Status row: ['Present Operational Status', 'Active']
             if "operational status" in first and len(cells) >= 2:
-                result["status"] = cells[-1].strip() or None
+                val = cells[-1].strip()
+                result["operational_status"] = val or None
             # Loan header row: ['Present Loan Status as on December 31, 2025']
             elif "loan status" in first and "as on" in first:
                 result["loan_as_on"] = _parse_as_on_date(cells[0])
@@ -715,6 +728,17 @@ def _parse_status_table(soup: BeautifulSoup) -> dict[str, Any]:
                 val_str = cells[-1].replace(",", "").strip()
                 if val_str not in ("-", "", "N/A"):
                     result["long_loan_mn"] = to_decimal(val_str)
+            # Credit rating rows
+            elif "short term" in first and "rating" in first and len(cells) >= 2:
+                val = cells[-1].strip()
+                result["credit_rating_st"] = val if val not in ("-", "", "N/A") else None
+            elif "long term" in first and "rating" in first and len(cells) >= 2:
+                val = cells[-1].strip()
+                result["credit_rating_lt"] = val if val not in ("-", "", "N/A") else None
+            # OTC/Delisting/Relisting remark row
+            elif "otc" in first and ("delisting" in first or "relisting" in first) and len(cells) >= 2:
+                val = cells[-1].strip()
+                result["delisting_remark"] = val if val not in ("-", "", "N/A") else None
         break  # found the table
     return result
 
@@ -748,7 +772,7 @@ def _parse_links(soup: BeautifulSoup) -> dict[str, str | None]:
 
 
 def _parse_quarterly_eps_full(soup: BeautifulSoup) -> list[dict[str, Any]]:
-    """Parse the full quarterly EPS table, returning one dict per fiscal-year block.
+    """Parse the full quarterly EPS table, returning one dict per quarter.
 
     The table structure (confirmed CITYBANK 2026-06):
       row[0]: ['Particulars', 'Unaudited / Audited']     ← header label
@@ -766,10 +790,11 @@ def _parse_quarterly_eps_full(soup: BeautifulSoup) -> list[dict[str, Any]]:
     Column layout after the row-label cell:
       idx 1=Q1, 2=Q2, 3=Half Yearly, 4=Q3, 5=9 Months, 6=Annual
 
-    Returns [{
-        fy_tag, eps_basic, eps_q2, eps_half, eps_q3, eps_9m, eps_annual,
-        period_end_price
-    }, ...] — one entry per fy_tag found.
+    Returns [{fiscal_year, quarter (1|2|3|4), eps_basic, eps_diluted, period_end_price}, ...]
+    Q1/Q2/Q3 read directly; cumulative Half/9M columns ignored;
+    Q4 only when Annual and 9M both present: eps_basic = Annual − 9M.
+    Fiscal year derived from fy_tag (e.g. "202603" → fiscal_year=2026).
+    Quarters where both eps values are None are skipped.
     """
     _FY_TAG_RE = re.compile(r"^\d{6}$")
 
@@ -777,75 +802,64 @@ def _parse_quarterly_eps_full(soup: BeautifulSoup) -> list[dict[str, Any]]:
         v = cells[idx].strip() if idx < len(cells) else "-"
         return to_decimal(v) if v not in ("-", "", "N/A") else None
 
-    out: list[dict[str, Any]] = []
     for tbl in soup.find_all("table"):
         headers_text = " ".join(c.get_text(strip=True) for c in tbl.find_all(["th", "td"])[:10]).lower()
         if "q1" not in headers_text or "half yearly" not in headers_text:
             continue
 
-        all_rows = tbl.find_all("tr")
-        # Walk through rows collecting fy_tag and EPS/price rows
-        fy_tag: str | None = None
-        eps_basic_row: list[str] | None = None
-        price_row: list[str] | None = None
-        in_eps_section = False
+        fy_m = re.search(r"(\d{4})(\d{2})", tbl.get_text(" ", strip=True))
+        fiscal_year = int(fy_m.group(1)) if fy_m else None
+        if fiscal_year is None:
+            return []
 
-        for row in all_rows:
+        def _v(cells: list[str], idx: int) -> Any:
+            v = cells[idx].strip() if idx < len(cells) else "-"
+            return to_decimal(v) if v not in ("-", "", "N/A") else None
+
+        basic: dict[str, Any] = {}
+        diluted: dict[str, Any] = {}
+        price: dict[str, Any] = {}
+        in_eps = False
+        for row in tbl.find_all("tr"):
             cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
             if not cells:
                 continue
-            first = cells[0].strip()
+            label = cells[0].lower()
+            if "earnings per share" in label and "continuing" not in label:
+                in_eps = True
+                continue
+            if "continuing" in label or "market price" in label:
+                in_eps = "market price" not in label and in_eps
+                if "market price" in label:
+                    price = {"q1": _v(cells, 1), "q2": _v(cells, 2),
+                             "q3": _v(cells, 4), "nine_m": _v(cells, 5), "annual": _v(cells, 6)}
+                continue
+            if in_eps and label == "basic" and not basic:
+                basic = {"q1": _v(cells, 1), "q2": _v(cells, 2), "q3": _v(cells, 4),
+                         "nine_m": _v(cells, 5), "annual": _v(cells, 6)}
+            elif in_eps and label.startswith("diluted") and not diluted:
+                diluted = {"q1": _v(cells, 1), "q2": _v(cells, 2), "q3": _v(cells, 4),
+                           "nine_m": _v(cells, 5), "annual": _v(cells, 6)}
 
-            # fy tag row: first cell matches 6-digit pattern
-            if _FY_TAG_RE.match(first):
-                # Start a fresh block if we encounter another fy_tag
-                if fy_tag is not None and eps_basic_row is not None:
-                    out.append(_build_quarterly_row(fy_tag, eps_basic_row, price_row))
-                fy_tag = first
-                eps_basic_row = None
-                price_row = None
-                in_eps_section = False
-
-            elif "earnings per share" in first.lower() and "continuing" not in first.lower():
-                in_eps_section = True
-
-            elif in_eps_section and first.lower() == "basic" and eps_basic_row is None:
-                eps_basic_row = cells
-
-            elif "market price per share" in first.lower():
-                price_row = cells
-
-        # Flush last block
-        if fy_tag is not None and eps_basic_row is not None:
-            out.append(_build_quarterly_row(fy_tag, eps_basic_row, price_row))
-
-        break  # only one quarterly table expected
-    return out
-
-
-def _build_quarterly_row(
-    fy_tag: str,
-    eps_row: list[str],
-    price_row: list[str] | None,
-) -> dict[str, Any]:
-    """Build a quarterly result dict from parsed row cells.
-
-    eps_row[0] == 'Basic'; columns 1-6 are Q1, Q2, Half, Q3, 9M, Annual.
-    """
-    def _v(cells: list[str], idx: int) -> Any:
-        v = cells[idx].strip() if idx < len(cells) else "-"
-        return to_decimal(v) if v not in ("-", "", "N/A") else None
-
-    return {
-        "fy_tag":           fy_tag,
-        "eps_basic":        _v(eps_row, 1),
-        "eps_q2":           _v(eps_row, 2),
-        "eps_half":         _v(eps_row, 3),
-        "eps_q3":           _v(eps_row, 4),
-        "eps_9m":           _v(eps_row, 5),
-        "eps_annual":       _v(eps_row, 6),
-        "period_end_price": _v(price_row, 1) if price_row else None,
-    }
+        rows_out = []
+        for q, key in ((1, "q1"), (2, "q2"), (3, "q3")):
+            eb, ed = basic.get(key), diluted.get(key)
+            if eb is None and ed is None:
+                continue
+            rows_out.append({
+                "fiscal_year": fiscal_year, "quarter": q,
+                "eps_basic": eb, "eps_diluted": ed,
+                "period_end_price": price.get(key),
+            })
+        ann, nine = basic.get("annual"), basic.get("nine_m")
+        if ann is not None and nine is not None:
+            rows_out.append({
+                "fiscal_year": fiscal_year, "quarter": 4,
+                "eps_basic": float(ann) - float(nine), "eps_diluted": None,
+                "period_end_price": price.get("annual"),
+            })
+        return rows_out
+    return []
 
 
 def _parse_full_name(soup: BeautifulSoup, ticker: str) -> str | None:
