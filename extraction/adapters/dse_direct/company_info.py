@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 import httpx
@@ -549,6 +549,303 @@ def _parse_shareholding(soup: BeautifulSoup) -> dict[str, Any]:
                 result[_label_map[key]] = to_decimal(val)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Task 6 helpers — date parsing, shareholding history, right issues,
+# status table, links, quarterly EPS (full grid)
+# ---------------------------------------------------------------------------
+
+_MONTHS = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+    "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+
+# Matches "Dec 31, 2025" or "December 31, 2025" or "31 Dec 2025" etc.
+_AS_ON_RE = re.compile(
+    r"(?:(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4}))"   # dd Mon yyyy
+    r"|(?:([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4}))",  # Mon dd yyyy
+    re.IGNORECASE,
+)
+
+# Matches right issue strings like "1R:1", "1R:2"
+# Format on page: "NR:D YYYY" where N=numerator, D=denominator
+_RIGHT_RE = re.compile(r"(\d+)R:(\d+)\s+(\d{4})", re.IGNORECASE)
+
+
+def _parse_as_on_date(text: str) -> date | None:
+    """Parse a date string into a date object.
+
+    Accepts formats like "Dec 31, 2025", "December 31, 2025", "31 Dec 2025".
+    Returns None for unparseable input.
+    """
+    m = _AS_ON_RE.search(text)
+    if not m:
+        return None
+    # Group 1-3: dd Mon yyyy  /  Group 4-6: Mon dd yyyy
+    if m.group(1):
+        day, mon_str, yr = int(m.group(1)), m.group(2).lower()[:3], int(m.group(3))
+    else:
+        mon_str, day, yr = m.group(4).lower()[:3], int(m.group(5)), int(m.group(6))
+    month = _MONTHS.get(mon_str)
+    if not month:
+        return None
+    try:
+        return date(yr, month, day)
+    except ValueError:
+        return None
+
+
+def _parse_shareholding_all(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Return ALL shareholding period rows (oldest → newest) as a list of dicts.
+
+    Each dict has keys: shareholding_date (date | None), sponsor_pct,
+    govt_pct, institution_pct, foreign_pct, public_pct.
+
+    Unlike _parse_shareholding (which keeps only the last row), this returns
+    every row so callers can populate multi-period columns.
+    """
+    _label_map = {
+        "sponsor/director": "sponsor_pct",
+        "govt":             "govt_pct",
+        "government":       "govt_pct",
+        "institute":        "institution_pct",
+        "foreign":          "foreign_pct",
+        "public":           "public_pct",
+    }
+    share_rows = []
+    for td in soup.find_all("td"):
+        txt = td.get_text(strip=True)
+        if "Share Holding" in txt and "as on" in txt.lower():
+            row = td.find_parent("tr")
+            if row:
+                share_rows.append(row)
+
+    out: list[dict[str, Any]] = []
+    for row in share_rows:
+        tds = row.find_all("td")
+        rec: dict[str, Any] = {
+            "shareholding_date": None,
+            "sponsor_pct": None, "govt_pct": None,
+            "institution_pct": None, "foreign_pct": None, "public_pct": None,
+        }
+        # Date from first td
+        date_m = re.search(r"as on\s+(.+?)(?:\s*\(|$|\])", tds[0].get_text(strip=True), re.IGNORECASE)
+        if date_m:
+            rec["shareholding_date"] = _parse_as_on_date(date_m.group(1).strip())
+
+        # Values from tds[2:] — each td text like "Sponsor/Director:30.37"
+        for td in tds[2:]:
+            text = td.get_text(strip=True)
+            if ":" in text:
+                parts = text.split(":", 1)
+                key = parts[0].strip().lower()
+                val = parts[1].strip().split()[0] if parts[1].strip() else ""
+                if key in _label_map and val:
+                    rec[_label_map[key]] = to_decimal(val)
+        out.append(rec)
+    return out
+
+
+def _parse_right_issues(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Parse right-issue history from the 'Right Issue' th/td pair.
+
+    Input cell text example: '1R:1 2010, 1R:1 2004,1R:2  2003'
+    Each match yields {'year': int, 'ratio': str} where ratio is 'N:D'
+    normalised (numerator:denominator, e.g. '1:1', '1:2').
+    Returns an empty list if the cell is absent or empty.
+    """
+    raw = ""
+    for row in soup.find_all("tr"):
+        ths = row.find_all("th")
+        for th in ths:
+            if th.get_text(strip=True).lower() == "right issue":
+                tds = row.find_all("td")
+                if tds:
+                    raw = tds[0].get_text(strip=True)
+                break
+        if raw:
+            break
+
+    out: list[dict[str, Any]] = []
+    for m in _RIGHT_RE.finditer(raw):
+        numerator, denominator, year = m.group(1), m.group(2), int(m.group(3))
+        out.append({"year": year, "ratio": f"{numerator}:{denominator}"})
+    return out
+
+
+def _parse_status_table(soup: BeautifulSoup) -> dict[str, Any]:
+    """Parse the 'Present Operational Status / Loan Status' table.
+
+    Returns:
+        status        – e.g. 'Active'
+        short_loan_mn – Decimal or None
+        long_loan_mn  – Decimal or None
+        loan_as_on    – date | None  (from 'Present Loan Status as on ...' header row)
+    """
+    result: dict[str, Any] = {
+        "status": None,
+        "short_loan_mn": None,
+        "long_loan_mn": None,
+        "loan_as_on": None,
+    }
+    for tbl in soup.find_all("table"):
+        text = tbl.get_text(" ", strip=True).lower()
+        if "operational status" not in text:
+            continue
+        rows = tbl.find_all("tr")
+        for row in rows:
+            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+            if not cells:
+                continue
+            first = cells[0].lower()
+            # Status row: ['Present Operational Status', 'Active']
+            if "operational status" in first and len(cells) >= 2:
+                result["status"] = cells[-1].strip() or None
+            # Loan header row: ['Present Loan Status as on December 31, 2025']
+            elif "loan status" in first and "as on" in first:
+                result["loan_as_on"] = _parse_as_on_date(cells[0])
+            # Short-term loan row: ['', 'Short-term loan (mn)', '0']
+            elif "short-term loan" in first or (len(cells) >= 3 and "short-term loan" in cells[1].lower()):
+                val_str = cells[-1].replace(",", "").strip()
+                if val_str not in ("-", "", "N/A"):
+                    result["short_loan_mn"] = to_decimal(val_str)
+            # Long-term loan row: ['Long-term loan (mn)', '11080']
+            elif "long-term loan" in first:
+                val_str = cells[-1].replace(",", "").strip()
+                if val_str not in ("-", "", "N/A"):
+                    result["long_loan_mn"] = to_decimal(val_str)
+        break  # found the table
+    return result
+
+
+def _parse_links(soup: BeautifulSoup) -> dict[str, str | None]:
+    """Extract 'Details of Financial Statement' (IR) and 'Price Sensitive Information' (PSI) links.
+
+    DSE page has th/td rows:
+      <tr><th>Details of Financial Statement</th><td><a href="...">...</a></td></tr>
+      <tr><td>Price Sensitive Information</td><td><a href="...">...</a></td></tr>
+
+    Returns {'ir_url': ..., 'psi_url': ...}.  Missing entries are None.
+    """
+    result: dict[str, str | None] = {"ir_url": None, "psi_url": None}
+    for row in soup.find_all("tr"):
+        cells = row.find_all(["td", "th"])
+        if len(cells) < 2:
+            continue
+        label = cells[0].get_text(strip=True).lower()
+        # Get href from first <a> in the second cell, fall back to text
+        link_cell = cells[1]
+        a_tag = link_cell.find("a", href=True)
+        url = (a_tag["href"] if a_tag else link_cell.get_text(strip=True)).strip()
+        if not url:
+            continue
+        if "financial statement" in label or "investor" in label:
+            result["ir_url"] = url
+        elif "price sensitive" in label:
+            result["psi_url"] = url
+    return result
+
+
+def _parse_quarterly_eps_full(soup: BeautifulSoup) -> list[dict[str, Any]]:
+    """Parse the full quarterly EPS table, returning one dict per fiscal-year block.
+
+    The table structure (confirmed CITYBANK 2026-06):
+      row[0]: ['Particulars', 'Unaudited / Audited']     ← header label
+      row[1]: ['Q1', 'Q2', 'Half Yearly', 'Q3', '9 Months', 'Annual']  ← column names
+      row[2]: ['Ending on', 'Ending on', '6 Months', 'Ending on', 'Ending on']
+      row[3]: ['202603', '', '', '']                      ← 6-digit fy tag (YYYYMM)
+      row[4]: ['Earnings Per Share (EPS)']                ← section header
+      row[5]: ['Basic', '1.580', '-', '-', '-', '-', '-']
+      row[6]: ['Diluted*', ...]
+      row[7]: ['Earnings Per Share (EPS) - continuing operations']
+      row[8]: ['Basic', ...]
+      row[9]: ['Diluted*', ...]
+      row[10]:['Market price per share at period end', '29.7', ...]
+
+    Column layout after the row-label cell:
+      idx 1=Q1, 2=Q2, 3=Half Yearly, 4=Q3, 5=9 Months, 6=Annual
+
+    Returns [{
+        fy_tag, eps_basic, eps_q2, eps_half, eps_q3, eps_9m, eps_annual,
+        period_end_price
+    }, ...] — one entry per fy_tag found.
+    """
+    _FY_TAG_RE = re.compile(r"^\d{6}$")
+
+    def _val(cells: list[str], idx: int) -> Any:
+        v = cells[idx].strip() if idx < len(cells) else "-"
+        return to_decimal(v) if v not in ("-", "", "N/A") else None
+
+    out: list[dict[str, Any]] = []
+    for tbl in soup.find_all("table"):
+        headers_text = " ".join(c.get_text(strip=True) for c in tbl.find_all(["th", "td"])[:10]).lower()
+        if "q1" not in headers_text or "half yearly" not in headers_text:
+            continue
+
+        all_rows = tbl.find_all("tr")
+        # Walk through rows collecting fy_tag and EPS/price rows
+        fy_tag: str | None = None
+        eps_basic_row: list[str] | None = None
+        price_row: list[str] | None = None
+        in_eps_section = False
+
+        for row in all_rows:
+            cells = [c.get_text(strip=True) for c in row.find_all(["td", "th"])]
+            if not cells:
+                continue
+            first = cells[0].strip()
+
+            # fy tag row: first cell matches 6-digit pattern
+            if _FY_TAG_RE.match(first):
+                # Start a fresh block if we encounter another fy_tag
+                if fy_tag is not None and eps_basic_row is not None:
+                    out.append(_build_quarterly_row(fy_tag, eps_basic_row, price_row))
+                fy_tag = first
+                eps_basic_row = None
+                price_row = None
+                in_eps_section = False
+
+            elif "earnings per share" in first.lower() and "continuing" not in first.lower():
+                in_eps_section = True
+
+            elif in_eps_section and first.lower() == "basic" and eps_basic_row is None:
+                eps_basic_row = cells
+
+            elif "market price per share" in first.lower():
+                price_row = cells
+
+        # Flush last block
+        if fy_tag is not None and eps_basic_row is not None:
+            out.append(_build_quarterly_row(fy_tag, eps_basic_row, price_row))
+
+        break  # only one quarterly table expected
+    return out
+
+
+def _build_quarterly_row(
+    fy_tag: str,
+    eps_row: list[str],
+    price_row: list[str] | None,
+) -> dict[str, Any]:
+    """Build a quarterly result dict from parsed row cells.
+
+    eps_row[0] == 'Basic'; columns 1-6 are Q1, Q2, Half, Q3, 9M, Annual.
+    """
+    def _v(cells: list[str], idx: int) -> Any:
+        v = cells[idx].strip() if idx < len(cells) else "-"
+        return to_decimal(v) if v not in ("-", "", "N/A") else None
+
+    return {
+        "fy_tag":           fy_tag,
+        "eps_basic":        _v(eps_row, 1),
+        "eps_q2":           _v(eps_row, 2),
+        "eps_half":         _v(eps_row, 3),
+        "eps_q3":           _v(eps_row, 4),
+        "eps_9m":           _v(eps_row, 5),
+        "eps_annual":       _v(eps_row, 6),
+        "period_end_price": _v(price_row, 1) if price_row else None,
+    }
 
 
 def _parse_full_name(soup: BeautifulSoup, ticker: str) -> str | None:

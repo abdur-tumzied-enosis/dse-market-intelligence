@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pickle
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -140,3 +141,151 @@ class TestPeDividendAndMerge:
         assert float(merged[2025]["net_profit_mn"]) == pytest.approx(13242.27)
         # dividend_yield from PE table propagated
         assert float(merged[2021]["dividend_yield"]) == pytest.approx(5.04)
+
+
+class TestNewParsers:
+    """Task 6 — shareholding history, right issues, status table, links, quarterly EPS."""
+
+    # ------------------------------------------------------------------
+    # _parse_as_on_date
+    # ------------------------------------------------------------------
+    def test_parse_as_on_date_dec(self):
+        from extraction.adapters.dse_direct.company_info import _parse_as_on_date
+
+        assert _parse_as_on_date("Dec 31, 2025") == date(2025, 12, 31)
+
+    def test_parse_as_on_date_apr(self):
+        from extraction.adapters.dse_direct.company_info import _parse_as_on_date
+
+        assert _parse_as_on_date("Apr 30, 2026") == date(2026, 4, 30)
+
+    def test_parse_as_on_date_none_on_garbage(self):
+        from extraction.adapters.dse_direct.company_info import _parse_as_on_date
+
+        assert _parse_as_on_date("not a date") is None
+
+    # ------------------------------------------------------------------
+    # _parse_shareholding_all
+    # ------------------------------------------------------------------
+    def test_shareholding_all_count(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_shareholding_all
+
+        rows = _parse_shareholding_all(citybank)
+        assert len(rows) == 3
+
+    def test_shareholding_all_first_row_institute(self, citybank):
+        """Dec 31 2025 row: institute=19.33, sponsor=30.37."""
+        from extraction.adapters.dse_direct.company_info import _parse_shareholding_all
+
+        rows = _parse_shareholding_all(citybank)
+        first = rows[0]
+        assert first["shareholding_date"] == date(2025, 12, 31)
+        assert float(first["institution_pct"]) == pytest.approx(19.33)
+        assert float(first["sponsor_pct"]) == pytest.approx(30.37)
+
+    def test_shareholding_all_last_row(self, citybank):
+        """May 31 2026 row: institute=15.00, sponsor=30.37."""
+        from extraction.adapters.dse_direct.company_info import _parse_shareholding_all
+
+        rows = _parse_shareholding_all(citybank)
+        last = rows[-1]
+        assert last["shareholding_date"] == date(2026, 5, 31)
+        assert float(last["institution_pct"]) == pytest.approx(15.00)
+        assert float(last["sponsor_pct"]) == pytest.approx(30.37)
+
+    # ------------------------------------------------------------------
+    # _parse_right_issues
+    # ------------------------------------------------------------------
+    def test_right_issues_count(self, citybank):
+        """CITYBANK has 3 right issues."""
+        from extraction.adapters.dse_direct.company_info import _parse_right_issues
+
+        issues = _parse_right_issues(citybank)
+        assert len(issues) == 3
+
+    def test_right_issues_values(self, citybank):
+        """Issues: 1R:1 2010, 1R:1 2004, 1R:2 2003."""
+        from extraction.adapters.dse_direct.company_info import _parse_right_issues
+
+        issues = _parse_right_issues(citybank)
+        by_year = {r["year"]: r for r in issues}
+        assert by_year[2010]["ratio"] == "1:1"
+        assert by_year[2004]["ratio"] == "1:1"
+        assert by_year[2003]["ratio"] == "1:2"
+
+    # ------------------------------------------------------------------
+    # _parse_status_table
+    # ------------------------------------------------------------------
+    def test_status_table_active(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_status_table
+
+        st = _parse_status_table(citybank)
+        assert st["status"] == "Active"
+
+    def test_status_table_loans(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_status_table
+
+        st = _parse_status_table(citybank)
+        assert float(st["short_loan_mn"]) == pytest.approx(0)
+        assert float(st["long_loan_mn"]) == pytest.approx(11080)
+
+    def test_status_table_as_on(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_status_table
+
+        st = _parse_status_table(citybank)
+        assert st["loan_as_on"] == date(2025, 12, 31)
+
+    # ------------------------------------------------------------------
+    # _parse_links
+    # ------------------------------------------------------------------
+    def test_links_ir(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_links
+
+        links = _parse_links(citybank)
+        assert links["ir_url"] == "https://www.citybankplc.com/investor-relation"
+
+    def test_links_psi(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_links
+
+        links = _parse_links(citybank)
+        assert links["psi_url"] == "https://www.citybankplc.com/price-sensitive-information"
+
+    # ------------------------------------------------------------------
+    # _parse_quarterly_eps_full
+    # ------------------------------------------------------------------
+    def test_quarterly_full_fy_tag(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_quarterly_eps_full
+
+        rows = _parse_quarterly_eps_full(citybank)
+        assert len(rows) >= 1
+        assert rows[0]["fy_tag"] == "202603"
+
+    def test_quarterly_full_q1_eps(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_quarterly_eps_full
+
+        rows = _parse_quarterly_eps_full(citybank)
+        r = rows[0]
+        assert float(r["eps_basic"]) == pytest.approx(1.580)
+
+    def test_quarterly_full_period_end_price(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_quarterly_eps_full
+
+        rows = _parse_quarterly_eps_full(citybank)
+        r = rows[0]
+        assert float(r["period_end_price"]) == pytest.approx(29.7)
+
+    def test_quarterly_full_no_q4(self, citybank):
+        """Annual column is '-' → eps_annual must be None."""
+        from extraction.adapters.dse_direct.company_info import _parse_quarterly_eps_full
+
+        rows = _parse_quarterly_eps_full(citybank)
+        r = rows[0]
+        assert r["eps_annual"] is None
+
+    def test_quarterly_full_no_9months(self, citybank):
+        """9 Months column is '-' → eps_9m must be None."""
+        from extraction.adapters.dse_direct.company_info import _parse_quarterly_eps_full
+
+        rows = _parse_quarterly_eps_full(citybank)
+        r = rows[0]
+        assert r["eps_9m"] is None
