@@ -155,3 +155,27 @@ class TestNewParsers:
         assert float(q1["period_end_price"]) == pytest.approx(29.7)
         # Q4 derived from Annual - 9 Months; both '-' on this page → no Q4 row
         assert all(r["quarter"] != 4 for r in rows)
+
+
+class TestCompanyBundle:
+    def test_bundle_from_fixture_html(self, citybank):
+        import pandas as pd
+        from extraction.adapters.dse_direct.company_info import (
+            DSEDirectCompanyInfoAdapter,
+            _build_bundle,
+        )
+
+        html = pickle.loads((FIXTURES / "dse_company_CITYBANK.pkl").read_bytes())
+        bundle = _build_bundle(html, "CITYBANK", source=DSEDirectCompanyInfoAdapter.name)
+
+        assert isinstance(bundle.yearly, pd.DataFrame) and len(bundle.yearly) >= 20
+        assert "net_profit_mn" in bundle.yearly.columns
+        assert len(bundle.shareholding) == 3
+        assert len(bundle.quarterly) >= 1
+        # actions: 11 cash + 19 bonus + 3 rights
+        assert set(bundle.actions["action_type"]) == {"cash_div", "stock_div", "right_issue"}
+        assert bundle.company_meta["scrip_code"] == "11102"
+        assert float(bundle.company_meta["face_value"]) == pytest.approx(10.0)
+        assert bundle.company_meta["market_lot"] == 1
+        assert bundle.company_meta["ir_url"].endswith("investor-relation")
+        assert (bundle.yearly["ticker"] == "CITYBANK").all()

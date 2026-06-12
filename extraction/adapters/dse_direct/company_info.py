@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -74,6 +75,9 @@ def _parse_th_td(soup: BeautifulSoup) -> dict[str, str]:
         "bonus issue (stock dividend)":      "bonus_raw",
         "last trading price":               "ltp",
         "details of financial statement":   "ir_url",
+        "face/par value":                   "face_value",
+        "market lot":                       "market_lot",
+        "debut trading date":               "debut_trading_date",
     }
     for row in soup.find_all("tr"):
         ths = row.find_all("th")
@@ -96,6 +100,7 @@ def _parse_td_td(soup: BeautifulSoup) -> dict[str, str]:
         "phone":           "phone",
         "email":           "email",
         "web":             "web",
+        "electronic share": "electronic_share",
     }
     for row in soup.find_all("tr"):
         tds = row.find_all("td")
@@ -882,6 +887,95 @@ def _parse_full_name(soup: BeautifulSoup, ticker: str) -> str | None:
     return None
 
 
+def _parse_scrip_code(soup: BeautifulSoup) -> str | None:
+    """Extract the numeric scrip code from the Trading Code section.
+
+    Handles both separate th/td pairs ('Scrip Code' | '11102') and
+    inline cell text ('Scrip Code:11102').
+    """
+    for row in soup.find_all("tr"):
+        cells = [c.get_text(strip=True) for c in row.find_all(["th", "td"])]
+        for i, cell in enumerate(cells):
+            low = cell.lower()
+            # Case 1: separate cells — label in cells[i], value in cells[i+1]
+            if low.rstrip("*").strip() == "scrip code" and i + 1 < len(cells):
+                return cells[i + 1] or None
+            # Case 2: inline "Scrip Code:11102" in a single cell
+            if low.startswith("scrip code:") or "scrip code:" in low:
+                after = cell.split(":", 1)[1].strip()
+                return after or None
+    return None
+
+
+@dataclass
+class CompanyBundle:
+    """All five datasets parsed from one displayCompany page."""
+    yearly: pd.DataFrame
+    quarterly: pd.DataFrame
+    shareholding: pd.DataFrame
+    actions: pd.DataFrame
+    company_meta: dict[str, Any] = field(default_factory=dict)
+
+
+def _build_bundle(html: str, ticker: str, source: str) -> CompanyBundle:
+    """Parse one displayCompany page into all five datasets (FR6: one fetch, all writes)."""
+    soup = BeautifulSoup(html, "lxml")
+    t = normalize_ticker(ticker)
+    now = datetime.now(timezone.utc)
+
+    th_td = _parse_th_td(soup)
+    div_by_year = _parse_dividend_history_th_td(th_td.get("dividend_raw"), th_td.get("bonus_raw"))
+    yearly_rows = _merge_yearly_rows(
+        _parse_eps_nav_all_years(soup), _parse_pe_dividend_all_years(soup), div_by_year)
+    for r in yearly_rows:
+        r.update(ticker=t, fetched_at=now, source=source)
+
+    quarterly = _parse_quarterly_eps_full(soup)
+    for r in quarterly:
+        r.update(ticker=t, fetched_at=now, source=source)
+
+    shareholding = _parse_shareholding_all(soup)
+    for r in shareholding:
+        r.update(ticker=t, fetched_at=now, source=source)
+
+    actions: list[dict[str, Any]] = []
+    for yr, d in div_by_year.items():
+        if d.get("cash") is not None:
+            actions.append({"fiscal_year": yr, "action_type": "cash_div",
+                            "value_pct": d["cash"], "ratio_text": None, "ratio": None})
+        if d.get("bonus") is not None:
+            actions.append({"fiscal_year": yr, "action_type": "stock_div",
+                            "value_pct": d["bonus"], "ratio_text": None, "ratio": None})
+    # Use the _right_issue_raw helper instead of inline soup scan (deviation from plan)
+    right_raw = _right_issue_raw(soup)
+    for r in _parse_right_issues(right_raw):
+        actions.append({**r, "action_type": "right_issue", "value_pct": None})
+    for a in actions:
+        a.update(ticker=t, source=source)
+
+    status = _parse_status_table(soup)
+    links = _parse_links(soup)
+    td_td = _parse_td_td(soup)
+    meta: dict[str, Any] = {
+        "ticker": t,
+        "face_value": to_decimal(th_td.get("face_value", "").replace(",", "")) if th_td.get("face_value") else None,
+        "market_lot": int(th_td["market_lot"]) if th_td.get("market_lot", "").isdigit() else None,
+        "debut_trading_date": th_td.get("debut_trading_date") or None,
+        "scrip_code": _parse_scrip_code(soup),
+        "electronic_share": (td_td.get("electronic_share") == "Y") if "electronic_share" in td_td else None,
+        **status,
+        **links,
+    }
+
+    return CompanyBundle(
+        yearly=pd.DataFrame(yearly_rows),
+        quarterly=pd.DataFrame(quarterly),
+        shareholding=pd.DataFrame(shareholding),
+        actions=pd.DataFrame(actions),
+        company_meta=meta,
+    )
+
+
 def _parse_html(html: str, ticker: str) -> dict[str, Any]:
     soup = BeautifulSoup(html, "lxml")
 
@@ -992,6 +1086,30 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
             raw_sample=parsed,
         )
 
+    async def fetch_company_bundle(self, ticker: str = "", **kwargs: Any) -> CompanyBundle:
+        """One GET → yearly/quarterly/shareholding/actions/company_meta."""
+        if not ticker:
+            raise AdapterError(self.name, "ticker required", retryable=False)
+        url = COMPANY_URL.format(ticker=ticker.upper())
+        try:
+            async with httpx.AsyncClient(
+                timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True,
+                verify=False,  # dsebd.org serves an incomplete cert chain — verification fails everywhere; public-data scrape.
+            ) as c:
+                resp = await c.get(url)
+                resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise AdapterError(self.name, f"HTTP {exc.response.status_code} for {ticker}", retryable=True) from exc
+        except Exception as exc:
+            raise AdapterError(self.name, f"request failed: {exc}", retryable=True) from exc
+        try:
+            bundle = _build_bundle(resp.text, ticker, source=self.name)
+        except Exception as exc:
+            raise AdapterError(self.name, f"parse failed: {exc}", retryable=False) from exc
+        if bundle.yearly.empty:
+            raise AdapterError(self.name, f"no historical year rows found for {ticker}", retryable=False)
+        return bundle
+
     async def fetch_historical(self, ticker: str = "", **kwargs: Any) -> AdapterResult:
         """
         Multi-year fundamentals from displayCompany.php.
@@ -999,68 +1117,17 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
         dividend-only historical years).
         Columns: ticker, fiscal_year, eps, eps_basis, eps_diluted, nav, net_profit_mn,
                  tci_mn, pe, dividend_yield, cash_div_pct, stock_div_pct, source
+
+        Thin wrapper around fetch_company_bundle for back-compatibility.
         """
-        if not ticker:
-            raise AdapterError(self.name, "ticker required", retryable=False)
-
-        url = COMPANY_URL.format(ticker=ticker.upper())
-        try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True) as c:
-                resp = await c.get(url)
-                resp.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            raise AdapterError(self.name, f"HTTP {exc.response.status_code} for {ticker}", retryable=True) from exc
-        except Exception as exc:
-            raise AdapterError(self.name, f"request failed: {exc}", retryable=True) from exc
-
-        try:
-            from bs4 import BeautifulSoup as _BS
-            soup        = _BS(resp.text, "lxml")
-            eps_rows    = _parse_eps_nav_all_years(soup)
-            pe_rows     = _parse_pe_dividend_all_years(soup)
-            th_td       = _parse_th_td(soup)
-            div_by_year = _parse_dividend_history_th_td(
-                th_td.get("dividend_raw"), th_td.get("bonus_raw")
-            )
-            yearly      = _merge_yearly_rows(eps_rows, pe_rows, div_by_year)
-        except Exception as exc:
-            raise AdapterError(self.name, f"parse failed: {exc}", retryable=False) from exc
-
-        if not yearly:
-            raise AdapterError(
-                self.name,
-                f"no historical year rows found for {ticker}",
-                retryable=False,
-            )
-
-        now = datetime.now(timezone.utc)
-        rows = [
-            {
-                "ticker":        normalize_ticker(ticker),
-                "fiscal_year":   y["fiscal_year"],
-                "eps":           y["eps"],
-                "eps_basis":     y["eps_basis"],
-                "eps_diluted":   y["eps_diluted"],
-                "nav":           y["nav"],
-                "net_profit_mn": y["net_profit_mn"],
-                "tci_mn":        y["tci_mn"],
-                "pe":            y["pe"],
-                "dividend_yield": y["dividend_yield"],
-                "cash_div_pct":  y["cash_div_pct"],
-                "stock_div_pct": y["stock_div_pct"],
-                "fetched_at":    now,
-                "source":        self.name,
-            }
-            for y in yearly
-        ]
-        df = pd.DataFrame(rows)
+        bundle = await self.fetch_company_bundle(ticker=ticker, **kwargs)
         return AdapterResult(
-            data=df,
+            data=bundle.yearly,
             source_name=self.name,
-            fetched_at=now,
+            fetched_at=datetime.now(timezone.utc),
             quality="ok",
-            records=len(df),
-            raw_sample=yearly[0] if yearly else {},
+            records=len(bundle.yearly),
+            raw_sample=bundle.yearly.iloc[0].to_dict() if len(bundle.yearly) else {},
         )
 
     async def health_check(self) -> bool:
