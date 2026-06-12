@@ -51,6 +51,48 @@ def _check_no_empty_dataframe(df: pd.DataFrame, stream: str) -> list[QualityFail
     return []
 
 
+def _check_shareholding_sum(df: pd.DataFrame, tolerance: float = 1.0) -> list[QualityFailure]:
+    """Warn when shareholding pct columns are present but don't sum to ~100."""
+    _COLS = ["sponsor_pct", "govt_pct", "institution_pct", "foreign_pct", "public_pct"]
+    present = [c for c in _COLS if c in df.columns]
+    if len(present) < 2:
+        return []
+    failures = []
+    for _, row in df.iterrows():
+        vals = [row[c] for c in present if row[c] is not None and not (isinstance(row[c], float) and pd.isna(row[c]))]
+        if not vals:
+            continue
+        total = sum(float(v) for v in vals)
+        if abs(total - 100.0) > tolerance:
+            failures.append(QualityFailure(
+                rule="shareholding_sum",
+                ticker=row.get("ticker"),
+                detail=f"shareholding pct sum={total:.2f} (expected ~100)",
+                severity="warning",
+            ))
+    return failures
+
+
+def _check_eps_bounds(df: pd.DataFrame, lo: float = -500.0, hi: float = 500.0) -> list[QualityFailure]:
+    """Warn when eps values fall outside the plausible range [lo, hi]."""
+    if "eps" not in df.columns:
+        return []
+    failures = []
+    for _, row in df.iterrows():
+        v = row.get("eps")
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            continue
+        fv = float(v)
+        if fv < lo or fv > hi:
+            failures.append(QualityFailure(
+                rule="eps_out_of_bounds",
+                ticker=row.get("ticker"),
+                detail=f"eps={fv} outside [{lo}, {hi}]",
+                severity="warning",
+            ))
+    return failures
+
+
 def _check_non_negative_prices(df: pd.DataFrame) -> list[QualityFailure]:
     failures = []
     price_cols = [c for c in ("open", "high", "low", "close", "ltp") if c in df.columns]
@@ -103,5 +145,9 @@ def run_quality_checks(
     failures += _check_required_columns(df, required, stream_name)
     failures += _check_non_negative_prices(df)
     failures += _check_price_range(df, threshold_pct=price_spike_threshold)
+    # Column-guarded — only active when shareholding/eps columns are present;
+    # no effect on existing streams that lack these fields.
+    failures += _check_shareholding_sum(df)
+    failures += _check_eps_bounds(df)
 
     return failures

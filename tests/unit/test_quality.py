@@ -63,3 +63,61 @@ class TestRunQualityChecks:
         df = pd.DataFrame({"x": [1]})
         failures = run_quality_checks(df, "unknown_stream")
         assert failures == []
+
+
+class TestShareholdingSumRule:
+    def test_shareholding_sum_rule(self):
+        """Shareholding pct columns that sum to ≠ 100 should trigger a warning."""
+        df = pd.DataFrame({
+            "ticker": ["GP"],
+            "sponsor_pct": [60.0],
+            "govt_pct": [0.0],
+            "institution_pct": [10.0],
+            "foreign_pct": [0.0],
+            "public_pct": [20.0],  # total = 90, not 100
+        })
+        failures = run_quality_checks(df, "fundamentals")
+        assert any(f.rule == "shareholding_sum" for f in failures)
+
+    def test_shareholding_sum_rule_passes_when_near_100(self):
+        """Shareholding pct columns that sum to ~100 should not trigger."""
+        df = pd.DataFrame({
+            "ticker": ["GP"],
+            "eps": [5.0],
+            "pe": [10.0],
+            "nav": [50.0],
+            "fetched_at": [pd.Timestamp.now(tz="UTC")],
+            "sponsor_pct": [60.0],
+            "govt_pct": [0.0],
+            "institution_pct": [10.0],
+            "foreign_pct": [5.0],
+            "public_pct": [25.0],  # total = 100
+        })
+        failures = run_quality_checks(df, "fundamentals")
+        assert not any(f.rule == "shareholding_sum" for f in failures)
+
+
+class TestEpsBoundsRule:
+    def test_eps_bounds_rule(self):
+        """EPS values outside [-500, 500] should trigger a warning."""
+        df = pd.DataFrame({
+            "ticker": ["GP", "BRACBANK"],
+            "eps": [5.0, 9999.0],  # 9999 out of bounds
+            "pe": [10.0, 10.0],
+            "nav": [50.0, 50.0],
+            "fetched_at": [pd.Timestamp.now(tz="UTC")] * 2,
+        })
+        failures = run_quality_checks(df, "fundamentals")
+        assert any(f.rule == "eps_out_of_bounds" for f in failures)
+
+    def test_eps_bounds_rule_passes_for_normal_values(self):
+        """EPS within [-500, 500] should not trigger."""
+        df = pd.DataFrame({
+            "ticker": ["GP"],
+            "eps": [5.0],
+            "pe": [10.0],
+            "nav": [50.0],
+            "fetched_at": [pd.Timestamp.now(tz="UTC")],
+        })
+        failures = run_quality_checks(df, "fundamentals")
+        assert not any(f.rule == "eps_out_of_bounds" for f in failures)
