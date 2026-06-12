@@ -1132,8 +1132,12 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
 
     async def health_check(self) -> bool:
         try:
-            result = await self.fetch(ticker="GP")
-            r = result.data.iloc[0]
-            return r["ticker"] == "GP" and r["eps"] is not None
+            bundle = await self.fetch_company_bundle(ticker="GP")
+            yearly = bundle.yearly
+            return (
+                not yearly.empty
+                and "net_profit_mn" in yearly.columns
+                and yearly["eps"].notna().any()
+            )
         except Exception:
             return False

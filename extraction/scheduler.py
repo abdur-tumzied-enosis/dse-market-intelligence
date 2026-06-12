@@ -596,10 +596,16 @@ async def job_weekly_fundamentals() -> None:
     logger.info("job_weekly_fundamentals: starting")
     async with job_run("weekly_fundamentals") as ctx:
         summary = await bulk_load_fundamentals_historical()
+        # pipeline_jobs only persists the records_* keys — map per-table counts
+        # so the ops row reports full write volume across all four tables.
         ctx["records_inserted"] = summary["total_upserted"]
+        ctx["records_quarterly"] = summary["quarterly"]
+        ctx["records_shareholding"] = summary["shareholding"]
+        ctx["records_actions"] = summary["actions"]
     logger.info(
-        "job_weekly_fundamentals: complete ok=%d failed=%d upserted=%d",
+        "job_weekly_fundamentals: complete ok=%d failed=%d upserted=%d quarterly=%d shareholding=%d actions=%d",
         summary["ok"], summary["failed"], summary["total_upserted"],
+        summary["quarterly"], summary["shareholding"], summary["actions"],
     )
 
 
