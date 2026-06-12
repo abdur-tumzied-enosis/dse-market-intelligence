@@ -67,3 +67,76 @@ class TestEpsNavAllYears:
 
         rows = {r["fiscal_year"]: r for r in _parse_eps_nav_all_years(citybank)}
         assert rows[2025]["eps_diluted"] is None
+
+
+class TestPeDividendAndMerge:
+    """Task 5 — P/E grid parser + D2 merge fix (dividend-only years survive)."""
+
+    def test_pe_grid_year_2021(self, citybank):
+        """PE table: year 2021 → pe=4.82, dividend_yield=5.04."""
+        from extraction.adapters.dse_direct.company_info import _parse_pe_dividend_all_years
+
+        rows = {r["fiscal_year"]: r for r in _parse_pe_dividend_all_years(citybank)}
+        assert 2021 in rows
+        assert float(rows[2021]["pe"]) == pytest.approx(4.82)
+        assert float(rows[2021]["dividend_yield"]) == pytest.approx(5.04)
+
+    def test_pe_grid_all_table_years_present(self, citybank):
+        """All 5 years in CITYBANK P/E table (2021-2025) must be returned."""
+        from extraction.adapters.dse_direct.company_info import _parse_pe_dividend_all_years
+
+        rows = _parse_pe_dividend_all_years(citybank)
+        years = {r["fiscal_year"] for r in rows}
+        assert {2021, 2022, 2023, 2024, 2025} <= years
+
+    def test_d2_dividend_only_years_survive_merge(self, citybank):
+        """D2 fix: dividend-only years (e.g. 2004 bonus=50%) appear in merged output."""
+        from extraction.adapters.dse_direct.company_info import (
+            _merge_yearly_rows,
+            _parse_dividend_history_th_td,
+            _parse_eps_nav_all_years,
+            _parse_pe_dividend_all_years,
+            _parse_th_td,
+        )
+
+        eps_rows = _parse_eps_nav_all_years(citybank)
+        pe_rows = _parse_pe_dividend_all_years(citybank)
+        th_td = _parse_th_td(citybank)
+        div_by_year = _parse_dividend_history_th_td(
+            th_td.get("dividend_raw"), th_td.get("bonus_raw")
+        )
+
+        merged = {r["fiscal_year"]: r for r in _merge_yearly_rows(eps_rows, pe_rows, div_by_year)}
+
+        # D2: bonus-only year 2004 must appear (was dropped before this fix)
+        assert 2004 in merged, "dividend-only year 2004 missing from merged output"
+        assert float(merged[2004]["stock_div_pct"]) == pytest.approx(50.0)
+        assert merged[2004]["cash_div_pct"] is None
+
+        # Cash-only year 2015 also present
+        assert 2015 in merged
+        assert float(merged[2015]["cash_div_pct"]) == pytest.approx(22.0)
+
+    def test_merge_carries_eps_basis_and_profit(self, citybank):
+        """Merged rows carry eps_basis, net_profit_mn, tci_mn from EPS table."""
+        from extraction.adapters.dse_direct.company_info import (
+            _merge_yearly_rows,
+            _parse_dividend_history_th_td,
+            _parse_eps_nav_all_years,
+            _parse_pe_dividend_all_years,
+            _parse_th_td,
+        )
+
+        eps_rows = _parse_eps_nav_all_years(citybank)
+        pe_rows = _parse_pe_dividend_all_years(citybank)
+        th_td = _parse_th_td(citybank)
+        div_by_year = _parse_dividend_history_th_td(
+            th_td.get("dividend_raw"), th_td.get("bonus_raw")
+        )
+
+        merged = {r["fiscal_year"]: r for r in _merge_yearly_rows(eps_rows, pe_rows, div_by_year)}
+
+        assert merged[2025]["eps_basis"] is not None
+        assert float(merged[2025]["net_profit_mn"]) == pytest.approx(13242.27)
+        # dividend_yield from PE table propagated
+        assert float(merged[2021]["dividend_yield"]) == pytest.approx(5.04)

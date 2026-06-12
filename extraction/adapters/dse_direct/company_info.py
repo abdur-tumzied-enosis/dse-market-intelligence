@@ -349,41 +349,89 @@ def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
 _DIV_HIST_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%\s*(\d{4})")
 
 
+def _find_pe_dividend_table(soup: BeautifulSoup) -> Any:
+    """The P/E + Dividend Yield table — identified by header text."""
+    for tbl in soup.find_all("table"):
+        head = " ".join(c.get_text(strip=True) for c in tbl.find_all(["th", "td"])[:20]).lower()
+        if "dividend yield" in head and "year" in head:
+            return tbl
+    return None
+
+
 def _parse_pe_dividend_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
     """
-    All year rows from P/E + Dividend Yield table — hardcoded column indices.
-    Three-row colspan headers break dynamic detection; indices confirmed from existing
-    single-year parser comment:
-      0=Year, 1=P/E basic orig, 2=P/E basic rest, 3=P/E diluted orig, 4=P/E diluted rest,
-      5=P/E cont basic orig, 6=P/E cont basic rest, 7=Dividend in %, 8=Dividend Yield in %
-    Cash/stock dividend history comes from th/td strings — NOT this table.
-    Returns [{fiscal_year, pe}, ...]
+    All year rows from P/E + Dividend Yield table via header-grid column mapping.
+    Returns [{fiscal_year, pe, dividend_yield}, ...]
+
+    The 'Year' header cell has colspan=2 while each data row has a single year
+    cell — identical to the EPS/NAV table pattern.  col_offset corrects the
+    grid→data-index translation (mirrors _parse_eps_nav_all_years).
+
+    PE preference order (restated > original, main EPS > continuing operations):
+      1. earnings per share(eps) > using diluted eps
+      2. earnings per share(eps) > using basic eps > restated
+      3. earnings per share(eps) > using basic eps > original
+      4. eps - continuing operations > using basic eps > original
+      5. eps - continuing operations > using basic eps > restated
+      6. eps - continuing operations > using diluted eps
+
+    Note: on some layouts (e.g. CITYBANK) the main-EPS columns are all '-'
+    and values live exclusively in the continuing-operations columns; the
+    candidate list handles this via fallback, matching the Task 4 approach.
     """
-    for tbl in soup.find_all("table"):
-        headers = " ".join(c.get_text(strip=True) for c in tbl.find_all(["th", "td"])[:20]).lower()
-        if "dividend yield" not in headers or "year" not in headers:
+    tbl = _find_pe_dividend_table(soup)
+    if tbl is None:
+        return []
+
+    labels = _expand_header_grid(tbl)
+    if not labels:
+        return []
+
+    # Compute col_offset: Year header cell may have colspan=2 while data rows
+    # have only one year cell — same pattern as the EPS/NAV table.
+    year_grid_cols = sum(1 for lab in labels if lab == "year")
+    col_offset = max(year_grid_cols - 1, 0)  # data index = grid_col - col_offset
+
+    # PE preference: restated > original, main EPS section > continuing operations
+    pe_candidates = [
+        ("earnings per share(eps)", "using diluted eps"),
+        ("earnings per share(eps)", "using basic eps", "restated"),
+        ("earnings per share(eps)", "using basic eps", "original"),
+        ("eps - continuing operations", "using basic eps", "original"),
+        ("eps - continuing operations", "using basic eps", "restated"),
+        ("eps - continuing operations", "using diluted eps"),
+    ]
+    div_yield_col = _find_col(labels, ("dividend yield",))
+
+    def _cell(cells: list[str], grid_idx: int | None) -> Any:
+        if grid_idx is None:
+            return None
+        data_idx = grid_idx - col_offset
+        if data_idx < 0 or data_idx >= len(cells):
+            return None
+        v = cells[data_idx].replace(",", "").strip()
+        return to_decimal(v) if v not in ("-", "", "N/A") else None
+
+    rows_out = []
+    for row in tbl.find_all("tr"):
+        cells = [td.get_text(strip=True) for td in row.find_all("td")]
+        if not (cells and re.match(r"^\d{4}$", cells[0])):
             continue
 
-        rows_out = []
-        for row in tbl.find_all("tr"):
-            cells = [td.get_text(strip=True) for td in row.find_all("td")]
-            if not (cells and re.match(r"^\d{4}$", cells[0])):
-                continue
+        pe_val = None
+        for needles in pe_candidates:
+            v = _cell(cells, _find_col(labels, needles))
+            if v is not None:
+                pe_val = v
+                break
 
-            def _fnum(idxs: list[int]) -> Any:
-                for i in idxs:
-                    if i < len(cells) and cells[i] not in ("-", "", "N/A"):
-                        return to_decimal(cells[i])
-                return None
+        rows_out.append({
+            "fiscal_year":    int(cells[0]),
+            "pe":             pe_val,
+            "dividend_yield": _cell(cells, div_yield_col),
+        })
 
-            rows_out.append({
-                "fiscal_year": int(cells[0]),
-                "pe":          _fnum([4, 3, 2, 1]),
-            })
-
-        if rows_out:
-            return rows_out
-    return []
+    return rows_out
 
 
 def _parse_dividend_history_th_td(
@@ -412,11 +460,18 @@ def _merge_yearly_rows(
     pe_rows: list[dict],
     div_by_year: dict[int, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Merge EPS+NAV, PE, and th/td dividend history rows by fiscal_year."""
+    """Merge EPS+NAV, PE, and th/td dividend history rows by fiscal_year.
+
+    D2 fix: dividend-only years (present in div_by_year but absent from both
+    eps_map and pe_map) are now included in the output.  Previously the union
+    was eps_map | pe_map, which silently dropped years like CITYBANK's 2004
+    bonus-only rows that predate the EPS/PE table range.
+    """
     eps_map = {r["fiscal_year"]: r for r in eps_rows}
     pe_map  = {r["fiscal_year"]: r for r in pe_rows}
-    years   = sorted(set(eps_map) | set(pe_map))
     div_map = div_by_year or {}
+    # Include dividend-only years (D2 fix)
+    years   = sorted(set(eps_map) | set(pe_map) | set(div_map))
     out = []
     for yr in years:
         e = eps_map.get(yr, {})
@@ -425,9 +480,13 @@ def _merge_yearly_rows(
         out.append({
             "fiscal_year":   yr,
             "eps":           e.get("eps"),
+            "eps_basis":     e.get("eps_basis"),
             "eps_diluted":   e.get("eps_diluted"),
             "nav":           e.get("nav"),
+            "net_profit_mn": e.get("net_profit_mn"),
+            "tci_mn":        e.get("tci_mn"),
             "pe":            p.get("pe"),
+            "dividend_yield": p.get("dividend_yield"),
             "cash_div_pct":  d.get("cash"),
             "stock_div_pct": d.get("bonus"),
         })
@@ -619,8 +678,10 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
     async def fetch_historical(self, ticker: str = "", **kwargs: Any) -> AdapterResult:
         """
         Multi-year fundamentals from displayCompany.php.
-        Returns one DataFrame row per fiscal year (typically 5–8 years).
-        Columns: ticker, fiscal_year, eps, eps_diluted, nav, pe, cash_div_pct, stock_div_pct, source
+        Returns one DataFrame row per fiscal year (typically 5–30 years including
+        dividend-only historical years).
+        Columns: ticker, fiscal_year, eps, eps_basis, eps_diluted, nav, net_profit_mn,
+                 tci_mn, pe, dividend_yield, cash_div_pct, stock_div_pct, source
         """
         if not ticker:
             raise AdapterError(self.name, "ticker required", retryable=False)
@@ -661,9 +722,13 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
                 "ticker":        normalize_ticker(ticker),
                 "fiscal_year":   y["fiscal_year"],
                 "eps":           y["eps"],
+                "eps_basis":     y["eps_basis"],
                 "eps_diluted":   y["eps_diluted"],
                 "nav":           y["nav"],
+                "net_profit_mn": y["net_profit_mn"],
+                "tci_mn":        y["tci_mn"],
                 "pe":            y["pe"],
+                "dividend_yield": y["dividend_yield"],
                 "cash_div_pct":  y["cash_div_pct"],
                 "stock_div_pct": y["stock_div_pct"],
                 "fetched_at":    now,
