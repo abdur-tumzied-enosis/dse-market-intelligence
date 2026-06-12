@@ -54,6 +54,17 @@ def _num(value: Any) -> float | None:
     return value
 
 
+def _text(value: Any) -> str | None:
+    """Coerce pandas NaN (object-column missing marker) to None for TEXT params.
+
+    NaN is truthy, so `value if value else None` does NOT catch it — asyncpg then
+    raises `expected str, got float` on TEXT columns.
+    """
+    if value is None or _isnan(value):
+        return None
+    return str(value)
+
+
 async def _write_bundle(pool: Any, bundle: CompanyBundle, job_id: str) -> dict[str, int]:
     """Write all five bundle datasets to the DB. Returns per-table upsert counts.
 
@@ -105,7 +116,7 @@ async def _write_bundle(pool: Any, bundle: CompanyBundle, job_id: str) -> dict[s
             row["ticker"],
             int(row["fiscal_year"]),
             _num(row.get("eps")),
-            row.get("eps_basis") if row.get("eps_basis") else None,
+            _text(row.get("eps_basis")),
             _num(row.get("eps_diluted")),
             _num(row.get("nav")),
             (np_mn * 1e6) if np_mn is not None else None,
@@ -199,7 +210,7 @@ async def _write_bundle(pool: Any, bundle: CompanyBundle, job_id: str) -> dict[s
             int(row["fiscal_year"]),
             row["action_type"],
             _num(row.get("value_pct")),
-            row.get("ratio_text") if row.get("ratio_text") else None,
+            _text(row.get("ratio_text")),
             _num(row.get("ratio")),
             row["source"],
         )
