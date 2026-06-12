@@ -99,10 +99,10 @@ class TestShareholdingSumRule:
 
 class TestEpsBoundsRule:
     def test_eps_bounds_rule(self):
-        """EPS values outside [-500, 500] should trigger a warning."""
+        """EPS values outside [-1000, 1000] should trigger a warning (design FR8)."""
         df = pd.DataFrame({
             "ticker": ["GP", "BRACBANK"],
-            "eps": [5.0, 9999.0],  # 9999 out of bounds
+            "eps": [5.0, 2000.0],  # 2000 out of bounds
             "pe": [10.0, 10.0],
             "nav": [50.0, 50.0],
             "fetched_at": [pd.Timestamp.now(tz="UTC")] * 2,
@@ -111,13 +111,40 @@ class TestEpsBoundsRule:
         assert any(f.rule == "eps_out_of_bounds" for f in failures)
 
     def test_eps_bounds_rule_passes_for_normal_values(self):
-        """EPS within [-500, 500] should not trigger."""
+        """High-but-plausible EPS (RECKITTBEN-scale) must not trigger."""
         df = pd.DataFrame({
-            "ticker": ["GP"],
-            "eps": [5.0],
-            "pe": [10.0],
-            "nav": [50.0],
-            "fetched_at": [pd.Timestamp.now(tz="UTC")],
+            "ticker": ["GP", "RECKITTBEN"],
+            "eps": [5.0, 165.0],
+            "pe": [10.0, 20.0],
+            "nav": [50.0, 300.0],
+            "fetched_at": [pd.Timestamp.now(tz="UTC")] * 2,
         })
         failures = run_quality_checks(df, "fundamentals")
         assert not any(f.rule == "eps_out_of_bounds" for f in failures)
+
+
+class TestNavBoundsRule:
+    def test_nav_implausibly_negative_flagged(self):
+        """NAV below -10000 should trigger a warning (design FR8)."""
+        df = pd.DataFrame({
+            "ticker": ["X", "GP"],
+            "eps": [1.0, 5.0],
+            "pe": [10.0, 10.0],
+            "nav": [-20000.0, 50.0],
+            "fetched_at": [pd.Timestamp.now(tz="UTC")] * 2,
+        })
+        failures = run_quality_checks(df, "fundamentals")
+        flagged = [f for f in failures if f.rule == "nav_out_of_bounds"]
+        assert len(flagged) == 1 and flagged[0].ticker == "X"
+
+    def test_moderately_negative_nav_allowed(self):
+        """Distressed companies can have negative NAV — only extremes flag."""
+        df = pd.DataFrame({
+            "ticker": ["ZCAT"],
+            "eps": [-2.0],
+            "pe": [10.0],
+            "nav": [-45.0],
+            "fetched_at": [pd.Timestamp.now(tz="UTC")],
+        })
+        failures = run_quality_checks(df, "fundamentals")
+        assert not any(f.rule == "nav_out_of_bounds" for f in failures)

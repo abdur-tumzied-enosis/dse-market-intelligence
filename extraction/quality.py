@@ -73,8 +73,12 @@ def _check_shareholding_sum(df: pd.DataFrame, tolerance: float = 1.0) -> list[Qu
     return failures
 
 
-def _check_eps_bounds(df: pd.DataFrame, lo: float = -500.0, hi: float = 500.0) -> list[QualityFailure]:
-    """Warn when eps values fall outside the plausible range [lo, hi]."""
+def _check_eps_bounds(df: pd.DataFrame, lo: float = -1000.0, hi: float = 1000.0) -> list[QualityFailure]:
+    """Warn when eps values fall outside the plausible range [lo, hi].
+
+    ±1000 per design FR8 — wide enough for high-EPS outliers (RECKITTBEN ~165)
+    while catching column-mapping mistakes (e.g. profit-mn landing in eps).
+    """
     if "eps" not in df.columns:
         return []
     failures = []
@@ -88,6 +92,25 @@ def _check_eps_bounds(df: pd.DataFrame, lo: float = -500.0, hi: float = 500.0) -
                 rule="eps_out_of_bounds",
                 ticker=row.get("ticker"),
                 detail=f"eps={fv} outside [{lo}, {hi}]",
+                severity="warning",
+            ))
+    return failures
+
+
+def _check_nav_bounds(df: pd.DataFrame, lo: float = -10000.0) -> list[QualityFailure]:
+    """Warn when NAV per share is implausibly negative (design FR8: nav > -10000)."""
+    if "nav" not in df.columns:
+        return []
+    failures = []
+    for _, row in df.iterrows():
+        v = row.get("nav")
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            continue
+        if float(v) < lo:
+            failures.append(QualityFailure(
+                rule="nav_out_of_bounds",
+                ticker=row.get("ticker"),
+                detail=f"nav={float(v)} below {lo}",
                 severity="warning",
             ))
     return failures
@@ -149,5 +172,6 @@ def run_quality_checks(
     # no effect on existing streams that lack these fields.
     failures += _check_shareholding_sum(df)
     failures += _check_eps_bounds(df)
+    failures += _check_nav_bounds(df)
 
     return failures
