@@ -26,7 +26,10 @@ def citybank() -> BeautifulSoup:
 
 class TestExpandHeaderGrid:
     def test_eps_nav_table_labels(self, citybank):
-        from extraction.adapters.dse_direct.company_info import _expand_header_grid, _find_eps_nav_table
+        from extraction.adapters.dse_direct.company_info import (
+            _expand_header_grid,
+            _find_eps_nav_table,
+        )
 
         tbl = _find_eps_nav_table(citybank)
         labels = _expand_header_grid(tbl)
@@ -39,7 +42,10 @@ class TestExpandHeaderGrid:
         assert all(lab == lab.lower() for lab in labels)
 
     def test_grid_handles_all_fixture_layouts(self):
-        from extraction.adapters.dse_direct.company_info import _expand_header_grid, _find_eps_nav_table
+        from extraction.adapters.dse_direct.company_info import (
+            _expand_header_grid,
+            _find_eps_nav_table,
+        )
 
         for ticker in ("CITYBANK", "GP", "SQURPHARMA", "FAMILYTEX"):
             tbl = _find_eps_nav_table(_soup(ticker))
@@ -160,6 +166,7 @@ class TestNewParsers:
 class TestCompanyBundle:
     def test_bundle_from_fixture_html(self, citybank):
         import pandas as pd
+
         from extraction.adapters.dse_direct.company_info import (
             DSEDirectCompanyInfoAdapter,
             _build_bundle,

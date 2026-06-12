@@ -16,7 +16,7 @@ import asyncio
 import logging
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from db.pool import get_pool
@@ -318,7 +318,7 @@ async def bulk_load_fundamentals_historical(tickers: list[str] | None = None) ->
 
     adapter = DSEDirectCompanyInfoAdapter()
     sem = asyncio.Semaphore(_CONCURRENCY)
-    job_id = f"fundamentals_hist_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    job_id = f"fundamentals_hist_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
 
     done = 0
     summary: dict = {

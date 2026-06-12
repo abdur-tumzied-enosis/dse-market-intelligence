@@ -1,8 +1,6 @@
 """Compute fundamental features from multi-year per-ticker fundamentals DataFrame."""
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
@@ -49,8 +47,8 @@ def compute_fundamental_features(df: pd.DataFrame) -> pd.DataFrame:
 def compute_track_record_features(
     yearly: pd.DataFrame,
     rights_count_10y: int,
-    inst_flow_pp: Optional[float],
-    foreign_flow_pp: Optional[float],
+    inst_flow_pp: float | None,
+    foreign_flow_pp: float | None,
 ) -> dict[str, float]:
     """Track-record scalars from per-year fundamentals + pre-aggregated inputs.
 

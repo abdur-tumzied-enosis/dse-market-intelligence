@@ -61,8 +61,9 @@ def test_div_yield_nonnegative():
 
 
 def test_track_record_features():
-    import pytest
     import pandas as pd
+    import pytest
+
     from ml.features.fundamental_features import compute_track_record_features
 
     yearly = pd.DataFrame({
@@ -84,7 +85,9 @@ def test_track_record_features():
 
 def test_track_record_cagr_null_on_sign_change():
     import math
+
     import pandas as pd
+
     from ml.features.fundamental_features import compute_track_record_features
 
     yearly = pd.DataFrame({

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
@@ -921,7 +921,7 @@ def _build_bundle(html: str, ticker: str, source: str) -> CompanyBundle:
     """Parse one displayCompany page into all five datasets (FR6: one fetch, all writes)."""
     soup = BeautifulSoup(html, "lxml")
     t = normalize_ticker(ticker)
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     th_td = _parse_th_td(soup)
     div_by_year = _parse_dividend_history_th_td(th_td.get("dividend_raw"), th_td.get("bonus_raw"))
@@ -1053,7 +1053,7 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
 
     def normalize(self, raw: dict[str, Any]) -> pd.DataFrame:
         row = dict(raw)
-        row["fetched_at"] = datetime.now(timezone.utc)
+        row["fetched_at"] = datetime.now(UTC)
         row["source"] = self.name
         return pd.DataFrame([row])
 
@@ -1080,7 +1080,7 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
         return AdapterResult(
             data=normalized,
             source_name=self.name,
-            fetched_at=datetime.now(timezone.utc),
+            fetched_at=datetime.now(UTC),
             quality="partial",  # no MA signals / multi-period shareholding
             records=1,
             raw_sample=parsed,
@@ -1124,7 +1124,7 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
         return AdapterResult(
             data=bundle.yearly,
             source_name=self.name,
-            fetched_at=datetime.now(timezone.utc),
+            fetched_at=datetime.now(UTC),
             quality="ok",
             records=len(bundle.yearly),
             raw_sample=bundle.yearly.iloc[0].to_dict() if len(bundle.yearly) else {},

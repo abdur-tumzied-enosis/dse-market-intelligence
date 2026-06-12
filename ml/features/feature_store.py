@@ -1,7 +1,7 @@
 """Fetch data from DB and assemble feature matrices for ML models."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -20,7 +20,7 @@ async def build_price_feature_matrix(
     """
     from ml.features.price_features import compute_price_features
 
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     # Fetch extra days for indicator warmup (ADX needs 28, MACD needs 26+9=35)
     start = end - timedelta(days=lookback_days + 40)
 

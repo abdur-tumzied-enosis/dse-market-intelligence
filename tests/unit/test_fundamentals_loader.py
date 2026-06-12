@@ -7,17 +7,14 @@ These tests use a FakePool (no DB required) to verify:
 """
 from __future__ import annotations
 
-import math
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
 
 from extraction.adapters.dse_direct.company_info import CompanyBundle
-
 
 # ---------------------------------------------------------------------------
 # FakePool — records every SQL statement executed
@@ -64,7 +61,7 @@ class FakePool:
 # ---------------------------------------------------------------------------
 
 def _make_bundle(ticker: str = "TESTCO") -> CompanyBundle:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     yearly = pd.DataFrame([
         {

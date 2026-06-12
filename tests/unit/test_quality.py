@@ -1,10 +1,9 @@
 """Unit tests for extraction/quality.py."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
-import pytest
 
 from extraction.quality import run_quality_checks
 
@@ -15,7 +14,7 @@ def _live_prices_df(**overrides):
         "close":      [50.0, 30.0],
         "prev_close": [49.0, 29.0],
         "volume":     [1000, 2000],
-        "fetched_at": [datetime.now(timezone.utc)] * 2,
+        "fetched_at": [datetime.now(UTC)] * 2,
     }
     base.update(overrides)
     return pd.DataFrame(base)
