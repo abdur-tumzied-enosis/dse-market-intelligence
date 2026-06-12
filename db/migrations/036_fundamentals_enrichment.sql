@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS corporate_actions (
 -- One action per type per year matches the SOURCE: the DSE th/td strings print one
 -- combined figure per year ("15% 2025"). Interim/final dividend granularity lives in
 -- company_announcements (migration 016), not here.
+CREATE INDEX IF NOT EXISTS idx_corporate_actions_ticker
+    ON corporate_actions (ticker, fiscal_year DESC);
 
 -- 4. quarterly EPS (FR5)
 CREATE TABLE IF NOT EXISTS fundamentals_quarterly (
