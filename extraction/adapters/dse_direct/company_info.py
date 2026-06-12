@@ -106,6 +106,73 @@ def _parse_td_td(soup: BeautifulSoup) -> dict[str, str]:
     return kv
 
 
+def _find_eps_nav_table(soup: BeautifulSoup) -> Any:
+    """The annual EPS/NAV/profit table — identified by its header text."""
+    for tbl in soup.find_all("table"):
+        head = " ".join(c.get_text(strip=True) for c in tbl.find_all(["th", "td"])[:14]).lower()
+        if "nav per share" in head and "year" in head:
+            return tbl
+    return None
+
+
+def _expand_header_grid(table: Any) -> list[str]:
+    """Flatten a table's multi-row colspan/rowspan header into one hierarchical
+    label per leaf column, e.g. 'earnings per share(eps) > basic > original'.
+
+    Header rows are everything above the first row whose first cell is a
+    4-digit year (or 'particulars' data marker)."""
+    if table is None:
+        return []
+    header_rows: list[list[Any]] = []
+    for tr in table.find_all("tr"):
+        cells = tr.find_all(["th", "td"])
+        if not cells:
+            continue
+        if re.match(r"^\d{4}$", cells[0].get_text(strip=True)):
+            break  # data rows reached
+        header_rows.append(cells)
+    if not header_rows:
+        return []
+
+    grid: dict[tuple[int, int], str] = {}
+    for r, cells in enumerate(header_rows):
+        c = 0
+        for cell in cells:
+            while (r, c) in grid:
+                c += 1
+            text = cell.get_text(" ", strip=True).lower()
+            try:
+                rowspan = int(cell.get("rowspan") or 1)
+                colspan = int(cell.get("colspan") or 1)
+            except ValueError:
+                rowspan = colspan = 1
+            for dr in range(rowspan):
+                for dc in range(colspan):
+                    grid[(r + dr, c + dc)] = text
+            c += colspan
+
+    n_cols = max(c for (_, c) in grid) + 1
+    labels: list[str] = []
+    for c in range(n_cols):
+        parts: list[str] = []
+        for r in range(len(header_rows)):
+            t = grid.get((r, c), "")
+            if t and (not parts or parts[-1] != t):
+                parts.append(t)
+        labels.append(" > ".join(parts))
+    return labels
+
+
+def _find_col(labels: list[str], *needle_sets: tuple[str, ...]) -> int | None:
+    """Index of the first label containing ALL needles; needle sets tried in
+    preference order. None when nothing matches."""
+    for needles in needle_sets:
+        for i, lab in enumerate(labels):
+            if all(n in lab for n in needles):
+                return i
+    return None
+
+
 def _parse_eps_nav_table(soup: BeautifulSoup) -> dict[str, Any]:
     """
     Annual EPS+NAV table. Headers: Year | EPS Basic | Diluted | ... | NAV Per Share
