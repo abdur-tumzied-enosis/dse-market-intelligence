@@ -9,6 +9,9 @@ import Announcements from '@/components/stocks/Announcements'
 import PaywallOverlay from '@/components/ui/PaywallOverlay'
 import KeyMetricsStrip from '@/components/stocks/KeyMetricsStrip'
 import AiAnalysis from '@/components/stocks/AiAnalysis'
+import ShareholdingTrend from '@/components/stocks/ShareholdingTrend'
+import CorporateActions from '@/components/stocks/CorporateActions'
+import QuarterlyEarnings from '@/components/stocks/QuarterlyEarnings'
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -36,6 +39,12 @@ function fmtVol(v: number | null | undefined): string {
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return '—'
   return `${Number(n)}%`
+}
+function fmtLoanCr(mn: number | null | undefined): string {
+  if (mn == null) return '—'
+  const cr = Number(mn) / 10 // DSE prints loans in millions; 10 mn = 1 crore
+  if (cr === 0) return '৳0'
+  return `৳${cr >= 100 ? Math.round(cr).toLocaleString('en-US') : cr.toFixed(1)} Cr`
 }
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -111,13 +120,14 @@ export default async function StockDetailPage({
 }) {
   const { ticker } = await params
 
-  const [detailResult, fundsResult, annResult, analyzeResult] = await Promise.allSettled([
+  const [detailResult, fundsResult, annResult, analyzeResult, trackResult] = await Promise.allSettled([
     serverApi.stocks.detail(ticker),
     serverApi.stocks.fundamentals(ticker),
     serverApi.stocks.announcements(ticker),
     // NOTE: analyze returns more than predictions+narrative; only those are used here.
     // When real ML inference lands, consider a slimmer endpoint or client-side lazy fetch to avoid blocking SSR.
     serverApi.stocks.analyze(ticker),
+    serverApi.stocks.trackRecord(ticker),
   ])
 
   if (detailResult.status === 'rejected') notFound()
@@ -126,6 +136,11 @@ export default async function StockDetailPage({
   const fundsData = fundsResult.status === 'fulfilled' ? fundsResult.value : null
   const annData = annResult.status === 'fulfilled' ? annResult.value : null
   const analyzeData = analyzeResult.status === 'fulfilled' ? analyzeResult.value : null
+  const trackData = trackResult.status === 'fulfilled' ? trackResult.value : null
+
+  const hasShareholding = (trackData?.shareholding.length ?? 0) > 0
+  const hasActions = (trackData?.actions.length ?? 0) > 0
+  const hasQuarterly = (trackData?.quarterly.length ?? 0) > 0
 
   const scoreNum = health_score?.health_score != null ? Number(health_score.health_score) : null
   const rating = getRating(scoreNum)
@@ -155,8 +170,21 @@ export default async function StockDetailPage({
     { label: 'Category', value: company.category ?? '—' },
     { label: 'ISIN', value: company.isin ?? '—' },
     { label: 'Listed', value: fmtDate(company.listing_date) },
+    { label: 'Debut Trading', value: fmtDate(company.debut_trading_date) },
     { label: 'Fiscal Yr', value: lf?.fiscal_year != null ? String(lf.fiscal_year) : '—' },
+    { label: 'Face Value', value: company.face_value != null ? fmtBDT(company.face_value) : '—' },
+    { label: 'Market Lot', value: company.market_lot != null ? String(company.market_lot) : '—' },
   ]
+
+  const risk = [
+    { label: 'Status', value: company.operational_status ?? '—' },
+    { label: 'Short-term Loan', value: fmtLoanCr(company.short_loan_mn) },
+    { label: 'Long-term Loan', value: fmtLoanCr(company.long_loan_mn) },
+    { label: 'Loan As On', value: fmtDate(company.loan_as_on) },
+    { label: 'Rating (ST)', value: company.credit_rating_st ?? '—' },
+    { label: 'Rating (LT)', value: company.credit_rating_lt ?? '—' },
+  ]
+  const hasRisk = risk.some(r => r.value !== '—')
 
   const metricGroups = [
     { title: 'Valuation', rows: valuation },
@@ -266,10 +294,10 @@ export default async function StockDetailPage({
         </Panel>
       </Reveal>
 
-      {/* ── Company info (highlighted) ─────────────────────────────────────── */}
+      {/* ── Company info: profile + risk & leverage ────────────────────────── */}
       <Reveal delay={200}>
         <Panel title="Company Info" accent="#6b6b80">
-          <div className={`grid gap-6 px-4 pb-4 ${hasOwnership ? 'md:grid-cols-2' : ''}`}>
+          <div className={`grid gap-6 px-4 pb-4 ${hasRisk || (!hasShareholding && hasOwnership) ? 'md:grid-cols-2' : ''}`}>
             {/* Profile */}
             <div className="space-y-1.5">
               {profile.map(({ label, value }) => (
@@ -281,8 +309,31 @@ export default async function StockDetailPage({
                 </div>
               ))}
             </div>
-            {/* Ownership */}
-            {hasOwnership && (
+            {/* Risk & leverage (DSE company-page loans/ratings/status) */}
+            {hasRisk && (
+              <div>
+                <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#56566a] mb-2">
+                  Risk &amp; Leverage
+                </p>
+                <div className="space-y-1.5">
+                  {risk.map(({ label, value }) => (
+                    <div key={label} className="flex justify-between items-baseline gap-2">
+                      <span className="text-[11px] text-[#8a8a9e] font-mono shrink-0">{label}</span>
+                      <span className="text-[11px] font-mono text-[#d8d8e4] text-right truncate">
+                        {value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                {company.delisting_remark && (
+                  <p className="mt-3 rounded-md border border-[#ff4d6a]/30 bg-[#ff4d6a]/10 px-2.5 py-1.5 text-[10px] font-mono text-[#ff4d6a]">
+                    {company.delisting_remark}
+                  </p>
+                )}
+              </div>
+            )}
+            {/* Ownership fallback — only when no dated shareholding history exists */}
+            {!hasShareholding && hasOwnership && (
               <div>
                 <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#56566a] mb-2">
                   Ownership
@@ -308,6 +359,45 @@ export default async function StockDetailPage({
           </div>
         </Panel>
       </Reveal>
+
+      {/* ── Ownership flow + corporate actions (track record) ──────────────── */}
+      {(hasShareholding || hasActions) && (
+        <Reveal delay={230}>
+          <div className={`grid gap-4 ${hasShareholding && hasActions ? 'lg:grid-cols-2' : ''}`}>
+            {hasShareholding && (
+              <Panel title="Ownership Flow" accent="#a78bfa">
+                <div className="px-4 pb-4">
+                  <ShareholdingTrend snapshots={trackData!.shareholding} />
+                </div>
+              </Panel>
+            )}
+            {hasActions && (
+              <Panel title="Corporate Actions" accent="#f5c842">
+                <div className="px-4 pb-4">
+                  {trackData!.is_truncated ? (
+                    <PaywallOverlay feature="Unlock full corporate-action history with Pro">
+                      <CorporateActions actions={trackData!.actions} />
+                    </PaywallOverlay>
+                  ) : (
+                    <CorporateActions actions={trackData!.actions} />
+                  )}
+                </div>
+              </Panel>
+            )}
+          </div>
+        </Reveal>
+      )}
+
+      {/* ── Quarterly earnings momentum ─────────────────────────────────────── */}
+      {hasQuarterly && (
+        <Reveal delay={250}>
+          <Panel title="Quarterly Earnings" accent="#4d9eff">
+            <div className="px-4 pb-4">
+              <QuarterlyEarnings quarterly={trackData!.quarterly} />
+            </div>
+          </Panel>
+        </Reveal>
+      )}
 
       {/* ── Historical fundamentals (highlighted, full width) ──────────────── */}
       {fundsData && fundsData.items.length > 0 && (

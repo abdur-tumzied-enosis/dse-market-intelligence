@@ -19,6 +19,19 @@ class CompanyRow(BaseModel):
     last_close: Decimal | None = None
     change_pct: Decimal | None = None
     rating: str = "N/A"
+    # Risk/meta fields (migration 036) — populated only by the detail endpoint;
+    # the list endpoint leaves them at None.
+    face_value: Decimal | None = None
+    market_lot: int | None = None
+    electronic_share: bool | None = None
+    debut_trading_date: date | None = None
+    operational_status: str | None = None
+    short_loan_mn: Decimal | None = None
+    long_loan_mn: Decimal | None = None
+    loan_as_on: date | None = None
+    credit_rating_st: str | None = None
+    credit_rating_lt: str | None = None
+    delisting_remark: str | None = None
 
 
 class LatestPrice(BaseModel):
@@ -81,6 +94,10 @@ class FundamentalsRow(BaseModel):
     stock_div_pct: Decimal | None
     sponsor_pct: Decimal | None
     public_pct: Decimal | None
+    net_profit_bdt: Decimal | None = None
+    total_comprehensive_income_bdt: Decimal | None = None
+    dividend_yield_pct: Decimal | None = None
+    eps_basis: str | None = None
     fetched_at: datetime
 
 
@@ -88,6 +105,40 @@ class FundamentalsResponse(BaseModel):
     ticker: str
     items: list[FundamentalsRow]
     max_years: int
+    is_truncated: bool
+
+
+class ShareholdingSnapshot(BaseModel):
+    as_on_date: date
+    sponsor_pct: Decimal | None
+    govt_pct: Decimal | None
+    institution_pct: Decimal | None
+    foreign_pct: Decimal | None
+    public_pct: Decimal | None
+
+
+class CorporateActionRow(BaseModel):
+    fiscal_year: int
+    action_type: str  # 'cash_div' | 'stock_div' | 'right_issue'
+    value_pct: Decimal | None
+    ratio_text: str | None
+    ratio: Decimal | None
+
+
+class QuarterlyEpsRow(BaseModel):
+    fiscal_year: int
+    quarter: int
+    eps_basic: Decimal | None
+    eps_diluted: Decimal | None
+    period_end_price: Decimal | None
+
+
+class TrackRecordResponse(BaseModel):
+    ticker: str
+    shareholding: list[ShareholdingSnapshot]
+    actions: list[CorporateActionRow]
+    quarterly: list[QuarterlyEpsRow]
+    max_action_years: int
     is_truncated: bool
 
 

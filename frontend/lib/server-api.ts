@@ -4,6 +4,7 @@ import type {
   MarketIndices, MarketRegime, MarketMovers, MarketSummary, HeatmapItem,
   StockDetail, FundamentalsResponse, PagedResponse, StockListItem,
   AnnouncementsResponse, SectorRow, SectorDetail, AnalyzeResponse,
+  TrackRecordResponse,
 } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? 'http://localhost:8000'
@@ -41,6 +42,8 @@ export const serverApi = {
       serverGet<FundamentalsResponse>(`/api/stocks/${ticker.toUpperCase()}/fundamentals`),
     announcements: (ticker: string) =>
       serverGet<AnnouncementsResponse>(`/api/stocks/${ticker.toUpperCase()}/announcements`),
+    trackRecord: (ticker: string) =>
+      serverGet<TrackRecordResponse>(`/api/stocks/${ticker.toUpperCase()}/track-record`),
     analyze: (ticker: string) =>
       serverGet<AnalyzeResponse>(`/api/analyze/${ticker.toUpperCase()}`),
   },

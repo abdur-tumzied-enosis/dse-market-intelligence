@@ -22,6 +22,7 @@ from api.schemas.stocks import (
     OHLCVResponse,
     PredictionsResponse,
     StockDetail,
+    TrackRecordResponse,
     WyckoffResponse,
 )
 from extraction.base import AllAdaptersFailedError
@@ -177,7 +178,10 @@ async def get_stock(ticker: str, pool=Depends(get_db), _user=Depends(get_current
         company = await conn.fetchrow(
             """
             SELECT ticker, name, sector, category, market_cap_bdt, is_active,
-                   listing_date, isin
+                   listing_date, isin,
+                   face_value, market_lot, electronic_share, debut_trading_date,
+                   operational_status, short_loan_mn, long_loan_mn, loan_as_on,
+                   credit_rating_st, credit_rating_lt, delisting_remark
             FROM companies WHERE ticker = $1
             """,
             ticker,
@@ -374,7 +378,10 @@ async def get_fundamentals(ticker: str, pool=Depends(get_db), user=Depends(get_c
         rows = await conn.fetch(
             """
             SELECT fiscal_year, eps, nav, pe, cash_div_pct, stock_div_pct,
-                   sponsor_pct, public_pct, fetched_at
+                   sponsor_pct, public_pct,
+                   net_profit_bdt, total_comprehensive_income_bdt,
+                   dividend_yield_pct, eps_basis,
+                   fetched_at
             FROM fundamentals WHERE ticker = $1
             ORDER BY fiscal_year DESC NULLS LAST, fetched_at DESC
             LIMIT $2
@@ -389,6 +396,72 @@ async def get_fundamentals(ticker: str, pool=Depends(get_db), user=Depends(get_c
         "items": items,
         "max_years": max_years,
         "is_truncated": user["tier"] == "free" and len(items) >= max_years,
+    }
+    await _cache_set(cache_key, result, ttl=86400)
+    return result
+
+
+@router.get("/{ticker}/track-record", response_model=TrackRecordResponse)
+async def get_track_record(ticker: str, pool=Depends(get_db), user=Depends(get_current_user)):
+    """Analyst track-record bundle: shareholding trend, corporate-action history,
+    quarterly EPS — one round trip for the stock page's track-record panels.
+
+    Free tier sees corporate actions for the FREE_FUNDAMENTALS_YEARS most recent
+    fiscal years (matches the fundamentals paywall); shareholding (max 3 snapshots
+    on the source page) and current-year quarterly rows are not gated.
+    """
+    ticker = ticker.upper()
+    is_free = user["tier"] == "free"
+    cache_key = f"cache:api:stocks:track_record:{ticker}:{user['tier']}"
+    cached = await _cache_get(cache_key)
+    if cached:
+        return cached
+
+    async with pool.acquire() as conn:
+        exists = await conn.fetchrow("SELECT 1 FROM companies WHERE ticker = $1", ticker)
+        if not exists:
+            raise HTTPException(status_code=404, detail=f"Ticker {ticker} not found")
+        shareholding = await conn.fetch(
+            """
+            SELECT as_on_date, sponsor_pct, govt_pct, institution_pct,
+                   foreign_pct, public_pct
+            FROM shareholding_history WHERE ticker = $1
+            ORDER BY as_on_date
+            """,
+            ticker,
+        )
+        actions = await conn.fetch(
+            """
+            SELECT fiscal_year, action_type, value_pct, ratio_text, ratio
+            FROM corporate_actions WHERE ticker = $1
+            ORDER BY fiscal_year DESC, action_type
+            """,
+            ticker,
+        )
+        quarterly = await conn.fetch(
+            """
+            SELECT fiscal_year, quarter, eps_basic, eps_diluted, period_end_price
+            FROM fundamentals_quarterly WHERE ticker = $1
+            ORDER BY fiscal_year DESC, quarter
+            """,
+            ticker,
+        )
+
+    action_items = [dict(r) for r in actions]
+    action_years = sorted({r["fiscal_year"] for r in action_items}, reverse=True)
+    is_truncated = False
+    if is_free and len(action_years) > FREE_FUNDAMENTALS_YEARS:
+        visible = set(action_years[:FREE_FUNDAMENTALS_YEARS])
+        action_items = [r for r in action_items if r["fiscal_year"] in visible]
+        is_truncated = True
+
+    result = {
+        "ticker": ticker,
+        "shareholding": [dict(r) for r in shareholding],
+        "actions": action_items,
+        "quarterly": [dict(r) for r in quarterly],
+        "max_action_years": FREE_FUNDAMENTALS_YEARS if is_free else len(action_years) or 1,
+        "is_truncated": is_truncated,
     }
     await _cache_set(cache_key, result, ttl=86400)
     return result

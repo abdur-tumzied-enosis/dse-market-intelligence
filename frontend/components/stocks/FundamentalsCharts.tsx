@@ -54,12 +54,18 @@ function MiniBar({ data, label, suffix = '', decimals = 1 }: MiniBarProps) {
             <g key={i}>
               <rect x={x} y={bY} width={barW} height={bH}
                 fill={color} opacity="0.75" rx="1.5" />
-              {barW > 16 && (
-                <text x={x + barW / 2} y={isPos ? bY - 3 : bY + bH + 10}
-                  textAnchor="middle" fontSize="8" fill={color} fontFamily="monospace">
-                  {fmt}{suffix}
-                </text>
-              )}
+              {barW > 16 && (() => {
+                // Tallest bars leave no headroom above — drop the label inside the bar
+                const inside = isPos && bY < 12
+                const y = inside ? bY + 10 : isPos ? bY - 3 : Math.min(bY + bH + 10, H + LABEL_H - 12)
+                return (
+                  <text x={x + barW / 2} y={y}
+                    textAnchor="middle" fontSize="8" fill={inside ? '#0c0c12' : color}
+                    fontFamily="monospace" fontWeight={inside ? 'bold' : 'normal'}>
+                    {fmt}{suffix}
+                  </text>
+                )
+              })()}
               <text x={x + barW / 2} y={H + LABEL_H - 2}
                 textAnchor="middle" fontSize="8" fill="#6b6b80" fontFamily="monospace">
                 {String(d.year).slice(2)}
@@ -82,17 +88,22 @@ export default function FundamentalsCharts({ items }: Props) {
     .sort((a, b) => (a.fiscal_year ?? 0) - (b.fiscal_year ?? 0))
     .slice(-8)
 
-  const toData = (field: keyof FundamentalsRow) =>
+  const toData = (field: keyof FundamentalsRow, scale = 1) =>
     sorted
       .filter(r => r[field] != null)
-      .map(r => ({ year: r.fiscal_year!, value: Number(r[field]) }))
+      .map(r => ({ year: r.fiscal_year!, value: Number(r[field]) * scale }))
+
+  // net_profit_bdt → crore so bar labels stay readable (13.24bn → 1324 Cr)
+  const profit = toData('net_profit_bdt', 1 / 10_000_000)
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      <MiniBar data={profit} label="Net Profit (৳ Cr)" decimals={0} />
       <MiniBar data={toData('eps')} label="EPS (৳)" decimals={2} />
       <MiniBar data={toData('nav')} label="NAV (৳)" decimals={1} />
       <MiniBar data={toData('pe')} label="P/E Ratio" decimals={1} />
       <MiniBar data={toData('cash_div_pct')} label="Cash Dividend" suffix="%" decimals={0} />
+      <MiniBar data={toData('dividend_yield_pct')} label="Dividend Yield" suffix="%" decimals={1} />
     </div>
   )
 }

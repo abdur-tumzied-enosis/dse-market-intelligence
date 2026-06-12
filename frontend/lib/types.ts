@@ -88,6 +88,18 @@ export interface CompanyInfo {
   is_active: boolean
   listing_date: string | null
   isin: string | null
+  // Risk/meta fields — present on the detail endpoint only
+  face_value: number | null
+  market_lot: number | null
+  electronic_share: boolean | null
+  debut_trading_date: string | null
+  operational_status: string | null
+  short_loan_mn: number | null
+  long_loan_mn: number | null
+  loan_as_on: string | null
+  credit_rating_st: string | null
+  credit_rating_lt: string | null
+  delisting_remark: string | null
 }
 
 export interface LatestPrice {
@@ -165,6 +177,10 @@ export interface FundamentalsRow {
   stock_div_pct: number | null
   sponsor_pct: number | null
   public_pct: number | null
+  net_profit_bdt: number | null
+  total_comprehensive_income_bdt: number | null
+  dividend_yield_pct: number | null
+  eps_basis: string | null
   fetched_at: string
 }
 
@@ -172,6 +188,42 @@ export interface FundamentalsResponse {
   ticker: string
   items: FundamentalsRow[]
   max_years: number
+  is_truncated: boolean
+}
+
+// ─── Track record (api/routers/stocks.py :: get_track_record) ────────────────
+
+export interface ShareholdingSnapshot {
+  as_on_date: string
+  sponsor_pct: number | null
+  govt_pct: number | null
+  institution_pct: number | null
+  foreign_pct: number | null
+  public_pct: number | null
+}
+
+export interface CorporateActionRow {
+  fiscal_year: number
+  action_type: 'cash_div' | 'stock_div' | 'right_issue'
+  value_pct: number | null
+  ratio_text: string | null
+  ratio: number | null
+}
+
+export interface QuarterlyEpsRow {
+  fiscal_year: number
+  quarter: number
+  eps_basic: number | null
+  eps_diluted: number | null
+  period_end_price: number | null
+}
+
+export interface TrackRecordResponse {
+  ticker: string
+  shareholding: ShareholdingSnapshot[]
+  actions: CorporateActionRow[]
+  quarterly: QuarterlyEpsRow[]
+  max_action_years: number
   is_truncated: boolean
 }
 
