@@ -46,3 +46,24 @@ class TestExpandHeaderGrid:
                 continue
             labels = _expand_header_grid(tbl)
             assert any("nav per share" in lab for lab in labels), ticker
+
+
+class TestEpsNavAllYears:
+    def test_citybank_profit_and_nav(self, citybank):
+        from extraction.adapters.dse_direct.company_info import _parse_eps_nav_all_years
+
+        rows = {r["fiscal_year"]: r for r in _parse_eps_nav_all_years(citybank)}
+
+        assert 2025 in rows and 2021 in rows
+        assert float(rows[2025]["net_profit_mn"]) == pytest.approx(13242.27)
+        assert float(rows[2021]["net_profit_mn"]) == pytest.approx(5494.16)
+        assert float(rows[2025]["nav"]) == pytest.approx(40.67)
+        assert float(rows[2025]["eps"]) == pytest.approx(8.71)
+        assert rows[2025]["eps_basis"] is not None
+
+    def test_d3_no_basic_fallthrough_for_diluted(self, citybank):
+        """Page shows '-' for diluted EPS — must be None, never the basic value."""
+        from extraction.adapters.dse_direct.company_info import _parse_eps_nav_all_years
+
+        rows = {r["fiscal_year"]: r for r in _parse_eps_nav_all_years(citybank)}
+        assert rows[2025]["eps_diluted"] is None

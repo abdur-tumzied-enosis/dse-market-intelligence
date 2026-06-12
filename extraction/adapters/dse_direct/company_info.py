@@ -274,31 +274,76 @@ def _parse_quarterly_eps(soup: BeautifulSoup) -> dict[str, Any]:
 
 
 def _parse_eps_nav_all_years(soup: BeautifulSoup) -> list[dict[str, Any]]:
-    """All year rows from EPS+NAV table → [{fiscal_year, eps, eps_diluted, nav}, ...]."""
-    for tbl in soup.find_all("table"):
-        headers = [td.get_text(strip=True) for td in tbl.find_all(["th", "td"])[:12]]
-        if "nav per share" in " ".join(headers).lower() and any(re.match(r"^\d{4}$", h) is None for h in headers):
-            rows_out = []
-            for row in tbl.find_all("tr"):
-                cells = [td.get_text(strip=True) for td in row.find_all("td")]
-                if not (cells and re.match(r"^\d{4}$", cells[0])):
-                    continue
+    """All year rows from the EPS+NAV table via header-grid column mapping.
+    → [{fiscal_year, eps, eps_basis, eps_diluted, nav, net_profit_mn, tci_mn}, ...]"""
+    tbl = _find_eps_nav_table(soup)
+    if tbl is None:
+        return []
+    labels = _expand_header_grid(tbl)
+    if not labels:
+        raise ValueError("EPS/NAV table header grid unparseable — layout changed?")
 
-                def _fnum(idxs: list[int]) -> Any:
-                    for i in idxs:
-                        if i < len(cells) and cells[i] not in ("-", "", "N/A"):
-                            return to_decimal(cells[i])
-                    return None
+    # The 'Year' header cell often has colspan>1 (e.g. colspan=2) while each data
+    # row contains only one year cell.  Compute the offset so that grid column
+    # indices can be translated to data-row cell indices correctly.
+    year_grid_cols = sum(1 for lab in labels if lab == "year")
+    col_offset = max(year_grid_cols - 1, 0)  # data index = grid_col - col_offset
 
-                rows_out.append({
-                    "fiscal_year": int(cells[0]),
-                    "eps":         _fnum([4, 3, 2, 1]),
-                    "eps_diluted": _fnum([3, 4]),
-                    "nav":         _fnum([8, 7]),
-                })
-            if rows_out:
-                return rows_out
-    return []
+    # (column, basis-tag) preference: restated over original, basic before diluted,
+    # non-continuing before continuing-operations columns.
+    # 'continuing operations' columns have label prefix 'eps - continuing operations'.
+    eps_candidates = [
+        (("earnings per share", "basic", "restated"), "basic_restated"),
+        (("earnings per share", "basic", "original"), "basic_original"),
+        (("earnings per share", "diluted", "restated"), "diluted_restated"),
+        (("earnings per share", "diluted", "original"), "diluted_original"),
+        (("earnings per share", "diluted"), "diluted"),
+        (("continuing operations", "basic", "restated"), "co_basic_restated"),
+        (("continuing operations", "basic", "original"), "co_basic_original"),
+        (("continuing operations", "diluted"), "co_diluted"),
+    ]
+    dil_col = _find_col(labels,
+                        ("earnings per share", "diluted", "restated"),
+                        ("earnings per share", "diluted", "original"),
+                        ("earnings per share", "diluted"))
+    # NAV: prefer original (most commonly populated), then restated, then any nav per share
+    nav_col = _find_col(labels,
+                        ("nav per share", "original"),
+                        ("nav per share", "restated"),
+                        ("nav per share",))
+    profit_col = _find_col(labels, ("profit for the year",))
+    tci_col = _find_col(labels, ("tci",))
+
+    def _cell(cells: list[str], grid_idx: int | None) -> Any:
+        if grid_idx is None:
+            return None
+        data_idx = grid_idx - col_offset
+        if data_idx < 0 or data_idx >= len(cells):
+            return None
+        v = cells[data_idx].replace(",", "").strip()
+        return to_decimal(v) if v not in ("-", "", "N/A") else None
+
+    rows_out: list[dict[str, Any]] = []
+    for row in tbl.find_all("tr"):
+        cells = [td.get_text(strip=True) for td in row.find_all("td")]
+        if not (cells and re.match(r"^\d{4}$", cells[0])):
+            continue
+        eps_val, eps_basis = None, None
+        for needles, basis in eps_candidates:
+            v = _cell(cells, _find_col(labels, needles))
+            if v is not None:
+                eps_val, eps_basis = v, basis
+                break
+        rows_out.append({
+            "fiscal_year":   int(cells[0]),
+            "eps":           eps_val,
+            "eps_basis":     eps_basis,
+            "eps_diluted":   _cell(cells, dil_col),   # D3: no basic fallback
+            "nav":           _cell(cells, nav_col),
+            "net_profit_mn": _cell(cells, profit_col),  # D1 fix
+            "tci_mn":        _cell(cells, tci_col),
+        })
+    return rows_out
 
 
 _DIV_HIST_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%\s*(\d{4})")
