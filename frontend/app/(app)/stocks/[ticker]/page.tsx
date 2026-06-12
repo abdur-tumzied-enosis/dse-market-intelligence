@@ -12,6 +12,7 @@ import AiAnalysis from '@/components/stocks/AiAnalysis'
 import ShareholdingTrend from '@/components/stocks/ShareholdingTrend'
 import CorporateActions from '@/components/stocks/CorporateActions'
 import QuarterlyEarnings from '@/components/stocks/QuarterlyEarnings'
+import CompanyProfile from '@/components/stocks/CompanyProfile'
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -39,12 +40,6 @@ function fmtVol(v: number | null | undefined): string {
 function fmtPct(n: number | null | undefined): string {
   if (n == null) return '—'
   return `${Number(n)}%`
-}
-function fmtLoanCr(mn: number | null | undefined): string {
-  if (mn == null) return '—'
-  const cr = Number(mn) / 10 // DSE prints loans in millions; 10 mn = 1 crore
-  if (cr === 0) return '৳0'
-  return `৳${cr >= 100 ? Math.round(cr).toLocaleString('en-US') : cr.toFixed(1)} Cr`
 }
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—'
@@ -146,12 +141,6 @@ export default async function StockDetailPage({
   const rating = getRating(scoreNum)
   const ratingColor = RATING_COLOR[rating]
 
-  // Ownership split (sponsor vs public), normalised for the bar.
-  const sponsor = lf?.sponsor_pct != null ? Number(lf.sponsor_pct) : null
-  const publicPct = lf?.public_pct != null ? Number(lf.public_pct) : null
-  const ownTotal = (sponsor ?? 0) + (publicPct ?? 0)
-  const hasOwnership = ownTotal > 0
-
   const valuation = [
     { label: 'P/E Ratio', value: fmt(lf?.pe, 1) },
     { label: 'Market Cap', value: fmtCap(company.market_cap_bdt) },
@@ -165,27 +154,6 @@ export default async function StockDetailPage({
     { label: 'Cash Div', value: fmtPct(lf?.cash_div_pct), accent: '#f5c842' },
     { label: 'Stock Div', value: fmtPct(lf?.stock_div_pct), accent: '#4d9eff' },
   ]
-  const profile = [
-    { label: 'Sector', value: company.sector },
-    { label: 'Category', value: company.category ?? '—' },
-    { label: 'ISIN', value: company.isin ?? '—' },
-    { label: 'Listed', value: fmtDate(company.listing_date) },
-    { label: 'Debut Trading', value: fmtDate(company.debut_trading_date) },
-    { label: 'Fiscal Yr', value: lf?.fiscal_year != null ? String(lf.fiscal_year) : '—' },
-    { label: 'Face Value', value: company.face_value != null ? fmtBDT(company.face_value) : '—' },
-    { label: 'Market Lot', value: company.market_lot != null ? String(company.market_lot) : '—' },
-  ]
-
-  const risk = [
-    { label: 'Status', value: company.operational_status ?? '—' },
-    { label: 'Short-term Loan', value: fmtLoanCr(company.short_loan_mn) },
-    { label: 'Long-term Loan', value: fmtLoanCr(company.long_loan_mn) },
-    { label: 'Loan As On', value: fmtDate(company.loan_as_on) },
-    { label: 'Rating (ST)', value: company.credit_rating_st ?? '—' },
-    { label: 'Rating (LT)', value: company.credit_rating_lt ?? '—' },
-  ]
-  const hasRisk = risk.some(r => r.value !== '—')
-
   const metricGroups = [
     { title: 'Valuation', rows: valuation },
     { title: 'Per Share', rows: perShare },
@@ -294,69 +262,10 @@ export default async function StockDetailPage({
         </Panel>
       </Reveal>
 
-      {/* ── Company info: profile + risk & leverage ────────────────────────── */}
+      {/* ── Company info: fact tiles + risk & leverage ─────────────────────── */}
       <Reveal delay={200}>
         <Panel title="Company Info" accent="#6b6b80">
-          <div className={`grid gap-6 px-4 pb-4 ${hasRisk || (!hasShareholding && hasOwnership) ? 'md:grid-cols-2' : ''}`}>
-            {/* Profile */}
-            <div className="space-y-1.5">
-              {profile.map(({ label, value }) => (
-                <div key={label} className="flex justify-between items-baseline gap-2">
-                  <span className="text-[11px] text-[#8a8a9e] font-mono shrink-0">{label}</span>
-                  <span className="text-[11px] font-mono text-[#d8d8e4] text-right truncate">
-                    {value}
-                  </span>
-                </div>
-              ))}
-            </div>
-            {/* Risk & leverage (DSE company-page loans/ratings/status) */}
-            {hasRisk && (
-              <div>
-                <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#56566a] mb-2">
-                  Risk &amp; Leverage
-                </p>
-                <div className="space-y-1.5">
-                  {risk.map(({ label, value }) => (
-                    <div key={label} className="flex justify-between items-baseline gap-2">
-                      <span className="text-[11px] text-[#8a8a9e] font-mono shrink-0">{label}</span>
-                      <span className="text-[11px] font-mono text-[#d8d8e4] text-right truncate">
-                        {value}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                {company.delisting_remark && (
-                  <p className="mt-3 rounded-md border border-[#ff4d6a]/30 bg-[#ff4d6a]/10 px-2.5 py-1.5 text-[10px] font-mono text-[#ff4d6a]">
-                    {company.delisting_remark}
-                  </p>
-                )}
-              </div>
-            )}
-            {/* Ownership fallback — only when no dated shareholding history exists */}
-            {!hasShareholding && hasOwnership && (
-              <div>
-                <p className="text-[9px] font-mono uppercase tracking-[0.2em] text-[#56566a] mb-2">
-                  Ownership
-                </p>
-                <div className="flex h-2.5 rounded-full overflow-hidden bg-[#1a1a24]">
-                  {sponsor != null && (
-                    <div className="h-full" style={{ width: `${(sponsor / ownTotal) * 100}%`, background: '#a78bfa' }} />
-                  )}
-                  {publicPct != null && (
-                    <div className="h-full" style={{ width: `${(publicPct / ownTotal) * 100}%`, background: '#4d9eff' }} />
-                  )}
-                </div>
-                <div className="flex justify-between mt-2 text-[10px] font-mono">
-                  <span className="text-[#a78bfa]">
-                    Sponsor <span className="tabular-nums">{fmtPct(sponsor)}</span>
-                  </span>
-                  <span className="text-[#4d9eff]">
-                    Public <span className="tabular-nums">{fmtPct(publicPct)}</span>
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
+          <CompanyProfile company={company} latest={lf} showOwnership={!hasShareholding} />
         </Panel>
       </Reveal>
 
