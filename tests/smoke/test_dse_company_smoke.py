@@ -26,11 +26,15 @@ HEADERS = {
 }
 URL = "https://www.dsebd.org/displayCompany.php?name={ticker}"
 
+# Layout-distinct pages: bank (EPS-CO columns, 3 shareholding rows), MNC/telecom,
+# pharma (Jun year-end), Z-category (sparse data).
 TICKERS = ["CITYBANK", "GP", "SQURPHARMA", "FAMILYTEX"]
 
 
 @pytest.mark.parametrize("ticker", TICKERS)
 async def test_company_page_fetch_and_save(ticker: str) -> None:
+    # dsebd.org serves an incomplete cert chain — verification fails everywhere,
+    # not just in Docker. Public-data scrape; verify=False is the accepted tradeoff.
     async with httpx.AsyncClient(timeout=30, headers=HEADERS, follow_redirects=True, verify=False) as c:
         resp = await c.get(URL.format(ticker=ticker))
 
