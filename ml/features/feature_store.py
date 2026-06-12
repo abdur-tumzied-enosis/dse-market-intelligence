@@ -64,6 +64,7 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
     rows = await pool.fetch(
         """
         SELECT f.fiscal_year, f.eps, f.nav, f.pe, f.cash_div_pct, f.stock_div_pct,
+               f.net_profit_bdt, f.eps_basis,
                (
                    SELECT sp.close FROM stock_prices sp
                    WHERE sp.ticker = f.ticker
@@ -93,9 +94,12 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
     df = pd.DataFrame(
         list(rows),
         columns=["fiscal_year", "eps", "nav", "pe", "cash_div_pct", "stock_div_pct",
+                 "net_profit_bdt", "eps_basis",  # eps_basis is text — excluded from numeric coercion below
                  "price_at_fy_end", "median_pe"],
     )
-    for col in df.columns:
+    # eps_basis is a text label (e.g. "basic_original") — coerce only numeric columns
+    numeric_cols = [c for c in df.columns if c != "eps_basis"]
+    for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     features = compute_fundamental_features(df)
@@ -109,7 +113,27 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
     price = float(df["price_at_fy_end"].iloc[-1]) if pd.notna(df["price_at_fy_end"].iloc[-1]) else np.nan
     pb_ratio = float(np.clip(price / nav, 0, 20)) if (nav and nav != 0 and not np.isnan(price)) else np.nan
 
-    return pd.Series({
+    rights = await pool.fetchval(
+        """SELECT count(*) FROM corporate_actions
+           WHERE ticker = $1 AND action_type = 'right_issue'
+             AND fiscal_year >= EXTRACT(YEAR FROM now())::int - 10""", ticker)
+    flows = await pool.fetchrow(
+        """SELECT (last.institution_pct - first.institution_pct) AS inst_flow,
+                  (last.foreign_pct - first.foreign_pct) AS foreign_flow
+           FROM (SELECT * FROM shareholding_history WHERE ticker = $1
+                 ORDER BY as_on_date ASC LIMIT 1) AS first,
+                (SELECT * FROM shareholding_history WHERE ticker = $1
+                 ORDER BY as_on_date DESC LIMIT 1) AS last""", ticker)
+
+    from ml.features.fundamental_features import compute_track_record_features
+    track = compute_track_record_features(
+        df,
+        rights_count_10y=rights or 0,
+        inst_flow_pp=float(flows["inst_flow"]) if flows and flows["inst_flow"] is not None else None,
+        foreign_flow_pp=float(flows["foreign_flow"]) if flows and flows["foreign_flow"] is not None else None,
+    )
+
+    result = pd.Series({
         "eps_growth_1yr": float(latest.get("eps_growth_1yr", np.nan)),
         "eps_growth_3yr": float(latest.get("eps_growth_3yr", np.nan)),
         "nav_growth":     float(latest.get("nav_growth", np.nan)),
@@ -120,3 +144,6 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         "pe_vs_sector":   pe_vs_sector,
         "pb_ratio":       pb_ratio,
     })
+    for k, v in track.items():
+        result[k] = v
+    return result

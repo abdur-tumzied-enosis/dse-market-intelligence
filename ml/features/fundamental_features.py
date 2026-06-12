@@ -1,6 +1,8 @@
 """Compute fundamental features from multi-year per-ticker fundamentals DataFrame."""
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
@@ -42,3 +44,50 @@ def compute_fundamental_features(df: pd.DataFrame) -> pd.DataFrame:
         result[col] = result[col].clip(-5, 5)
 
     return result
+
+
+def compute_track_record_features(
+    yearly: pd.DataFrame,
+    rights_count_10y: int,
+    inst_flow_pp: Optional[float],
+    foreign_flow_pp: Optional[float],
+) -> dict[str, float]:
+    """Track-record scalars from per-year fundamentals + pre-aggregated inputs.
+
+    Rules (design §3.6): NULLs dropped per feature; windows use closed fiscal
+    years only (caller passes closed years); CAGR is NaN on profit sign change.
+    """
+    df = yearly.sort_values("fiscal_year").reset_index(drop=True)
+    profit = pd.to_numeric(df["net_profit_bdt"], errors="coerce")
+
+    def _cagr(n_years: int) -> float:
+        s = profit.dropna()
+        if len(s) < n_years + 1:
+            return np.nan
+        first, last = float(s.iloc[-(n_years + 1)]), float(s.iloc[-1])
+        if first <= 0 or last <= 0:  # sign change / nonpositive base → meaningless
+            return np.nan
+        return (last / first) ** (1.0 / n_years) - 1
+
+    cash = pd.to_numeric(df["cash_div_pct"], errors="coerce").fillna(0)
+    stock = pd.to_numeric(df["stock_div_pct"], errors="coerce").fillna(0)
+
+    streak = 0
+    for v in reversed(cash.tolist()):
+        if v > 0:
+            streak += 1
+        else:
+            break
+
+    cash5, stock5 = float(cash.tail(5).sum()), float(stock.tail(5).sum())
+    denom = cash5 + stock5
+
+    return {
+        "profit_cagr_3y": _cagr(3),
+        "profit_cagr_5y": _cagr(5),
+        "dividend_streak": float(streak),
+        "cash_div_ratio_5y": cash5 / denom if denom > 0 else np.nan,
+        "rights_count_10y": float(rights_count_10y),
+        "inst_flow_pp": float(inst_flow_pp) if inst_flow_pp is not None else np.nan,
+        "foreign_flow_pp": float(foreign_flow_pp) if foreign_flow_pp is not None else np.nan,
+    }

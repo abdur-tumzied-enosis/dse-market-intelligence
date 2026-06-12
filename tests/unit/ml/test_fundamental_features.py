@@ -58,3 +58,42 @@ def test_div_yield_nonnegative():
     result = compute_fundamental_features(_make_fundamentals())
     valid = result["div_yield"].dropna()
     assert (valid >= 0).all()
+
+
+def test_track_record_features():
+    import pytest
+    import pandas as pd
+    from ml.features.fundamental_features import compute_track_record_features
+
+    yearly = pd.DataFrame({
+        "fiscal_year":   [2021, 2022, 2023, 2024, 2025],
+        "net_profit_bdt": [5494.16e6, 4781.26e6, 6384.66e6, 10143.46e6, 13242.27e6],
+        "cash_div_pct":  [12.5, 10.0, 15.0, 12.5, 15.0],
+        "stock_div_pct": [12.5, 2.0, 10.0, 12.5, 15.0],
+    })
+    f = compute_track_record_features(yearly, rights_count_10y=1,
+                                      inst_flow_pp=-4.33, foreign_flow_pp=-0.61)
+    # CAGR 3y: (13242.27 / 6384.66) ** (1/2)? No — window is last 4 closed years:
+    # (13242.27/4781.26)^(1/3) - 1 ≈ 0.4043
+    assert f["profit_cagr_3y"] == pytest.approx(0.4043, abs=1e-3)
+    assert f["dividend_streak"] == 5
+    assert f["cash_div_ratio_5y"] == pytest.approx(65.0 / (65.0 + 52.0), abs=1e-4)
+    assert f["rights_count_10y"] == 1
+    assert f["inst_flow_pp"] == pytest.approx(-4.33)
+
+
+def test_track_record_cagr_null_on_sign_change():
+    import math
+    import pandas as pd
+    from ml.features.fundamental_features import compute_track_record_features
+
+    yearly = pd.DataFrame({
+        "fiscal_year":   [2022, 2023, 2024, 2025],
+        "net_profit_bdt": [-100e6, 50e6, 80e6, 120e6],
+        "cash_div_pct":  [0, 0, 5.0, 5.0],
+        "stock_div_pct": [0, 0, 0, 0],
+    })
+    f = compute_track_record_features(yearly, rights_count_10y=0,
+                                      inst_flow_pp=None, foreign_flow_pp=None)
+    assert math.isnan(f["profit_cagr_3y"])
+    assert f["dividend_streak"] == 2
