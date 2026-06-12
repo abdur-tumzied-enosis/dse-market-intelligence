@@ -90,6 +90,16 @@
 - [x] `extraction/bulk_load/fundamentals_historical_loader.py` — scrapes `displayCompany.php` for all active tickers; 5–8 years EPS/NAV/PE/cash_div/stock_div; ON CONFLICT (ticker, fiscal_year) DO UPDATE; 3 concurrent, 1.5s delay
 - [x] Run full bulk load: 406 tickers → 395 ok / 11 failed (bonds/sukuk have no EPS tables — expected) / **1,945 rows upserted** (2026-05-24)
 
+#### Fundamentals Enrichment (2026-06-12) — spec: docs/superpowers/specs/2026-06-12-fundamentals-enrichment-{prd,design}.md
+
+- [x] `db/migrations/036_fundamentals_enrichment.sql` — shareholding_history, corporate_actions, fundamentals_quarterly + fundamentals/companies column adds
+- [x] Header-grid table parsing (`_expand_header_grid`) replaces hardcoded column indices; D1 (net profit/TCI captured), D2 (dividend-only years kept — CITYBANK 5→22 years), D3 (diluted-EPS fallthrough) fixed
+- [x] `fetch_company_bundle()` — one request → yearly/quarterly/shareholding/actions/company-meta; loader writes all five with idempotent upserts
+- [x] Weekly job per-table metrics; bundle-aware health check; quality rules (shareholding sum, eps/nav bounds)
+- [x] Track-record features: profit CAGR 3y/5y, dividend streak, cash-div ratio, rights count, institutional/foreign flow
+- [ ] Run full enrichment bulk load across all 406 tickers (only CITYBANK/GP/SQURPHARMA/FAMILYTEX loaded so far)
+- [ ] P4 (separate effort): annual-report PDF extraction — `ir_url`/`psi_url` now stored per company
+
 #### AmarStock Adapters (BACKUP / fundamentals PRIMARY)
 
 - [x] Smoke-test all AmarStock endpoints — 14/14 passing (2026-05-21)
