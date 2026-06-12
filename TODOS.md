@@ -98,6 +98,10 @@
 - [x] Weekly job per-table metrics; bundle-aware health check; quality rules (shareholding sum, eps/nav bounds)
 - [x] Track-record features: profit CAGR 3y/5y, dividend streak, cash-div ratio, rights count, institutional/foreign flow
 - [ ] Run full enrichment bulk load across all 406 tickers (only CITYBANK/GP/SQURPHARMA/FAMILYTEX loaded so far)
+- [ ] Wire `run_quality_checks` into the actual write paths — pre-existing gap: rules (incl. new shareholding/eps/nav bounds) have NO production caller; CLAUDE.md's "rules run after every fetch" is aspirational
+- [ ] eps×pe vs year-end price warn rule (design §3.7) — deferred: needs DB price lookup, doesn't fit quality.py's pure-DataFrame shape
+- [ ] extraction/health.py structure-hash signature for the EPS/NAV table (design §3.7) — partially covered: bundle-aware adapter health_check fails loud on grid breakage, but no pre-emptive layout-drift alert
+- [ ] TLS consistency: `fetch_company_bundle` uses verify=False (dsebd.org broken cert chain); the rest of the dse_direct family still verifies and likely fails in Docker — align deliberately
 - [ ] P4 (separate effort): annual-report PDF extraction — `ir_url`/`psi_url` now stored per company
 
 #### AmarStock Adapters (BACKUP / fundamentals PRIMARY)

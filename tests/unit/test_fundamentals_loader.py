@@ -221,3 +221,21 @@ async def test_write_bundle_idempotent_on_conflict():
         "Some INSERT statements are missing ON CONFLICT DO UPDATE:\n"
         + "\n".join(sql for sql in pool.sqls() if "insert" in sql and "on conflict" not in sql)
     )
+
+
+async def test_load_one_isolates_write_failures():
+    """A DB-layer exception for one ticker must not escape _load_one —
+    it would cancel the gather() and abort the remaining ~405 tickers."""
+    from extraction.bulk_load.fundamentals_historical_loader import _load_one
+
+    class ExplodingPool(FakePool):
+        async def execute(self, sql: str, *args: Any) -> str:
+            raise RuntimeError("FK violation: ticker not in companies")
+
+    class FakeAdapter:
+        async def fetch_company_bundle(self, ticker: str = "") -> CompanyBundle:
+            return _make_bundle(ticker)
+
+    result = await _load_one(ExplodingPool(), "TESTCO", FakeAdapter(), "job_x")
+    assert result["status"] == "failed"
+    assert result["upserted"] == 0

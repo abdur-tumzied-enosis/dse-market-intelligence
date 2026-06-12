@@ -285,14 +285,22 @@ async def _load_one(
     adapter: DSEDirectCompanyInfoAdapter,
     job_id: str,
 ) -> dict:
+    _failed = {"ticker": ticker, "status": "failed", "upserted": 0,
+               "quarterly": 0, "shareholding": 0, "actions": 0}
     try:
         bundle = await adapter.fetch_company_bundle(ticker=ticker)
     except AdapterError as exc:
         logger.warning("fundamentals_hist_failed ticker=%s error=%s", ticker, exc)
-        return {"ticker": ticker, "status": "failed", "upserted": 0,
-                "quarterly": 0, "shareholding": 0, "actions": 0}
+        return _failed
 
-    counts = await _write_bundle(pool, bundle, job_id)
+    try:
+        counts = await _write_bundle(pool, bundle, job_id)
+    except Exception as exc:
+        # Per-ticker isolation: a DB-layer error (FK/CHECK violation, numeric
+        # overflow from one malformed page) must not escape into the gather()
+        # and abort the remaining ~405 tickers of the weekly run.
+        logger.warning("fundamentals_hist_write_failed ticker=%s error=%s", ticker, exc)
+        return _failed
     return {
         "ticker": ticker,
         "status": "ok",
