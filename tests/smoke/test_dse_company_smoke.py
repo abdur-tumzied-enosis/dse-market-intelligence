@@ -38,13 +38,7 @@ async def test_company_page_fetch_and_save(ticker: str) -> None:
     assert resp.status_code == 200
     assert len(resp.text) > 50_000, "page suspiciously small"
 
-    if ticker == "FAMILYTEX":
-        if "Share Holding Percentage" not in resp.text:
-            print(f"[WARN] {ticker}: 'Share Holding Percentage' not found — Z-category sparse page, skipping assertion")
-        else:
-            assert "Share Holding Percentage" in resp.text
-    else:
-        assert "Share Holding Percentage" in resp.text
+    assert "Share Holding Percentage" in resp.text
 
     path = FIXTURE_DIR / f"dse_company_{ticker}.pkl"
     with open(path, "wb") as f:
