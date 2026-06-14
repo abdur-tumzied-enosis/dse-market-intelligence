@@ -1066,8 +1066,11 @@ python -m ml.train.train_lstm                # produce models/v1/lstm_v0.pt
 python -m ml.eval.lstm_validation            # READ THE NUMBERS — full vs ex_floor
 python -m ml.eval.calibrate_direction        # writes lstm_direction_calibrators.pkl
 python -m ml.inference.predict_prices        # writes calibrated lstm_v2_cal rows
-# optional cleanup of the old fabricated lineage:
-#   DELETE FROM ml_predictions WHERE model_version = 'lstm_v1';
 ```
+
+Stale-row cleanup of the old fabricated lineage (`lstm_v0`/`lstm_v1`) is now
+automatic via `db/migrations/038_purge_uncalibrated_predictions.sql` (runs on
+`make migrate`), so inactive tickers stop serving the old percentile-rank
+confidence rather than relying on a manual DELETE.
 
 **Decision gate after `lstm_validation`:** if `ex_floor` rank-IC AND hit-rate are both ≈ base rate, the model is poisoned by floor-regime training labels — the next step is to **retrain excluding the floor window** (scoped move toward Approach B), NOT to trust the calibrator. If `ex_floor` shows real edge but `full` is muddy, proceed with calibration and note regime sensitivity. (See spec "Decision rules (post-D1)".)
