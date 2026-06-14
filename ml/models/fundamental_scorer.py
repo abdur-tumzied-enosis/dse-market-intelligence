@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from sklearn.isotonic import IsotonicRegression
-from xgboost import XGBClassifier
 
 FEATURE_COLS = [
     # Growth
@@ -34,7 +33,7 @@ class FundamentalScorer:
     """XGBoost classifier (isotonic-calibrated): P(stock outperforms peers, 12m)."""
 
     def __init__(self) -> None:
-        self._model = XGBClassifier(
+        self._model = xgb.XGBClassifier(
             n_estimators=100, max_depth=3, learning_rate=0.05,
             subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
             reg_lambda=1.0, eval_metric="logloss", random_state=42,
@@ -48,7 +47,7 @@ class FundamentalScorer:
         return X[self.feature_cols].fillna(self._medians)
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
-        self._medians = X[FEATURE_COLS].median()
+        self._medians = X[FEATURE_COLS].median().fillna(0.0)
         Xf = self._prep(X)
         n = len(Xf)
         cut = int(n * (1 - _CALIB_FRACTION))
@@ -81,7 +80,10 @@ class FundamentalScorer:
         return raw
 
     def shap_contributions(self, X: pd.DataFrame) -> pd.DataFrame:
-        """Native XGBoost TreeSHAP contributions (drops the bias column)."""
+        """Native XGBoost TreeSHAP contributions (drops the bias column).
+
+        Values are from the raw (uncalibrated) booster output, not the isotonic-calibrated probabilities.
+        """
         if not self._trained:
             raise RuntimeError("Model not trained. Call fit() or load() first.")
         Xf = self._prep(X)
@@ -91,6 +93,8 @@ class FundamentalScorer:
         return pd.DataFrame(contribs[:, :-1], columns=self.feature_cols, index=X.index)
 
     def feature_importances(self) -> dict[str, float]:
+        if not self._trained:
+            raise RuntimeError("Model not trained. Call fit() or load() first.")
         return dict(zip(self.feature_cols, self._model.feature_importances_.tolist()))
 
     def save(self, path: Path) -> None:
