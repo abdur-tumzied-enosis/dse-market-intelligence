@@ -7,27 +7,34 @@ import pandas as pd
 
 def add_neutralized_label(
     df: pd.DataFrame,
-    min_sector_names: int = 5,
+    min_cohort_size: int = 5,
 ) -> pd.DataFrame:
     """Add raw_return, neutralized_return, and binary top-half label.
 
     Requires columns: fiscal_year, sector, price_at_fy_end, price_fwd.
     neutralized_return subtracts the (fiscal_year, sector) median return; cohorts
-    with < min_sector_names fall back to the (fiscal_year) median. label = 1 if the
-    row's neutralized_return is above the within-year median (top half).
+    with < min_cohort_size fall back to the (fiscal_year) median. label = 1 if the
+    row's neutralized_return is above the within-year median (top half). Rows where
+    price_at_fy_end is zero yield NaN raw_return, NaN neutralized_return, and NaN
+    label — the training pipeline's dropna will remove them. Peer medians are
+    unaffected because groupby().transform("median") skips NaN by default.
     """
     out = df.copy()
-    out["raw_return"] = (out["price_fwd"] - out["price_at_fy_end"]) / out["price_at_fy_end"]
+    denom = out["price_at_fy_end"].replace(0, np.nan)
+    out["raw_return"] = (out["price_fwd"] - denom) / denom
 
     grp = out.groupby(["fiscal_year", "sector"])["raw_return"]
     sector_size = grp.transform("size")
     sector_med = grp.transform("median")
     year_med = out.groupby("fiscal_year")["raw_return"].transform("median")
-    baseline = sector_med.where(sector_size >= min_sector_names, year_med)
+    baseline = sector_med.where(sector_size >= min_cohort_size, year_med)
 
     out["neutralized_return"] = out["raw_return"] - baseline
     yr_med_neut = out.groupby("fiscal_year")["neutralized_return"].transform("median")
-    out["label"] = (out["neutralized_return"] > yr_med_neut).astype(int)
+    out["label"] = np.where(
+        out["neutralized_return"].isna(), np.nan,
+        (out["neutralized_return"] > yr_med_neut).astype(float),
+    )
     return out
 
 
@@ -51,6 +58,5 @@ def walk_forward_folds(
             continue
         train_idx = fy.index[fy <= cutoff].to_numpy()
         test_idx = fy.index[fy == test_year].to_numpy()
-        if len(train_idx) and len(test_idx):
-            folds.append((train_idx, test_idx))
+        folds.append((train_idx, test_idx))
     return folds

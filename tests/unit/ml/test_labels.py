@@ -5,7 +5,7 @@ import pandas as pd
 
 
 def _frame() -> pd.DataFrame:
-    # two sectors, one fiscal year; price_fwd encodes known returns
+    # six tickers, one sector, one fiscal year; price_fwd encodes known returns
     return pd.DataFrame({
         "ticker":          ["A", "B", "C", "D", "E", "F"],
         "fiscal_year":     [2022, 2022, 2022, 2022, 2022, 2022],
@@ -17,7 +17,7 @@ def _frame() -> pd.DataFrame:
 
 def test_label_top_half_within_year():
     from ml.train.labels import add_neutralized_label
-    out = add_neutralized_label(_frame(), min_sector_names=5)
+    out = add_neutralized_label(_frame(), min_cohort_size=5)
     # 6 names, balanced top half → exactly 3 positives
     assert out["label"].sum() == 3
     # best return is positive-labelled, worst is negative
@@ -27,7 +27,7 @@ def test_label_top_half_within_year():
 
 def test_label_sector_neutralized_subtracts_cohort_median():
     from ml.train.labels import add_neutralized_label
-    out = add_neutralized_label(_frame(), min_sector_names=5)
+    out = add_neutralized_label(_frame(), min_cohort_size=5)
     # raw returns: 0.30,0.20,0.10,0.05,0.00,-0.10 ; median 0.075
     a = out.loc[out["ticker"] == "A", "neutralized_return"].iloc[0]
     assert abs(a - (0.30 - 0.075)) < 1e-9
@@ -37,7 +37,7 @@ def test_label_falls_back_to_year_median_for_sparse_sector():
     from ml.train.labels import add_neutralized_label
     df = _frame()
     df.loc[0, "sector"] = "Tiny"  # sector of size 1 < min_sector_names
-    out = add_neutralized_label(df, min_sector_names=5)
+    out = add_neutralized_label(df, min_cohort_size=5)
     # Tiny-sector row uses YEAR median (not its own 1-row sector median)
     year_med = ((df["price_fwd"] - df["price_at_fy_end"]) / df["price_at_fy_end"]).median()
     a = out.loc[out["ticker"] == "A", "neutralized_return"].iloc[0]
@@ -53,3 +53,18 @@ def test_walk_forward_folds_embargo():
     train_idx, test_idx = folds[0]
     assert set(years.iloc[train_idx]) == {2020}
     assert set(years.iloc[test_idx]) == {2022}
+
+
+def test_label_nan_for_zero_base_price_and_peers_uncorrupted():
+    import math
+    from ml.train.labels import add_neutralized_label
+    df = _frame()
+    df.loc[0, "price_at_fy_end"] = 0.0  # ticker A: zero base price
+    out = add_neutralized_label(df, min_cohort_size=5)
+    a = out.loc[out["ticker"] == "A"].iloc[0]
+    assert math.isnan(a["raw_return"])
+    assert math.isnan(a["label"])
+    # peers' neutralized_return unaffected by the inf/NaN row
+    # remaining raw returns: B..F = 0.20,0.10,0.05,0.00,-0.10 ; their median = 0.05
+    b = out.loc[out["ticker"] == "B"].iloc[0]
+    assert abs(b["neutralized_return"] - (0.20 - 0.05)) < 1e-9
