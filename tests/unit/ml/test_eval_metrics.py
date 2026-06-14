@@ -67,6 +67,13 @@ def test_reliability_table_bins_and_counts():
     assert list(tbl["frac_pos"]) == [0.0, 1.0]
 
 
+def test_reliability_table_empty_input_keeps_schema():
+    from ml.eval.metrics import reliability_table
+    tbl = reliability_table(np.array([]), np.array([]))
+    assert list(tbl.columns) == ["bin", "mean_prob", "frac_pos", "n"]
+    assert len(tbl) == 0
+
+
 def test_is_low_signal_true_at_base_rate():
     from ml.eval.metrics import is_low_signal
     # hit == base, large n -> not distinguishable -> low signal

@@ -60,6 +60,9 @@ def reliability_table(
     are dropped."""
     prob = np.asarray(prob, dtype=float)
     outcome = np.asarray(outcome, dtype=float)
+    if prob.size == 0:
+        # Keep the column schema so callers can index the result unconditionally.
+        return pd.DataFrame(columns=["bin", "mean_prob", "frac_pos", "n"])
     edges = np.linspace(0.0, 1.0, n_bins + 1)
     # clip to [0, n_bins-1] so prob==1.0 lands in the last bin
     idx = np.clip(np.digitize(prob, edges[1:-1], right=False), 0, n_bins - 1)
