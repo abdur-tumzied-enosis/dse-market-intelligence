@@ -29,7 +29,11 @@ async def test_serve_vector_covers_all_feature_cols():
     #   pool.fetch (quarterly rows).
     pool.fetch = AsyncMock(side_effect=[fund_rows, []])  # main query, then quarterly
     pool.fetchval = AsyncMock(return_value=1)            # rights count
-    pool.fetchrow = AsyncMock(return_value={"inst_flow": 2.0, "foreign_flow": 1.0})
+    # flows query now also returns latest-snapshot ownership LEVELS
+    pool.fetchrow = AsyncMock(return_value={
+        "inst_flow": 2.0, "foreign_flow": 1.0,
+        "institution_pct": 22.0, "foreign_pct": 6.0,
+    })
 
     vec = await build_fundamental_feature_vector(pool, "TESTCO")
     assert set(FEATURE_COLS).issubset(set(vec.index))

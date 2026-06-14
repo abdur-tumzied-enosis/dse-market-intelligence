@@ -78,9 +78,13 @@ async def test_score_attaches_pillars_and_drivers():
         results = await score_all_tickers(pool, scorer)
 
     assert "GP" in results and "BANK" in results
-    assert "score" in results["GP"] and "pillars" in results["GP"]
-    assert "drivers" in results["GP"]
-    assert set(results["GP"]["pillars"].keys())  # non-empty pillar dict
+    gp = results["GP"]
+    assert {"health_score", "pillars", "drivers", "ml_score", "score"} <= set(gp.keys())
+    assert set(gp["pillars"].keys())  # non-empty pillar dict
+    # health_score is a float in [0, 100] or None
+    assert gp["health_score"] is None or (0.0 <= gp["health_score"] <= 100.0)
+    # drivers is a non-empty list
+    assert isinstance(gp["drivers"], list) and len(gp["drivers"]) > 0
 
 
 @pytest.mark.asyncio
@@ -95,8 +99,11 @@ async def test_write_scores_persists_detail_json():
     scores = {
         "GP": {
             "score": 0.7,
+            "health_score": 72.0,
+            "ml_score": 0.7,
             "pillars": {"growth": 80.0},
-            "drivers": [{"feature": "roe", "value": 0.2, "sentence": "x", "polarity": "good"}],
+            "drivers": [{"feature": "roe", "value": 0.2, "sentence": "x",
+                         "polarity": "good", "percentile": 0.95}],
         }
     }
     n = await write_scores(pool, scores, datetime(2026, 6, 14, tzinfo=UTC))
@@ -106,4 +113,6 @@ async def test_write_scores_persists_detail_json():
     # find the json string among positional args (the fundamental_detail payload)
     detail_arg = next(a for a in args if isinstance(a, str) and a.strip().startswith("{"))
     decoded = json.loads(detail_arg)
-    assert "pillars" in decoded and "drivers" in decoded and decoded["score"] == 0.7
+    assert {"health_score", "ml_score", "pillars", "drivers"} <= set(decoded.keys())
+    # fundamental_score column still receives the ML proba
+    assert 0.7 in args

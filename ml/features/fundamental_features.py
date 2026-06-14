@@ -158,6 +158,23 @@ def compute_pillar_scores(cross: pd.DataFrame) -> pd.DataFrame:
     return scores
 
 
+def compute_feature_percentiles(cross: pd.DataFrame) -> pd.DataFrame:
+    """Direction-adjusted cross-sectional percentile (0-1, higher = better) per pillar feature.
+
+    Uses PILLAR_SPEC directions: percentile rank of each feature across the cohort,
+    inverted (1 - pct) for lower-is-better features. Features absent from `cross` are
+    skipped. NaN feature values yield NaN percentile (rank skips them).
+    """
+    feat_dir = {f: d for feats in PILLAR_SPEC.values() for f, d in feats}
+    out = pd.DataFrame(index=cross.index)
+    for feat, direction in feat_dir.items():
+        if feat not in cross.columns:
+            continue
+        pct = cross[feat].rank(pct=True)
+        out[feat] = pct if direction == 1 else (1.0 - pct)
+    return out
+
+
 def compute_quarterly_eps_yoy(quarterly: pd.DataFrame) -> float:
     """Latest quarter's basic EPS vs the same quarter one year earlier.
 

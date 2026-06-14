@@ -24,13 +24,18 @@ log = logging.getLogger(__name__)
 
 
 async def score_all_tickers(pool, scorer) -> dict[str, dict]:
-    """Score all active tickers; return {ticker: {score, pillars, drivers}}.
+    """Score all active tickers; return {ticker: {...scorecard payload...}}.
 
-    Builds every ticker's feature vector first so pillar scores (cross-sectional
-    percentiles) and SHAP attributions are computed over the full scored cohort.
+    Builds every ticker's feature vector first so pillar scores and feature
+    percentiles (both cross-sectional) are computed over the full scored cohort.
+    The beginner headline is the deterministic equal-weight pillar composite
+    (health_score, 0-100); the ML probability is demoted to a secondary ml_score.
     """
-    from ml.explain.fundamental_explainer import build_explanation
-    from ml.features.fundamental_features import compute_pillar_scores
+    from ml.explain.fundamental_explainer import build_scorecard_explanation
+    from ml.features.fundamental_features import (
+        compute_feature_percentiles,
+        compute_pillar_scores,
+    )
 
     tickers = await pool.fetch(
         "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker")
@@ -52,21 +57,27 @@ async def score_all_tickers(pool, scorer) -> dict[str, dict]:
 
     cross = pd.DataFrame(vectors).T  # index = ticker, columns = feature names
     pillars_df = compute_pillar_scores(cross)
+    feat_pct_df = compute_feature_percentiles(cross)
     feat_df = cross.reindex(columns=FEATURE_COLS)
-    proba = scorer.predict_proba(feat_df)
-    contribs = scorer.shap_contributions(feat_df)
+    proba = scorer.predict_proba(feat_df)  # ml_score (secondary, demoted)
 
     results: dict[str, dict] = {}
     for i, ticker in enumerate(cross.index):
-        pillars = {k: (float(v) if pd.notna(v) else None)
-                   for k, v in pillars_df.loc[ticker].items()}
-        payload = build_explanation(
-            headline=float(proba[i]) * 100.0,
-            pillars={k: v for k, v in pillars.items() if v is not None},
+        prow = pillars_df.loc[ticker]
+        pillars = {k: (float(v) if pd.notna(v) else None) for k, v in prow.items()}
+        valid = [v for v in pillars.values() if v is not None]
+        health = float(sum(valid) / len(valid)) if valid else None  # 0-100 equal-weight composite
+        ml_score = float(proba[i])
+        payload = build_scorecard_explanation(
+            health_score=health, pillars=pillars,
             feature_row=cross.loc[ticker],
-            contributions=contribs.iloc[i])
+            feature_percentiles=(feat_pct_df.loc[ticker]
+                                 if ticker in feat_pct_df.index else pd.Series(dtype=float)),
+            ml_score=ml_score)
         results[ticker] = {
-            "score": float(proba[i]),
+            "score": ml_score,        # persisted to fundamental_score column (ML proba, kept for compat)
+            "health_score": health,   # honest beginner headline (0-100)
+            "ml_score": ml_score,     # explicit secondary
             "pillars": pillars,
             "drivers": payload["drivers"],
         }
@@ -79,7 +90,8 @@ async def write_scores(pool, scores: dict[str, dict], scored_at: datetime) -> in
     count = 0
     for ticker, payload in scores.items():
         detail = {
-            "score": payload["score"],
+            "health_score": payload["health_score"],
+            "ml_score": payload["ml_score"],
             "pillars": payload["pillars"],
             "drivers": payload["drivers"],
         }

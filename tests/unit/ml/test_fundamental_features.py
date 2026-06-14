@@ -190,6 +190,45 @@ def test_compute_pillar_scores_ranges_and_direction():
     assert pillars.loc[2, "value"] == pillars["value"].max()
 
 
+def test_compute_feature_percentiles_direction_adjusted():
+    import math
+
+    import numpy as np
+    import pandas as pd
+    import pytest
+
+    from ml.features.fundamental_features import compute_feature_percentiles
+
+    cross = pd.DataFrame(
+        {
+            # higher-is-better feature, ascending
+            "eps_growth_1yr": [0.0, 0.1, 0.2],
+            # lower-is-better feature
+            "pe_vs_sector": [2.0, 1.0, 0.5],
+            # partial NaN, higher-is-better
+            "roe": [0.05, np.nan, 0.15],
+            # absent-from-PILLAR_SPEC column -> skipped
+            "not_a_pillar_feature": [1.0, 2.0, 3.0],
+        },
+        index=["A", "B", "C"],
+    )
+    out = compute_feature_percentiles(cross)
+
+    # higher-is-better: highest raw value -> ~1.0 adjusted percentile
+    assert out.loc["C", "eps_growth_1yr"] == pytest.approx(1.0)
+    assert out["eps_growth_1yr"].idxmax() == "C"
+    # lower-is-better: lowest raw value -> highest adjusted percentile
+    assert out["pe_vs_sector"].idxmax() == "C"
+    # 3 rows, lowest raw rank pct = 1/3 -> inverted = 1 - 1/3
+    assert out.loc["C", "pe_vs_sector"] == pytest.approx(1.0 - 1.0 / 3.0)
+    # highest raw value (worst) -> lowest adjusted percentile
+    assert out["pe_vs_sector"].idxmin() == "A"
+    # NaN raw value stays NaN
+    assert math.isnan(out.loc["B", "roe"])
+    # column not in PILLAR_SPEC is skipped
+    assert "not_a_pillar_feature" not in out.columns
+
+
 def test_compute_pillar_scores_nan_handling():
     import math
 
