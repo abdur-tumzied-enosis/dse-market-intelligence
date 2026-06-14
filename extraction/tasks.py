@@ -83,7 +83,7 @@ async def _run_ml_inference_async() -> dict:
 
     async with job_run("nightly_ml") as ctx:
         pool = await get_pool()
-        fund_scores: dict[str, float] = {}
+        fund_scores: dict[str, dict[str, object]] = {}
 
         # ── 1. Fundamental scoring (XGBoost) ──────────────────────────
         fund_path = Path("models/v1/fundamental_scorer.pkl")
@@ -165,7 +165,8 @@ async def _run_ml_inference_async() -> dict:
                 if dcf["margin_of_safety_pct"] is not None:
                     mos = dcf["margin_of_safety_pct"]
                     valuation_score = min(max((mos + 50) / 100, 0.0), 1.0)
-                    fund_score = fund_scores.get(ticker)
+                    fund_entry = fund_scores.get(ticker)
+                    fund_score = fund_entry["score"] if fund_entry else None
                     health = compute_health_score(
                         fundamental_score=fund_score,
                         valuation_score=valuation_score,
