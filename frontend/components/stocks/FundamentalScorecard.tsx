@@ -2,12 +2,12 @@ import type { FundamentalDetail } from '@/lib/types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Descriptive word for the headline score — deliberately NOT buy/sell. */
+/** Descriptive word for the headline score — deliberately NOT buy/sell.
+ *  Bands match the color thresholds + pillar bars (≥70 / ≥40 / <40). */
 function scoreWord(n: number | null): string {
   if (n == null) return 'No data'
-  if (n >= 80) return 'Strong'
-  if (n >= 60) return 'Solid'
-  if (n >= 40) return 'Mixed'
+  if (n >= 70) return 'Strong'
+  if (n >= 40) return 'Fair'
   return 'Weak'
 }
 
@@ -24,26 +24,32 @@ function barColor(pct: number): string {
   return pct >= 70 ? '#00d4a4' : pct >= 40 ? '#f5c842' : '#ff4d6a'
 }
 
-// Fixed pillar order + Title Case labels. Keys are lowercase in detail.pillars.
-const PILLARS: { key: string; label: string }[] = [
-  { key: 'growth', label: 'Growth' },
-  { key: 'value', label: 'Value' },
-  { key: 'quality', label: 'Quality' },
-  { key: 'dividends', label: 'Dividends' },
-  { key: 'safety', label: 'Safety' },
-  { key: 'ownership', label: 'Ownership' },
+// Fixed pillar order + Title Case labels + beginner tooltips.
+// Keys are lowercase in detail.pillars. Score = percentile vs market peers (higher = better).
+const PILLARS: { key: string; label: string; help: string }[] = [
+  { key: 'growth', label: 'Growth', help: 'Is the company growing earnings, book value and profits over time?' },
+  { key: 'value', label: 'Value', help: 'Is the stock cheap relative to its earnings, assets and sector peers?' },
+  { key: 'quality', label: 'Quality', help: 'How stable and genuine are the profits — return on equity, consistency, earnings quality.' },
+  { key: 'dividends', label: 'Dividends', help: 'Track record of paying regular cash dividends to shareholders.' },
+  { key: 'safety', label: 'Safety', help: 'Financial risk: debt levels and share dilution. Higher = safer (less debt).' },
+  { key: 'ownership', label: 'Ownership', help: 'Are institutions and foreign investors increasing their stake?' },
 ]
 
 // ─── Pillar bar (reuses KeyMetricsStrip ScoreBar visual) ────────────────────────
 
-function PillarBar({ label, value }: { label: string; value: number | null }) {
+function PillarBar({ label, value, help }: { label: string; value: number | null; help: string }) {
   const hasValue = value != null
   const n = Number(value ?? 0)
   const pct = Math.min(100, Math.max(0, n))
   return (
     <div>
       <div className="flex justify-between text-[10px] font-mono mb-1">
-        <span className="text-[#8a8a9e]">{label}</span>
+        <span
+          className="text-[#8a8a9e] cursor-help decoration-dotted decoration-[#3a3a4a] underline underline-offset-2"
+          title={help}
+        >
+          {label}
+        </span>
         <span className="text-[#e8e8f0] tabular-nums">{hasValue ? n.toFixed(0) : '—'}</span>
       </div>
       <div className="h-1.5 rounded-full bg-[#1a1a24] overflow-hidden">
@@ -115,8 +121,8 @@ export default function FundamentalScorecard({ detail }: { detail: FundamentalDe
       {/* Pillars + drivers */}
       <div className="space-y-4">
         <div className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2">
-          {PILLARS.map(({ key, label }) => (
-            <PillarBar key={key} label={label} value={pillars[key] ?? null} />
+          {PILLARS.map(({ key, label, help }) => (
+            <PillarBar key={key} label={label} value={pillars[key] ?? null} help={help} />
           ))}
         </div>
 
