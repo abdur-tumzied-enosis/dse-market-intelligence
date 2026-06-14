@@ -81,3 +81,29 @@ async def test_score_attaches_pillars_and_drivers():
     assert "score" in results["GP"] and "pillars" in results["GP"]
     assert "drivers" in results["GP"]
     assert set(results["GP"]["pillars"].keys())  # non-empty pillar dict
+
+
+@pytest.mark.asyncio
+async def test_write_scores_persists_detail_json():
+    import json
+    from datetime import UTC, datetime
+
+    from ml.inference.score_fundamentals import write_scores
+
+    pool = MagicMock()
+    pool.execute = AsyncMock()
+    scores = {
+        "GP": {
+            "score": 0.7,
+            "pillars": {"growth": 80.0},
+            "drivers": [{"feature": "roe", "value": 0.2, "sentence": "x", "polarity": "good"}],
+        }
+    }
+    n = await write_scores(pool, scores, datetime(2026, 6, 14, tzinfo=UTC))
+    assert n == 1
+    pool.execute.assert_awaited_once()
+    args = pool.execute.await_args.args
+    # find the json string among positional args (the fundamental_detail payload)
+    detail_arg = next(a for a in args if isinstance(a, str) and a.strip().startswith("{"))
+    decoded = json.loads(detail_arg)
+    assert "pillars" in decoded and "drivers" in decoded and decoded["score"] == 0.7

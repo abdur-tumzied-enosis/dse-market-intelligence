@@ -6,6 +6,7 @@ Run: python -m ml.inference.score_fundamentals
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,20 +74,28 @@ async def score_all_tickers(pool, scorer) -> dict[str, dict]:
 
 
 async def write_scores(pool, scores: dict[str, dict], scored_at: datetime) -> int:
-    """Upsert fundamental_score into stock_scores. Returns rows inserted."""
+    """Upsert fundamental_score + detail payload into stock_scores. Returns rows written."""
     scored_date = scored_at.date()
     count = 0
     for ticker, payload in scores.items():
+        detail = {
+            "score": payload["score"],
+            "pillars": payload["pillars"],
+            "drivers": payload["drivers"],
+        }
         await pool.execute(
             """
             INSERT INTO stock_scores
-                (ticker, scored_at, scored_date, fundamental_score, model_version)
-            VALUES ($1, $2, $3, $4, $5)
+                (ticker, scored_at, scored_date, fundamental_score,
+                 fundamental_detail, model_version)
+            VALUES ($1, $2, $3, $4, $5, $6)
             ON CONFLICT (ticker, model_version, scored_date) DO UPDATE
-                SET fundamental_score = EXCLUDED.fundamental_score,
-                    scored_at         = EXCLUDED.scored_at
+                SET fundamental_score   = EXCLUDED.fundamental_score,
+                    fundamental_detail  = EXCLUDED.fundamental_detail,
+                    scored_at           = EXCLUDED.scored_at
             """,
-            ticker, scored_at, scored_date, payload["score"], MODEL_VERSION,
+            ticker, scored_at, scored_date, payload["score"],
+            json.dumps(detail), MODEL_VERSION,
         )
         count += 1
     return count
