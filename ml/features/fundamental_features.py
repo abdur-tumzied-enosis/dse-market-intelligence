@@ -37,6 +37,14 @@ def compute_fundamental_features(df: pd.DataFrame) -> pd.DataFrame:
     result["roe"] = (eps / nav).clip(-5, 5)
     result["payout_ratio"] = (cash_div / 100.0 / eps.abs().replace(0, np.nan)).clip(0, 3)
 
+    # earnings quality: comprehensive income vs net profit (1.0 == clean)
+    if "total_comprehensive_income_bdt" in result.columns and "net_profit_bdt" in result.columns:
+        npft = pd.to_numeric(result["net_profit_bdt"], errors="coerce").replace(0, np.nan)
+        tci = pd.to_numeric(result["total_comprehensive_income_bdt"], errors="coerce")
+        result["earnings_quality"] = (tci / npft).clip(-2, 3)
+    else:
+        result["earnings_quality"] = np.nan
+
     # Clip extreme values (data errors in DSE filings)
     for col in ["eps_growth_1yr", "eps_growth_3yr", "nav_growth"]:
         result[col] = result[col].clip(-5, 5)
@@ -89,3 +97,47 @@ def compute_track_record_features(
         "inst_flow_pp": float(inst_flow_pp) if inst_flow_pp is not None else np.nan,
         "foreign_flow_pp": float(foreign_flow_pp) if foreign_flow_pp is not None else np.nan,
     }
+
+
+def compute_leverage_features(
+    short_loan_mn: float | None,
+    long_loan_mn: float | None,
+    market_cap_bdt: float | None,
+    net_profit_bdt: float | None,
+) -> dict[str, float]:
+    """Leverage ratios from latest loan snapshot. Missing loan data -> NaN (not 0).
+
+    Loan columns are in millions of BDT; market cap / profit are in BDT.
+    """
+    if short_loan_mn is None and long_loan_mn is None:
+        return {"leverage_mktcap": np.nan, "leverage_profit": np.nan}
+    total_loan_bdt = ((short_loan_mn or 0.0) + (long_loan_mn or 0.0)) * 1e6
+    mktcap = float(market_cap_bdt) if market_cap_bdt else np.nan
+    profit = float(net_profit_bdt) if net_profit_bdt else np.nan
+    lev_mc = total_loan_bdt / mktcap if mktcap and mktcap > 0 else np.nan
+    lev_pf = total_loan_bdt / profit if profit and profit > 0 else np.nan
+    return {
+        "leverage_mktcap": float(np.clip(lev_mc, 0, 50)) if not np.isnan(lev_mc) else np.nan,
+        "leverage_profit": float(np.clip(lev_pf, 0, 100)) if not np.isnan(lev_pf) else np.nan,
+    }
+
+
+def compute_quarterly_eps_yoy(quarterly: pd.DataFrame) -> float:
+    """Latest quarter's basic EPS vs the same quarter one year earlier.
+
+    quarterly columns: fiscal_year, quarter, eps_basic. Returns NaN if the
+    prior-year same quarter is missing or non-positive.
+    """
+    if quarterly.empty:
+        return np.nan
+    q = quarterly.sort_values(["fiscal_year", "quarter"]).reset_index(drop=True)
+    last = q.iloc[-1]
+    fy, qtr = int(last["fiscal_year"]), int(last["quarter"])
+    cur = pd.to_numeric(pd.Series([last["eps_basic"]]), errors="coerce").iloc[0]
+    prior = q[(q["fiscal_year"] == fy - 1) & (q["quarter"] == qtr)]
+    if prior.empty:
+        return np.nan
+    prev = pd.to_numeric(prior["eps_basic"], errors="coerce").iloc[0]
+    if not np.isfinite(cur) or not np.isfinite(prev) or prev <= 0:
+        return np.nan
+    return float(cur / prev - 1)

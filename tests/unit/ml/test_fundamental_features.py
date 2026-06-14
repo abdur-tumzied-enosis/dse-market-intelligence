@@ -100,3 +100,56 @@ def test_track_record_cagr_null_on_sign_change():
                                       inst_flow_pp=None, foreign_flow_pp=None)
     assert math.isnan(f["profit_cagr_3y"])
     assert f["dividend_streak"] == 2
+
+
+def test_compute_leverage_features_uses_market_cap_and_profit():
+    from ml.features.fundamental_features import compute_leverage_features
+    f = compute_leverage_features(
+        short_loan_mn=200.0, long_loan_mn=800.0,
+        market_cap_bdt=5_000_000_000.0, net_profit_bdt=500_000_000.0,
+    )
+    # total loan = 1000 mn = 1.0e9 bdt
+    assert abs(f["leverage_mktcap"] - (1.0e9 / 5.0e9)) < 1e-9
+    assert abs(f["leverage_profit"] - (1.0e9 / 5.0e8)) < 1e-9
+
+
+def test_compute_leverage_features_missing_loan_is_nan_not_zero():
+    import math
+    from ml.features.fundamental_features import compute_leverage_features
+    f = compute_leverage_features(
+        short_loan_mn=None, long_loan_mn=None,
+        market_cap_bdt=5_000_000_000.0, net_profit_bdt=500_000_000.0,
+    )
+    assert math.isnan(f["leverage_mktcap"])
+    assert math.isnan(f["leverage_profit"])
+
+
+def test_quarterly_eps_yoy():
+    import pandas as pd
+    from ml.features.fundamental_features import compute_quarterly_eps_yoy
+    q = pd.DataFrame({
+        "fiscal_year": [2023, 2023, 2024, 2024],
+        "quarter":     [1, 2, 1, 2],
+        "eps_basic":   [1.0, 1.2, 1.5, 1.6],
+    })
+    # latest quarter = 2024Q2 (1.6); same quarter prior year = 2023Q2 (1.2)
+    yoy = compute_quarterly_eps_yoy(q)
+    assert abs(yoy - (1.6 / 1.2 - 1)) < 1e-9
+
+
+def test_quarterly_eps_yoy_nan_when_no_prior_year_quarter():
+    import math
+    import pandas as pd
+    from ml.features.fundamental_features import compute_quarterly_eps_yoy
+    q = pd.DataFrame({"fiscal_year": [2024], "quarter": [2], "eps_basic": [1.6]})
+    assert math.isnan(compute_quarterly_eps_yoy(q))
+
+
+def test_earnings_quality_in_features():
+    from ml.features.fundamental_features import compute_fundamental_features
+    df = _make_fundamentals()
+    df["net_profit_bdt"] = [100e6, 110e6, 120e6, 100e6, 140e6]
+    df["total_comprehensive_income_bdt"] = [90e6, 110e6, 130e6, 80e6, 140e6]
+    result = compute_fundamental_features(df)
+    # 2023: 140/140 = 1.0
+    assert abs(result.iloc[4]["earnings_quality"] - 1.0) < 1e-6
