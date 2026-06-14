@@ -22,18 +22,20 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
 
-async def score_all_tickers(pool, scorer: FundamentalScorer) -> dict[str, float]:
-    """
-    Score all active tickers with FundamentalScorer.
+async def score_all_tickers(pool, scorer) -> dict[str, dict]:
+    """Score all active tickers; return {ticker: {score, pillars, drivers}}.
 
-    Returns dict mapping ticker → fundamental_score (0.0–1.0).
-    Tickers with missing fundamental data are skipped.
+    Builds every ticker's feature vector first so pillar scores (cross-sectional
+    percentiles) and SHAP attributions are computed over the full scored cohort.
     """
+    from ml.explain.fundamental_explainer import build_explanation
+    from ml.features.fundamental_features import compute_pillar_scores
+    from ml.models.fundamental_scorer import FEATURE_COLS
+
     tickers = await pool.fetch(
-        "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker"
-    )
+        "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker")
 
-    scores: dict[str, float] = {}
+    vectors: dict[str, pd.Series] = {}
     for row in tickers:
         ticker = row["ticker"]
         try:
@@ -41,20 +43,41 @@ async def score_all_tickers(pool, scorer: FundamentalScorer) -> dict[str, float]
             if feat_vec.empty or feat_vec.isna().all():
                 log.debug(f"skip {ticker}: no fundamental data")
                 continue
-            feat_df = pd.DataFrame([feat_vec])
-            proba = scorer.predict_proba(feat_df)
-            scores[ticker] = float(proba[0])
-        except Exception as exc:
+            vectors[ticker] = feat_vec
+        except Exception as exc:  # noqa: BLE001
             log.warning(f"skip {ticker}: {exc}")
 
-    return scores
+    if not vectors:
+        return {}
+
+    cross = pd.DataFrame(vectors).T  # index = ticker, columns = feature names
+    pillars_df = compute_pillar_scores(cross)
+    feat_df = cross.reindex(columns=FEATURE_COLS)
+    proba = scorer.predict_proba(feat_df)
+    contribs = scorer.shap_contributions(feat_df)
+
+    results: dict[str, dict] = {}
+    for i, ticker in enumerate(cross.index):
+        pillars = {k: (float(v) if pd.notna(v) else None)
+                   for k, v in pillars_df.loc[ticker].items()}
+        payload = build_explanation(
+            headline=float(proba[i]) * 100.0,
+            pillars={k: v for k, v in pillars.items() if v is not None},
+            feature_row=cross.loc[ticker],
+            contributions=contribs.iloc[i])
+        results[ticker] = {
+            "score": float(proba[i]),
+            "pillars": pillars,
+            "drivers": payload["drivers"],
+        }
+    return results
 
 
-async def write_scores(pool, scores: dict[str, float], scored_at: datetime) -> int:
+async def write_scores(pool, scores: dict[str, dict], scored_at: datetime) -> int:
     """Upsert fundamental_score into stock_scores. Returns rows inserted."""
     scored_date = scored_at.date()
     count = 0
-    for ticker, score in scores.items():
+    for ticker, payload in scores.items():
         await pool.execute(
             """
             INSERT INTO stock_scores
@@ -64,7 +87,7 @@ async def write_scores(pool, scores: dict[str, float], scored_at: datetime) -> i
                 SET fundamental_score = EXCLUDED.fundamental_score,
                     scored_at         = EXCLUDED.scored_at
             """,
-            ticker, scored_at, scored_date, score, MODEL_VERSION,
+            ticker, scored_at, scored_date, payload["score"], MODEL_VERSION,
         )
         count += 1
     return count
