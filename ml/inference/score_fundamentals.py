@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from db.pool import get_pool
+from db.pool import get_batch_pool
 from ml.features.feature_store import build_fundamental_feature_vector
 from ml.models.fundamental_scorer import FEATURE_COLS, FundamentalScorer
 
@@ -107,7 +107,7 @@ async def main() -> None:
             f"Model not found at {MODEL_PATH}. Run ml.train.train_fundamental first."
         )
 
-    pool = await get_pool()
+    pool = await get_batch_pool()
     scorer = FundamentalScorer()
     scorer.load(MODEL_PATH)
 

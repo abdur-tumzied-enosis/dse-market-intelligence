@@ -15,7 +15,7 @@ import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.metrics import roc_auc_score
 
-from db.pool import get_pool
+from db.pool import get_batch_pool
 from ml.features.fundamental_features import (
     compute_fundamental_features,
     compute_quarterly_eps_yoy,
@@ -165,7 +165,7 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 async def main() -> None:
-    pool = await get_pool()
+    pool = await get_batch_pool()
     log.info("Building training dataset...")
     X, meta = await build_training_dataset(pool)
     y = meta["label"]
