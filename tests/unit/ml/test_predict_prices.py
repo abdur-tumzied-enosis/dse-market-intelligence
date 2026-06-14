@@ -42,4 +42,4 @@ async def test_module_importable():
 
     assert hasattr(pp, "main")
     assert hasattr(pp, "MODEL_VERSION")
-    assert pp.MODEL_VERSION == "lstm_v1"
+    assert pp.MODEL_VERSION == "lstm_v2_cal"

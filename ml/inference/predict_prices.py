@@ -11,6 +11,7 @@ import logging
 import pickle
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -21,6 +22,10 @@ from ml.constants import HORIZONS, MIN_TICKERS_PER_DATE, PRICE_FEATURE_COLS, SEQ
 from ml.features.cross_sectional import cross_sectional_zscore
 from ml.features.feature_store import build_price_feature_matrix
 from ml.models.lstm_predictor import LSTMPredictor
+
+if TYPE_CHECKING:
+    import numpy.typing as npt
+    from sklearn.isotonic import IsotonicRegression
 
 MODEL_PATH = Path("models/v1/lstm_v0.pt")
 MODEL_VERSION = "lstm_v2_cal"
@@ -50,7 +55,11 @@ async def _build_latest_panel(pool, tickers: list[str]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
-def calibrated_direction(scores, calibrator, low_signal: bool):
+def calibrated_direction(
+    scores: npt.ArrayLike,
+    calibrator: IsotonicRegression | None,
+    low_signal: bool,
+) -> tuple[list[str], np.ndarray]:
     """Map raw per-ticker scores for one horizon to (directions, confidences).
 
     With a usable calibrator: confidence = calibrated P of the STATED side
@@ -68,7 +77,7 @@ def calibrated_direction(scores, calibrator, low_signal: bool):
     return directions, confidences
 
 
-def _load_calibrators():
+def _load_calibrators() -> tuple[dict[int, IsotonicRegression], dict[int, dict[str, object]]]:
     """Returns (calibrators dict, metadata dict). Empty if the file is absent —
     inference then writes neutral confidence everywhere (honest degraded mode)."""
     if not CALIBRATORS_PATH.exists():
