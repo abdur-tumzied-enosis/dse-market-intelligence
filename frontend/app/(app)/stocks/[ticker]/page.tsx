@@ -261,8 +261,6 @@ export default async function StockDetailPage({
           <KeyMetricsStrip
             groups={metricGroups}
             score={scoreNum}
-            fundamentalScore={health_score?.fundamental_score ?? null}
-            momentumScore={health_score?.momentum_score ?? null}
           />
           {health_score?.scored_at && (
             <p className="text-[9px] font-mono text-[#6b6b80] px-4 pb-3">

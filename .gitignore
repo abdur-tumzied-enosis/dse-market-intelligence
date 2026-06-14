@@ -98,3 +98,6 @@ test-data/*
 gcp-sa.json
 # git worktrees (docker-mounted isolation)
 .worktrees/
+
+.agents/
+.claude/

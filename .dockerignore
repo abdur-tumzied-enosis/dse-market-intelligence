@@ -4,3 +4,4 @@ data/amarstock_csv/
 mgmt-ui/*
 docs/*
 .vscode/
+.venv/
