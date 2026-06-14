@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -60,6 +61,7 @@ class HealthScoreRow(BaseModel):
     fundamental_score: Decimal | None
     momentum_score: Decimal | None
     scored_at: datetime
+    fundamental_detail: dict[str, Any] | None = None
 
 
 class StockDetail(BaseModel):
