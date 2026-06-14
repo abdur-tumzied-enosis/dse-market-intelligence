@@ -122,6 +122,42 @@ def compute_leverage_features(
     }
 
 
+PILLAR_SPEC: dict[str, list[tuple[str, int]]] = {
+    "growth":    [("eps_growth_1yr", 1), ("eps_growth_3yr", 1), ("profit_cagr_3y", 1),
+                  ("profit_cagr_5y", 1), ("nav_growth", 1), ("quarterly_eps_yoy", 1)],
+    "quality":   [("eps_consistency", 1), ("roe", 1), ("earnings_quality", 1)],
+    "value":     [("pe_vs_sector", -1), ("pb_ratio", -1), ("div_yield", 1),
+                  ("dividend_yield_pct", 1)],
+    "dividends": [("dividend_streak", 1), ("cash_div_ratio_5y", 1), ("payout_ratio", 1)],
+    "safety":    [("leverage_mktcap", -1), ("leverage_profit", -1), ("rights_count_10y", -1)],
+    "ownership": [("inst_flow_pp", 1), ("foreign_flow_pp", 1), ("institution_pct", 1),
+                  ("foreign_pct", 1)],
+}
+
+
+def compute_pillar_scores(cross: pd.DataFrame) -> pd.DataFrame:
+    """Cross-sectional 0-100 pillar scores for a cohort of tickers.
+
+    Each constituent feature is percentile-ranked across the cohort (pct=True),
+    inverted where lower-is-better, then averaged per pillar and scaled to 0-100.
+    NaN constituents are ignored in the per-pillar mean; a pillar with no usable
+    constituents for a row scores NaN.
+    """
+    scores = pd.DataFrame(index=cross.index)
+    for pillar, feats in PILLAR_SPEC.items():
+        cols = []
+        for feat, direction in feats:
+            if feat not in cross.columns:
+                continue
+            pct = cross[feat].rank(pct=True)
+            cols.append(pct if direction == 1 else (1.0 - pct))
+        if cols:
+            scores[pillar] = pd.concat(cols, axis=1).mean(axis=1, skipna=True) * 100.0
+        else:
+            scores[pillar] = np.nan
+    return scores
+
+
 def compute_quarterly_eps_yoy(quarterly: pd.DataFrame) -> float:
     """Latest quarter's basic EPS vs the same quarter one year earlier.
 

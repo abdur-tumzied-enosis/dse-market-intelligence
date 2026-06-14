@@ -153,3 +153,33 @@ def test_earnings_quality_in_features():
     result = compute_fundamental_features(df)
     # 2023: 140/140 = 1.0
     assert abs(result.iloc[4]["earnings_quality"] - 1.0) < 1e-6
+
+
+def test_compute_pillar_scores_ranges_and_direction():
+    import pandas as pd
+    from ml.features.fundamental_features import compute_pillar_scores, PILLAR_SPEC
+
+    # 3 tickers, growth ascending; safety: lower leverage = better
+    cross = pd.DataFrame({
+        "eps_growth_1yr": [0.0, 0.1, 0.2], "eps_growth_3yr": [0.0, 0.1, 0.2],
+        "profit_cagr_3y": [0.0, 0.1, 0.2], "profit_cagr_5y": [0.0, 0.1, 0.2],
+        "nav_growth": [0.0, 0.1, 0.2], "quarterly_eps_yoy": [0.0, 0.1, 0.2],
+        "eps_consistency": [0.5, 0.6, 0.7], "roe": [0.05, 0.1, 0.15],
+        "earnings_quality": [0.8, 0.9, 1.0],
+        "pe_vs_sector": [2.0, 1.0, 0.5], "pb_ratio": [3.0, 2.0, 1.0],
+        "div_yield": [0.0, 0.02, 0.04], "dividend_yield_pct": [0.0, 2.0, 4.0],
+        "dividend_streak": [0, 2, 5], "cash_div_ratio_5y": [0.0, 0.5, 1.0],
+        "payout_ratio": [0.0, 0.3, 0.6],
+        "leverage_mktcap": [1.0, 0.5, 0.1], "leverage_profit": [10.0, 5.0, 1.0],
+        "rights_count_10y": [3, 1, 0],
+        "inst_flow_pp": [-1.0, 0.0, 2.0], "foreign_flow_pp": [-1.0, 0.0, 2.0],
+        "institution_pct": [10.0, 20.0, 30.0], "foreign_pct": [0.0, 5.0, 10.0],
+    })
+    pillars = compute_pillar_scores(cross)
+    assert set(pillars.columns) == set(PILLAR_SPEC.keys())
+    # all scores within 0..100
+    assert ((pillars >= 0) & (pillars <= 100)).all().all()
+    # ticker index 2 is best on every pillar (highest growth, lowest leverage, etc.)
+    assert pillars.loc[2, "growth"] == pillars["growth"].max()
+    assert pillars.loc[2, "safety"] == pillars["safety"].max()
+    assert pillars.loc[2, "value"] == pillars["value"].max()
