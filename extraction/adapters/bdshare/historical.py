@@ -18,7 +18,7 @@ class BDShareHistoricalAdapter(BaseAdapter):
     Signature: get_hist_data(start, end, code) NOT (code, start, end).
     """
     name = "bdshare_historical"
-    priority = 2
+    priority = 1
     timeout_seconds = 30
 
     def normalize(self, raw: pd.DataFrame) -> pd.DataFrame:
@@ -72,6 +72,12 @@ class BDShareHistoricalAdapter(BaseAdapter):
         except ImportError as exc:
             raise AdapterError(self.name, "bdshare not installed", retryable=False) from exc
 
+        # bdshare hits dsebd.org via `requests`, which serves an incomplete cert
+        # chain. Point requests/OpenSSL at the pinned-intermediate bundle or every
+        # call fails CERTIFICATE_VERIFY_FAILED under Linux/Docker (and Windows-Python).
+        from extraction.adapters.dse_direct._tls import use_dse_ca_for_requests  # noqa: PLC0415
+        use_dse_ca_for_requests()
+
         try:
             raw: pd.DataFrame = bd.get_historical_data(start, end, normalize_ticker(ticker))
         except Exception as exc:
@@ -93,6 +99,9 @@ class BDShareHistoricalAdapter(BaseAdapter):
     async def health_check(self) -> bool:
         try:
             import bdshare as bd
+
+            from extraction.adapters.dse_direct._tls import use_dse_ca_for_requests
+            use_dse_ca_for_requests()
             end = date.today().isoformat()
             start = end  # single day
             raw = bd.get_historical_data(start, end, "SQURPHARMA")

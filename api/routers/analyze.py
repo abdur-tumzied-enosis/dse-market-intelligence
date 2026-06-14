@@ -50,7 +50,7 @@ async def _fetch_ticker_analysis(conn, ticker: str) -> dict:
 
     recent_news = await conn.fetch(
         """
-        SELECT title, published_at, sentiment_score, url
+        SELECT headline AS title, published_at, sentiment_score, url
         FROM news WHERE $1 = ANY(tickers)
         ORDER BY published_at DESC LIMIT 5
         """,

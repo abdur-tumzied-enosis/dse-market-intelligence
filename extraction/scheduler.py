@@ -19,7 +19,7 @@ from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import create_engine
 
-from extraction.market_status import get_market_status, refresh_market_status
+from extraction.market_status import clock_status, get_market_status, refresh_market_status
 from mgmt.cache import get_redis
 
 logger = logging.getLogger(__name__)
@@ -322,6 +322,14 @@ async def job_live_prices() -> None:
     logger.info("job_live_prices: starting")
     now = datetime.now(BD_TZ)
     status = (await get_market_status())["status"]
+    # Self-heal a stale cache: the morning poll (job_market_status_open) only
+    # runs 10:00–10:15, so if DSE flips to Open after that window — or every
+    # scrape in it failed — the cache keeps yesterday's Closed all day and we'd
+    # skip every tick. When the clock says we're inside trading hours but the
+    # cache disagrees, re-scrape once before trusting the Closed.
+    if status != "Open" and clock_status(now) == "Open":
+        logger.info("job_live_prices: cache=Closed but clock=Open — re-scraping status")
+        status = (await refresh_market_status())["status"]
     if status != "Open":
         logger.info("job_live_prices: market not open (status=%s) — skipping write", status)
         await _invalidate_live_caches()

@@ -23,11 +23,11 @@ import os
 import re
 
 import asyncpg
-import httpx
 import structlog
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
+from extraction.adapters.dse_direct._tls import dse_client
 from extraction.normalizers import normalize_ticker
 
 load_dotenv()
@@ -94,7 +94,7 @@ def parse_tickers(html: str) -> list[str]:
 
 
 async def fetch_tickers() -> list[str]:
-    async with httpx.AsyncClient(timeout=30, headers=HEADERS, follow_redirects=True) as client:
+    async with dse_client(timeout=30, headers=HEADERS) as client:
         resp = await client.get(LISTING_URL)
         resp.raise_for_status()
     return parse_tickers(resp.text)

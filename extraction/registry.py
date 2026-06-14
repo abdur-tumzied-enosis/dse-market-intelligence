@@ -50,11 +50,13 @@ def _build_registry() -> dict[str, DataStream]:
 
     # ------------------------------------------------------------------
     # Stream: historical_ohlcv
-    # Primary: amarstock CSV (bulk), bdshare hist API (incremental)
+    # Primary: bdshare hist API — full real OHLCV (open/close included).
+    # Fallback: amarstock CSV — high/low only, close synthesized (no_ohlc).
+    # Used by gap_backfill; bulk loaders call adapters directly, not this chain.
     # ------------------------------------------------------------------
     streams["historical_ohlcv"] = DataStream(name="historical_ohlcv", adapters=[
-        AmarStockCSVAdapter(),
         BDShareHistoricalAdapter(),
+        AmarStockCSVAdapter(),
     ])
 
     # ------------------------------------------------------------------

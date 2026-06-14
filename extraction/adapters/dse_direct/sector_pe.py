@@ -7,6 +7,7 @@ import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
 
+from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import to_decimal
 
@@ -95,7 +96,7 @@ class DSEDirectSectorPEAdapter(BaseAdapter):
 
     async def fetch(self, **kwargs: Any) -> AdapterResult:
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True) as c:
+            async with dse_client(timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True) as c:
                 resp = await c.get(SECTOR_PE_URL)
                 resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -130,7 +131,7 @@ class DSEDirectSectorPEAdapter(BaseAdapter):
 
     async def health_check(self) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=10, headers=HEADERS, follow_redirects=True) as c:
+            async with dse_client(timeout=10, headers=HEADERS, follow_redirects=True) as c:
                 resp = await c.get(SECTOR_PE_URL)
                 return resp.status_code == 200 and b"P/E" in resp.content
         except Exception:

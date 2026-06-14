@@ -1,6 +1,6 @@
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import Link from 'next/link'
-import { serverApi } from '@/lib/server-api'
+import { serverApi, ApiError } from '@/lib/server-api'
 import { getRating, type Rating } from '@/lib/rating'
 import PriceChart from '@/components/stocks/PriceChart'
 import FundamentalsCharts from '@/components/stocks/FundamentalsCharts'
@@ -125,7 +125,16 @@ export default async function StockDetailPage({
     serverApi.stocks.trackRecord(ticker),
   ])
 
-  if (detailResult.status === 'rejected') notFound()
+  if (detailResult.status === 'rejected') {
+    const reason = detailResult.reason
+    // Dead session (access expired AND refresh rejected): clear the stale
+    // cookies via /logout and bounce to login. A real "ticker not found" (404)
+    // falls through to notFound().
+    if (reason instanceof ApiError && reason.status === 401) {
+      redirect(`/logout?from=/stocks/${ticker}`)
+    }
+    notFound()
+  }
 
   const { company, latest_price, health_score, fundamentals: lf } = detailResult.value
   const fundsData = fundsResult.status === 'fulfilled' ? fundsResult.value : null

@@ -215,8 +215,9 @@ async def _httpx_fetch_company_news(
 
     criteria=3 filters by inst (company). criteria=1/2 return all-company feeds.
     """
-    import httpx
     from bs4 import BeautifulSoup
+
+    from extraction.adapters.dse_direct._tls import dse_client
 
     url = f"{OLD_NEWS_URL}?inst={ticker}&criteria={criteria}&archive=news"
     headers = {
@@ -230,7 +231,7 @@ async def _httpx_fetch_company_news(
         "Referer": "https://www.dsebd.org/",
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout_s) as client:
+        async with dse_client(timeout=timeout_s) as client:
             resp = await client.get(url, headers=headers, follow_redirects=True)
             resp.raise_for_status()
     except Exception as exc:

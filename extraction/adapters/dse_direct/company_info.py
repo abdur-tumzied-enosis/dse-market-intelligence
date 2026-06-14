@@ -9,6 +9,7 @@ import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
 
+from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import normalize_ticker, to_decimal
 
@@ -1063,7 +1064,7 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
 
         url = COMPANY_URL.format(ticker=ticker.upper())
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True) as c:
+            async with dse_client(timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True) as c:
                 resp = await c.get(url)
                 resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -1092,10 +1093,7 @@ class DSEDirectCompanyInfoAdapter(BaseAdapter):
             raise AdapterError(self.name, "ticker required", retryable=False)
         url = COMPANY_URL.format(ticker=ticker.upper())
         try:
-            async with httpx.AsyncClient(
-                timeout=self.timeout_seconds, headers=HEADERS, follow_redirects=True,
-                verify=False,  # dsebd.org serves an incomplete cert chain — verification fails everywhere; public-data scrape.
-            ) as c:
+            async with dse_client(timeout=self.timeout_seconds, headers=HEADERS) as c:
                 resp = await c.get(url)
                 resp.raise_for_status()
         except httpx.HTTPStatusError as exc:

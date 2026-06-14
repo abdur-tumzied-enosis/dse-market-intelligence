@@ -30,6 +30,13 @@ async def backfill_index_history() -> dict:
         logger.error("index_backfill: bdshare not installed")
         return {"inserted": 0, "rows": 0}
 
+    # bdshare hits dsebd.org, which serves an incomplete cert chain. Point
+    # requests/urllib at the pinned-intermediate bundle or every fetch raises
+    # CERTIFICATE_VERIFY_FAILED under Linux/Docker.
+    from extraction.adapters.dse_direct._tls import use_dse_ca_for_requests
+
+    use_dse_ca_for_requests()
+
     raw = bd.get_market_info()
     if raw is None or len(raw) == 0:
         logger.warning("index_backfill: get_market_info returned empty")

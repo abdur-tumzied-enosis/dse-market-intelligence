@@ -9,6 +9,11 @@ Patch 1 — read_html bytes fix
 Patch 2 — get_company_info slice fix
   bdshare 1.2.1 hardcodes tables[400:] but DSE page now renders ~397 tables.
   tables[400:] is always empty. Fix: return the last 15 tables instead.
+
+Patch 3 — dead fallback domain fix
+  bdshare's DSE_ALT_URL = "https://dsebd.com.bd/" no longer resolves
+  (NameResolutionError). Nearly every bdshare call falls back to it.
+  Fix: rewrite DSE_ALT_URL to the live domain "https://www.dsebd.org/".
 """
 from __future__ import annotations
 
@@ -23,6 +28,14 @@ def _apply_bdshare_patches() -> None:
         import pandas as _pd
     except ImportError:
         return
+
+    # ------------------------------------------------------------------ #
+    # Patch 3: rewrite dead fallback domain dsebd.com.bd → www.dsebd.org #
+    # ------------------------------------------------------------------ #
+    from bdshare.util import vars as _vs_patch
+
+    if "dsebd.com.bd" in _vs_patch.DSE_ALT_URL:
+        _vs_patch.DSE_ALT_URL = "https://www.dsebd.org/"
 
     # ------------------------------------------------------------------ #
     # Patch 1: wrap pd.read_html(bytes) → pd.read_html(BytesIO(bytes))   #

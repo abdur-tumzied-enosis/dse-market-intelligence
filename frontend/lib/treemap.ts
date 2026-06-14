@@ -13,12 +13,21 @@ function worstAspect(row: number[], rowLen: number): number {
 }
 
 export function squarify(values: number[], rect: Rect): Rect[] {
-  const total = values.reduce((a, b) => a + b, 0)
-  if (total === 0 || rect.w <= 0 || rect.h <= 0) return values.map(() => rect)
-  const area = rect.w * rect.h
-  const scaled = values.map(v => (v / total) * area)
-  const out: Rect[] = new Array(values.length)
-  layout(scaled, rect, 0, out)
+  // Sanitize: coerce non-finite / negative inputs to 0 so a single bad
+  // value (e.g. NaN market_cap) can't poison every rect with NaN.
+  const safe = values.map(v => (Number.isFinite(v) && v > 0 ? v : 0))
+  const safeRect: Rect = {
+    x: Number.isFinite(rect.x) ? rect.x : 0,
+    y: Number.isFinite(rect.y) ? rect.y : 0,
+    w: Number.isFinite(rect.w) ? rect.w : 0,
+    h: Number.isFinite(rect.h) ? rect.h : 0,
+  }
+  const total = safe.reduce((a, b) => a + b, 0)
+  if (total <= 0 || safeRect.w <= 0 || safeRect.h <= 0) return safe.map(() => safeRect)
+  const area = safeRect.w * safeRect.h
+  const scaled = safe.map(v => (v / total) * area)
+  const out: Rect[] = new Array(safe.length)
+  layout(scaled, safeRect, 0, out)
   return out
 }
 
