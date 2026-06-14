@@ -34,6 +34,12 @@ def test_calibrator_no_signal_flagged_low():
     assert meta["low_signal"] is True
 
 
+def test_fit_raises_on_too_few_pairs():
+    import pytest
+    with pytest.raises(ValueError, match="too small"):
+        fit_horizon_calibrator(_pairs(n=3))
+
+
 def test_fit_uses_chronological_subsplit_no_overlap():
     # eval half must be strictly later than fit half
     iso, meta = fit_horizon_calibrator(_pairs(signal=True))

@@ -35,7 +35,10 @@ def fit_horizon_calibrator(pairs: pd.DataFrame) -> tuple[IsotonicRegression, dic
     """Chronological 50/50 sub-split of one horizon's OOS pairs. Fit isotonic on
     the earlier half (score -> actual_up), evaluate on the later half. Returns the
     fitted calibrator and a metadata dict (Brier, base/hit rate, low_signal,
-    date ranges)."""
+    date ranges). Requires >= 4 pairs so both halves have >= 2 rows; callers in
+    main() already gate on a 100-pair minimum."""
+    if len(pairs) < 4:
+        raise ValueError(f"pairs too small for 50/50 split: {len(pairs)}")
     pairs = pairs.sort_values("time").reset_index(drop=True)
     mid = len(pairs) // 2
     fit, ev = pairs.iloc[:mid], pairs.iloc[mid:]
