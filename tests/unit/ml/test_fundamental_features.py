@@ -183,3 +183,37 @@ def test_compute_pillar_scores_ranges_and_direction():
     assert pillars.loc[2, "growth"] == pillars["growth"].max()
     assert pillars.loc[2, "safety"] == pillars["safety"].max()
     assert pillars.loc[2, "value"] == pillars["value"].max()
+
+
+def test_compute_pillar_scores_nan_handling():
+    import math
+    import numpy as np
+    import pandas as pd
+    from ml.features.fundamental_features import compute_pillar_scores
+
+    # missing column (drop quarterly_eps_yoy), one partial-NaN constituent, one all-NaN ownership row
+    cross = pd.DataFrame({
+        "eps_growth_1yr": [0.0, 0.1, np.nan], "eps_growth_3yr": [0.0, 0.1, 0.2],
+        "profit_cagr_3y": [0.0, 0.1, 0.2], "profit_cagr_5y": [0.0, 0.1, 0.2],
+        "nav_growth": [0.0, 0.1, 0.2],
+        # quarterly_eps_yoy intentionally absent -> must be skipped, no crash
+        "eps_consistency": [0.5, 0.6, 0.7], "roe": [0.05, 0.1, 0.15],
+        "earnings_quality": [0.8, 0.9, 1.0],
+        "pe_vs_sector": [2.0, 1.0, 0.5], "pb_ratio": [3.0, 2.0, 1.0],
+        "div_yield": [0.0, 0.02, 0.04], "dividend_yield_pct": [0.0, 2.0, 4.0],
+        "dividend_streak": [0, 2, 5], "cash_div_ratio_5y": [0.0, 0.5, 1.0],
+        "payout_ratio": [0.0, 0.3, 0.6],
+        "leverage_mktcap": [1.0, 0.5, 0.1], "leverage_profit": [10.0, 5.0, 1.0],
+        "rights_count_10y": [3, 1, 0],
+        "inst_flow_pp": [-1.0, 0.0, np.nan], "foreign_flow_pp": [-1.0, 0.0, np.nan],
+        "institution_pct": [10.0, 20.0, np.nan], "foreign_pct": [0.0, 5.0, np.nan],
+    })
+    pillars = compute_pillar_scores(cross)
+    # missing quarterly_eps_yoy did not crash; growth still computed for all rows
+    assert pillars["growth"].notna().all()
+    # row 2 has a partial NaN in growth (eps_growth_1yr) but still scores from the rest
+    assert not math.isnan(pillars.loc[2, "growth"])
+    # row 2 ownership is all-NaN -> pillar score is NaN (not 0)
+    assert math.isnan(pillars.loc[2, "ownership"])
+    # rows 0,1 ownership are finite
+    assert pillars.loc[0, "ownership"] >= 0
