@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import pickle
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -22,7 +23,8 @@ from ml.features.feature_store import build_price_feature_matrix
 from ml.models.lstm_predictor import LSTMPredictor
 
 MODEL_PATH = Path("models/v1/lstm_v0.pt")
-MODEL_VERSION = "lstm_v1"
+MODEL_VERSION = "lstm_v2_cal"
+CALIBRATORS_PATH = Path("models/v1/lstm_direction_calibrators.pkl")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 log = logging.getLogger(__name__)
 
@@ -46,6 +48,35 @@ async def _build_latest_panel(pool, tickers: list[str]) -> pd.DataFrame:
     if not frames:
         return pd.DataFrame()
     return pd.concat(frames, ignore_index=True)
+
+
+def calibrated_direction(scores, calibrator, low_signal: bool):
+    """Map raw per-ticker scores for one horizon to (directions, confidences).
+
+    With a usable calibrator: confidence = calibrated P of the STATED side
+    (P(up) for an 'up' call, 1-P(up) for 'down'). Without one, or when the
+    horizon is low-signal, confidence is a neutral 0.5 — honest 'no conviction' —
+    while direction still follows the sign of the score.
+    """
+    scores = np.asarray(scores, dtype=float)
+    directions = ["up" if s >= 0 else "down" for s in scores]
+    if calibrator is None or low_signal:
+        return directions, np.full(len(scores), 0.5)
+    p_up = np.clip(calibrator.predict(scores), 0.0, 1.0)
+    directions = ["up" if p >= 0.5 else "down" for p in p_up]
+    confidences = np.where(p_up >= 0.5, p_up, 1.0 - p_up)
+    return directions, confidences
+
+
+def _load_calibrators():
+    """Returns (calibrators dict, metadata dict). Empty if the file is absent —
+    inference then writes neutral confidence everywhere (honest degraded mode)."""
+    if not CALIBRATORS_PATH.exists():
+        log.warning("No calibrators at %s — writing neutral 0.5 confidence.", CALIBRATORS_PATH)
+        return {}, {}
+    with CALIBRATORS_PATH.open("rb") as f:
+        blob = pickle.load(f)
+    return blob.get("calibrators", {}), blob.get("metadata", {})
 
 
 async def main() -> None:
@@ -86,13 +117,14 @@ async def main() -> None:
     predicted_at = datetime.now(UTC)
     prediction_date = predicted_at.date()
 
+    calibrators, cal_meta = _load_calibrators()
+
     for hi, horizon in enumerate(HORIZONS):
         scores = preds[:, hi]
-        # cross-sectional percentile rank -> confidence in [0,1]
-        pct = pd.Series(scores).rank(pct=True).to_numpy()
+        iso = calibrators.get(horizon)
+        low_signal = bool(cal_meta.get(horizon, {}).get("low_signal", False))
+        directions, confidences = calibrated_direction(scores, iso, low_signal)
         for ti, ticker in enumerate(kept):
-            direction = "up" if scores[ti] >= 0 else "down"
-            confidence = float(pct[ti])
             await pool.execute(
                 """
                 INSERT INTO ml_predictions
@@ -106,7 +138,7 @@ async def main() -> None:
                         predicted_at        = EXCLUDED.predicted_at
                 """,
                 ticker, predicted_at, prediction_date, horizon,
-                direction, confidence, None, MODEL_VERSION,
+                directions[ti], float(confidences[ti]), None, MODEL_VERSION,
             )
 
     log.info(f"Done. wrote {len(kept)} tickers × {len(HORIZONS)} horizons.")
