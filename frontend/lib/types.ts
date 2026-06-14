@@ -138,11 +138,25 @@ export interface LatestFundamentals {
   fiscal_year: number | null
 }
 
+export interface FundamentalDriver {
+  feature: string
+  value: number | null
+  sentence: string
+  polarity: "good" | "bad"
+}
+
+export interface FundamentalDetail {
+  score: number
+  pillars: Record<string, number | null>
+  drivers: FundamentalDriver[]
+}
+
 export interface HealthScore {
   health_score: number | null
   fundamental_score: number | null
   momentum_score: number | null
   scored_at: string
+  fundamental_detail: FundamentalDetail | null
 }
 
 export interface StockDetail {
