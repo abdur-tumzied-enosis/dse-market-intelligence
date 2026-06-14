@@ -13,6 +13,7 @@ import ShareholdingTrend from '@/components/stocks/ShareholdingTrend'
 import CorporateActions from '@/components/stocks/CorporateActions'
 import QuarterlyEarnings from '@/components/stocks/QuarterlyEarnings'
 import CompanyProfile from '@/components/stocks/CompanyProfile'
+import FundamentalScorecard from '@/components/stocks/FundamentalScorecard'
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
@@ -268,6 +269,13 @@ export default async function StockDetailPage({
               scored {fmtDate(health_score.scored_at)}
             </p>
           )}
+        </Panel>
+      </Reveal>
+
+      {/* ── Fundamental scorecard: health score + 6 pillar bars + drivers ──── */}
+      <Reveal delay={170}>
+        <Panel title="Fundamental Scorecard" accent="#00d4a4">
+          <FundamentalScorecard detail={health_score?.fundamental_detail ?? null} />
         </Panel>
       </Reveal>
 
