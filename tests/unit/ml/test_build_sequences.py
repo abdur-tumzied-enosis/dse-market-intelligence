@@ -26,9 +26,9 @@ def _fake_price_df(n_tickers=25, n_days=120):
 
 
 def test_build_sequences_shapes():
+    from ml.constants import HORIZONS, PRICE_FEATURE_COLS, SEQ_LEN
     from ml.features.sequence_builder import build_sequences
-    from ml.constants import SEQ_LEN, HORIZONS, PRICE_FEATURE_COLS
-    X, y, meta = build_sequences(_fake_price_df())
+    X, y, meta = build_sequences(_fake_price_df())  # noqa: N806
     assert X.ndim == 3
     assert X.shape[1] == SEQ_LEN
     assert X.shape[2] == len(PRICE_FEATURE_COLS)
@@ -41,14 +41,14 @@ def test_build_sequences_shapes():
 
 def test_build_sequences_no_nan_in_features():
     from ml.features.sequence_builder import build_sequences
-    X, y, meta = build_sequences(_fake_price_df())
+    X, y, meta = build_sequences(_fake_price_df())  # noqa: N806
     assert not np.isnan(X).any()
     assert not np.isnan(y).any()
 
 
 def test_build_sequences_labels_are_cross_sectional_zscored():
     from ml.features.sequence_builder import build_sequences
-    X, y, meta = build_sequences(_fake_price_df())
+    X, y, meta = build_sequences(_fake_price_df())  # noqa: N806
     df = meta.copy()
     df["y0"] = y[:, 0]
     means = df.groupby("time")["y0"].mean()
