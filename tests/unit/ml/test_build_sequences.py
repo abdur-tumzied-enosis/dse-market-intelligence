@@ -26,7 +26,7 @@ def _fake_price_df(n_tickers=25, n_days=120):
 
 
 def test_build_sequences_shapes():
-    from ml.train.train_lstm import build_sequences
+    from ml.features.sequence_builder import build_sequences
     from ml.constants import SEQ_LEN, HORIZONS, PRICE_FEATURE_COLS
     X, y, meta = build_sequences(_fake_price_df())
     assert X.ndim == 3
@@ -40,14 +40,14 @@ def test_build_sequences_shapes():
 
 
 def test_build_sequences_no_nan_in_features():
-    from ml.train.train_lstm import build_sequences
+    from ml.features.sequence_builder import build_sequences
     X, y, meta = build_sequences(_fake_price_df())
     assert not np.isnan(X).any()
     assert not np.isnan(y).any()
 
 
 def test_build_sequences_labels_are_cross_sectional_zscored():
-    from ml.train.train_lstm import build_sequences
+    from ml.features.sequence_builder import build_sequences
     X, y, meta = build_sequences(_fake_price_df())
     df = meta.copy()
     df["y0"] = y[:, 0]
