@@ -36,3 +36,18 @@ def test_driver_polarity_follows_contribution_sign():
                             contributions=contribs)
     assert out["drivers"][0]["feature"] == "pe_vs_sector"
     assert out["drivers"][0]["polarity"] == "bad"
+
+
+def test_driver_value_is_none_when_feature_missing():
+    import json
+    from ml.explain.fundamental_explainer import build_explanation
+    # contribution references a feature absent from feature_row -> value must be JSON-null
+    feature_row = pd.Series({"roe": 0.1})
+    contribs = pd.Series({"profit_cagr_5y": 0.9, "roe": 0.2})
+    out = build_explanation(headline=50.0, pillars={}, feature_row=feature_row,
+                            contributions=contribs)
+    top = out["drivers"][0]
+    assert top["feature"] == "profit_cagr_5y"
+    assert top["value"] is None  # missing -> None, not NaN
+    assert "n/a" in top["sentence"]
+    json.dumps(out)  # must not raise (valid JSON, no NaN literal)

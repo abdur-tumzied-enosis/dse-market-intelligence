@@ -31,7 +31,7 @@ FEATURE_TEMPLATES: dict[str, tuple[str, str]] = {
 
 
 def _format_value(kind: str, value: float) -> str:
-    if value is None or (isinstance(value, float) and np.isnan(value)):
+    if value is None or pd.isna(value):
         return "n/a"
     if kind == "pct":
         return f"{value * 100:.0f}%"
@@ -57,15 +57,17 @@ def build_explanation(
     contributions: per-feature SHAP value (signed) for this row. Drivers are the
     top_k features by |contribution|; polarity is good if contribution > 0.
     """
-    ranked = contributions.reindex(contributions.abs().sort_values(ascending=False).index)
+    ranked = contributions.reindex(
+        contributions.abs().sort_values(ascending=False, kind="stable").index)
     drivers = []
     for feat in ranked.index[:top_k]:
         name, kind = FEATURE_TEMPLATES.get(feat, (feat, "ratio"))
-        raw = float(feature_row.get(feat, np.nan))
+        raw = feature_row.get(feat, np.nan)
+        raw_val = None if pd.isna(raw) else float(raw)
         polarity = "good" if ranked[feat] > 0 else "bad"
         adverb = "boosts" if polarity == "good" else "drags down"
         sentence = f"{name}: {_format_value(kind, raw)} — {adverb} the score."
-        drivers.append({"feature": feat, "value": raw, "sentence": sentence,
+        drivers.append({"feature": feat, "value": raw_val, "sentence": sentence,
                         "polarity": polarity})
     return {
         "headline": float(headline),
