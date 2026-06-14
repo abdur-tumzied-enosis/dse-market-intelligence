@@ -75,9 +75,12 @@ async def score_all_tickers(pool, scorer) -> dict[str, dict]:
                                  if ticker in feat_pct_df.index else pd.Series(dtype=float)),
             ml_score=ml_score)
         results[ticker] = {
-            "score": ml_score,        # persisted to fundamental_score column (ML proba, kept for compat)
-            "health_score": health,   # honest beginner headline (0-100)
-            "ml_score": ml_score,     # explicit secondary
+            # fundamental_score column = honest pillar composite (0-1), NOT the
+            # no-signal ML proba. Feeds compute_health_score + the "Fundamental"
+            # bar. ml_score is kept separately (experimental, unsurfaced).
+            "score": (health / 100.0) if health is not None else None,
+            "health_score": health,   # beginner headline (0-100)
+            "ml_score": ml_score,     # demoted ML probability (experimental)
             "pillars": pillars,
             "drivers": payload["drivers"],
         }
