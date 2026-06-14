@@ -117,7 +117,9 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         ticker, latest_fy) if latest_fy is not None else 0
     flows = await pool.fetchrow(
         """SELECT (last.institution_pct - first.institution_pct) AS inst_flow,
-                  (last.foreign_pct - first.foreign_pct) AS foreign_flow
+                  (last.foreign_pct - first.foreign_pct) AS foreign_flow,
+                  last.institution_pct AS institution_pct,
+                  last.foreign_pct AS foreign_pct
            FROM (SELECT * FROM shareholding_history WHERE ticker = $1
                  ORDER BY as_on_date ASC LIMIT 1) AS first,
                 (SELECT * FROM shareholding_history WHERE ticker = $1
@@ -158,7 +160,9 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         "rights_count_10y":   track["rights_count_10y"],
         "inst_flow_pp":       track["inst_flow_pp"],
         "foreign_flow_pp":    track["foreign_flow_pp"],
-        "institution_pct":    float(last["institution_pct"]) if pd.notna(last.get("institution_pct")) else np.nan,
-        "foreign_pct":        float(last["foreign_pct"]) if pd.notna(last.get("foreign_pct")) else np.nan,
+        # Ownership LEVELS come from the latest shareholding_history snapshot;
+        # the fundamentals table's institution_pct/foreign_pct are always NULL.
+        "institution_pct":    float(flows["institution_pct"]) if flows and flows["institution_pct"] is not None else np.nan,
+        "foreign_pct":        float(flows["foreign_pct"]) if flows and flows["foreign_pct"] is not None else np.nan,
     })
     return result
