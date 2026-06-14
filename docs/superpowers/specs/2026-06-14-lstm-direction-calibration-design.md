@@ -37,12 +37,17 @@ These are revisited only after the D1 harness numbers are known.
 
 ## Components
 
+### D0 — Refactor first (blocking prerequisite): shared `build_sequences`
+
+`build_sequences` currently lives in `ml/train/train_lstm.py`. D1 cannot build correctly until it is extracted, so this is sequenced **first**, not in parallel. Move the identical pipeline (per-ticker `clean_and_smooth` → forward returns → cross-sectional z-score → `build_windows`) into a shared module (`ml/features/sequence_builder.py`) and import it from both `train_lstm.py` and `lstm_validation.py`. Behavior must stay byte-identical — this is the train/serve-parity invariant (`project_lstm_ranking_redesign`). Also expose the **master trading calendar** (sorted union of all dates seen in the panel) from this module, since both the index→date split and the purge gap (D1) need it.
+
 ### D1 — Validation harness: `ml/eval/lstm_validation.py`
 
 Mirror the structure of `ml/eval/momentum_validation.py` (point-in-time, survivorship-aware, regime/bucket splits, report dict + printed summary).
 
-- **Data/model:** load trained `models/v1/lstm_v0.pt`; rebuild full historical windows via a **shared** `build_sequences` (see Refactor below); run `model.predict` over all windows → per-(time, ticker, horizon) raw score, alongside `meta`'s raw `fwd_ret_h`.
-- **Out-of-sample only:** reproduce training's chronological 80/20 split by sample `time`, evaluate the **val tail only**, and apply a **purge gap = max(HORIZONS)** trading dates at the train/val boundary (training itself has no purge; the harness adds it so val windows don't overlap train labels).
+- **Pool:** use `get_batch_pool()` (direct `db:5432`), **not** the default pgBouncer pool — the full `stock_prices` scan stalls on pgBouncer (`project_pgbouncer_batch_pool`; same choice as `momentum_validation.py:249`).
+- **Data/model:** load trained `models/v1/lstm_v0.pt`; rebuild full historical windows via the shared `build_sequences` (D0); run `model.predict` over all windows → per-(time, ticker, horizon) raw score, alongside `meta`'s raw `fwd_ret_h`.
+- **Out-of-sample split — leak-free:** the training split (`train_lstm.py:182`, `split = int(len(X)*0.8)`) cuts by **sample index** on time-sorted data, so one calendar date straddles train/val. The harness must instead split on a **date boundary**: pick the date at the ~80th percentile of sample dates, assign all samples on dates `< boundary` to train and `>= boundary` to val. Then apply the purge on the **master trading calendar** (DSE Sun–Thu + holidays, from D0): take the last train date, advance `max(HORIZONS)` positions **on the trading calendar** (not `timedelta(days=13)`, which under-purges across weekends/holidays), and drop val samples whose date is earlier than that advanced date. Evaluate the purged val tail only. (Note: this reconstructs an OOS slice for the *already-trained* `lstm_v0.pt`, which was fit on the leaky index split — so the harness is a conservative read on a model trained slightly optimistically; flag this in the report header.)
 - **Per horizon, three framings:**
   1. **Rank-IC** — `rank_ic(pred, raw_fwd_ret)` per date, summarized like `momentum_validation._ic_summary` (mean, std, IR, t-stat, %positive). Does the *relative* signal exist?
   2. **Directional hit-rate** — treat `pred >= 0` as an "up" call; `actual_up = raw_fwd_ret > 0`; hit-rate = mean(call == actual), with base rate (market up-fraction) for comparison. Is the *absolute* call better than 50% / better than base rate?
@@ -53,9 +58,11 @@ Mirror the structure of `ml/eval/momentum_validation.py` (point-in-time, survivo
 
 ### D2 — Direction calibrator: `ml/eval/calibrate_direction.py`
 
+- **Input provenance (leak-free):** D2 consumes the **D1 OOS `(raw_score, actual_up)` pairs** — never train-period data. It sub-splits those OOS pairs **chronologically**: fit the isotonic on the earlier half, evaluate Brier/reliability on the later half. This is the only path that avoids both train contamination and fit/eval-on-same-rows. (The harness should expose its OOS pairs so D2 reuses them rather than rebuilding.)
 - Per-horizon **isotonic regression** mapping raw model score → P(absolute up = `raw_fwd_ret > 0`). Use `sklearn.isotonic.IsotonicRegression` directly (per `project_sklearn_calibration_gotcha`: `CalibratedClassifierCV(cv="prefit")` is removed in sklearn 1.9.0).
-- Fit on an OOS calibration slice with a **walk-forward / chronological** split so fit and evaluation never share dates; report Brier before/after and a reliability table per horizon.
-- Persist to `models/v1/lstm_direction_calibrators.pkl` — a dict `{horizon_days: fitted_isotonic}` plus metadata (fit date range, n samples, per-horizon Brier and base rate). A horizon whose OOS hit-rate is statistically indistinguishable from its base rate is flagged `low_signal=True` in the metadata so D3 can suppress it.
+- Report Brier before/after and a reliability table per horizon (on the held-out later half).
+- **`low_signal` definition (concrete):** flag horizon `low_signal=True` if **either** a one-sided binomial test of OOS hit-rate vs base rate gives `p > 0.10` (can't reject "= base rate") **or** the effect size `|hit_rate − base_rate| < 0.02` (2pp). OR-combined so it suppresses conservatively. (t-stats are anti-conservative under overlapping windows — the effect-size floor guards against that.)
+- Persist to `models/v1/lstm_direction_calibrators.pkl` — a dict `{horizon_days: fitted_isotonic}` plus metadata (fit/eval date ranges, n samples, per-horizon Brier, base rate, hit-rate, `low_signal`). D3 reads `low_signal` to decide suppression.
 - **Entry point:** `python -m ml.eval.calibrate_direction`.
 
 ### D3 — Honest inference: edit `ml/inference/predict_prices.py`
@@ -64,14 +71,12 @@ Mirror the structure of `ml/eval/momentum_validation.py` (point-in-time, survivo
 - Per ticker/horizon: `p_up = calib[h](raw_score)`; `direction = "up" if p_up >= 0.5 else "down"`; `confidence = p_up if up else 1 - p_up` (probability of the stated side).
 - If no calibrator file, or the horizon is flagged `low_signal`: write honest low conviction — `confidence ≈ 0.5` (neutral) — or skip writing that horizon. Decision per horizon driven by D1/D2 metadata; default to writing neutral 0.5 rather than a fake high number.
 - Remove the percentile-rank-as-confidence path. Keep the cross-sectional z-score + windowing untouched (train/serve parity).
+- **Stale-row backfill:** old fabricated high-confidence rows persist in `ml_predictions` (upsert keys on `prediction_date`, so prior dates are not overwritten) and would keep serving to the UI after deploy. Bump `MODEL_VERSION` (e.g. `lstm_v2_cal`) so calibrated rows are a clean new lineage, and on first deploy `DELETE FROM ml_predictions WHERE model_version = 'lstm_v1'` (or the API reads only the latest `model_version`). Pin down which the API does before deploy; document the chosen path in the implementation plan.
 
 ### D4 — Monitoring alignment: `ml/monitoring/accuracy_report.py`
 
 - Once D3 makes `predicted_direction` an absolute up/down call, the existing `populate_outcomes` comparison (`actual_direction = up if h_price > p_price`) becomes semantically correct. No code change expected. Re-read after D1; add a guard/comment only if the harness reveals a concrete mismatch (e.g. needs to compare against a peer-relative baseline).
-
-### Refactor — shared `build_sequences`
-
-`build_sequences` currently lives in `ml/train/train_lstm.py`. D1 needs the identical pipeline (per-ticker `clean_and_smooth` → forward returns → cross-sectional z-score → `build_windows`) to guarantee train/eval parity. Extract it into a shared module (e.g. `ml/features/sequence_builder.py` or `ml/train/dataset.py`) and import it from both `train_lstm.py` and `lstm_validation.py`. Keep behavior identical; this is the train/serve-parity invariant (`project_lstm_ranking_redesign`).
+- **Thresholds revisit:** the hardcoded `warning=0.48 / critical=0.45` in `check_accuracy_thresholds` were set pre-signal, assuming ~50% base rate. D1 reports the *real* per-horizon base rate (DSE up-fraction may not be 50%). After D1, re-set these thresholds **per horizon relative to each horizon's measured base rate** rather than the flat 0.48/0.45. Treat as a follow-up tuning step once base rates are known; not locked now.
 
 ## Data Flow
 
@@ -100,7 +105,8 @@ Unit tests stay fully offline (synthetic arrays / tiny DataFrames; no DB):
 
 - `rank_ic` / hit-rate / calibration-error + reliability-bin metric: known-input expected-output (perfect, inverse, random signals).
 - Calibration mapping: isotonic is monotonic; perfectly-separable synthetic data → near-0 Brier; random data → Brier ≈ base-rate variance.
-- Harness slicing: synthetic windowed dataset → purge gap drops the right boundary dates; regime split partitions correctly; OOS tail excludes train rows.
+- `low_signal` threshold: synthetic at-base-rate signal → flagged; clear-signal → not flagged; effect-size floor (|hit−base|<2pp) catches a t-stat that overlapping windows inflated.
+- Harness slicing: synthetic windowed dataset on a synthetic trading calendar → **date-boundary** split (no date straddles train/val); purge advances `max(HORIZONS)` positions on the calendar (not raw days) and drops the right boundary dates; regime split partitions correctly; OOS tail excludes train rows; D2 sub-split is chronological within the OOS pairs.
 - `predict_prices`: with a stub calibrator, written `confidence` equals the calibrated P (not the percentile rank); `low_signal` horizon writes neutral/skip.
 
 Live run (manual, against DB + trained model): `python -m ml.train.train_lstm` → `python -m ml.eval.lstm_validation` → `python -m ml.eval.calibrate_direction` → `python -m ml.inference.predict_prices`.
@@ -112,9 +118,16 @@ Live run (manual, against DB + trained model): `python -m ml.train.train_lstm` �
 - D3 ships calibrated P as confidence and an honest direction; near-random horizons show ~0.5 conviction or are suppressed — no fabricated high-confidence numbers remain.
 - All new unit tests pass offline; `make check` clean.
 
+## Decision rules (post-D1)
+
+- **Floor poisons training, not just eval.** `lstm_v0.pt` was *trained* on 2022–24 frozen-floor prices → its labels in that window are noise, so even the `ex_floor` eval tests a model degraded at training time. Calibration (D2) cannot repair bad training labels.
+  - If `ex_floor` rank-IC **and** hit-rate are both ≈ base rate → the correct action is **retrain excluding the floor regime** (a scoped step toward B), **not** "calibrate harder." A calibrator on a poisoned model just maps noise to base rate.
+  - If `ex_floor` shows real signal but `full` is muddy → floor contamination is the explanation; proceed with calibration on ex_floor-fit data and note the regime sensitivity.
+- **No signal anywhere** → A's job is done: D3 ships honest low conviction; escalate to the B-vs-C decision. Not a failure to patch around.
+
 ## Risks / Open Questions
 
-- **The honest answer may be "no signal."** If hit-rate ≈ base rate everywhere, D3 will correctly show low conviction. That is a successful outcome of A and the trigger to decide B vs C — not a failure to patch around.
+- **The honest answer may be "no signal."** Captured in the decision rules above — a successful outcome of A, the trigger to decide B vs C.
 - **Floor-regime dates are approximate.** Constant is configurable; refine if the ex_floor split looks mis-cut.
 - **Sample overlap / t-stat inflation.** Overlapping forward windows make t-stats anti-conservative (same caveat as `momentum_validation`). Treat as directional.
 - **No trained model present locally.** Harness requires running training first against a populated DB; document in run steps.
