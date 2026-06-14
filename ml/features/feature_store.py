@@ -109,10 +109,12 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
     price = float(last["price_at_fy_end"]) if pd.notna(last["price_at_fy_end"]) else np.nan
     pb_ratio = float(np.clip(price / nav, 0, 20)) if (nav and nav != 0 and not np.isnan(price)) else np.nan
 
+    latest_fy = int(last["fiscal_year"]) if pd.notna(last["fiscal_year"]) else None
     rights = await pool.fetchval(
         """SELECT count(*) FROM corporate_actions
            WHERE ticker = $1 AND action_type = 'right_issue'
-             AND fiscal_year >= EXTRACT(YEAR FROM now())::int - 10""", ticker)
+             AND fiscal_year <= $2 AND fiscal_year >= $2 - 10""",
+        ticker, latest_fy) if latest_fy is not None else 0
     flows = await pool.fetchrow(
         """SELECT (last.institution_pct - first.institution_pct) AS inst_flow,
                   (last.foreign_pct - first.foreign_pct) AS foreign_flow

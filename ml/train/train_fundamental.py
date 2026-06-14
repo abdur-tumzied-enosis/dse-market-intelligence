@@ -149,7 +149,8 @@ async def build_training_dataset(pool) -> tuple[pd.DataFrame, pd.DataFrame]:
     full = pd.concat(feature_rows, ignore_index=True)
     full = full.dropna(subset=["price_at_fy_end", "price_fwd"])
 
-    sector_median_pe = full.groupby(["fiscal_year", "sector"])["pe_raw"].transform("median")
+    pe_pos = full["pe_raw"].where(full["pe_raw"] > 0)
+    sector_median_pe = pe_pos.groupby([full["fiscal_year"], full["sector"]]).transform("median")
     full["pe_vs_sector"] = (full["pe_raw"] / sector_median_pe.replace(0, np.nan)).clip(0, 10)
     full["pb_ratio"] = (full["price_at_fy_end"] / full["nav_raw"]).clip(0, 20)
 
