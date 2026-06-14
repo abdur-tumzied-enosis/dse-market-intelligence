@@ -143,10 +143,12 @@ export interface FundamentalDriver {
   value: number | null
   sentence: string
   polarity: "good" | "bad"
+  percentile?: number
 }
 
 export interface FundamentalDetail {
-  score: number
+  health_score: number | null
+  ml_score: number | null
   pillars: Record<string, number | null>
   drivers: FundamentalDriver[]
 }
