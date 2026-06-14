@@ -109,3 +109,17 @@ def test_save_load_roundtrip_preserves_feature_cols():
         proba_after = loaded.predict_proba(X)
         assert loaded.feature_cols == FEATURE_COLS
     np.testing.assert_array_almost_equal(proba_before, proba_after)
+
+
+def test_fit_handles_single_class_training_split():
+    from ml.models.fundamental_scorer import FundamentalScorer
+    # first 80% all class 1, last 20% mixed -> training split is single-class
+    n = 100
+    rng = np.random.default_rng(0)
+    X = pd.DataFrame(rng.standard_normal((n, len(FEATURE_COLS))), columns=FEATURE_COLS)
+    y = pd.Series([1] * 80 + [0, 1] * 10)
+    scorer = FundamentalScorer()
+    scorer.fit(X, y)  # must not raise
+    proba = scorer.predict_proba(X)
+    assert proba.shape == (n,)
+    assert (proba >= 0).all() and (proba <= 1).all()

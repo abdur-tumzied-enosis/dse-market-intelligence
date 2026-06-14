@@ -54,8 +54,15 @@ class FundamentalScorer:
         cut = int(n * (1 - _CALIB_FRACTION))
         X_fit, y_fit = Xf.iloc[:cut], y.iloc[:cut]
         X_cal, y_cal = Xf.iloc[cut:], y.iloc[cut:]
-        self._model.fit(X_fit, y_fit)
-        if n >= _CALIB_MIN_ROWS and y_cal.nunique() == 2 and len(y_cal) >= 10:
+
+        can_calibrate = (
+            n >= _CALIB_MIN_ROWS
+            and y_fit.nunique() == 2
+            and y_cal.nunique() == 2
+            and len(y_cal) >= 10
+        )
+        if can_calibrate:
+            self._model.fit(X_fit, y_fit)
             raw_cal = self._model.predict_proba(X_cal)[:, 1]
             self._calibrator = IsotonicRegression(out_of_bounds="clip")
             self._calibrator.fit(raw_cal, y_cal)
