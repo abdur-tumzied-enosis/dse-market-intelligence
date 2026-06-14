@@ -1,6 +1,7 @@
 # api/routers/stocks.py
 from __future__ import annotations
 
+import json
 import math
 from datetime import UTC, date, datetime
 from typing import Any
@@ -30,6 +31,13 @@ from extraction.market_status import get_market_status
 from extraction.registry import STREAMS
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
+
+
+def _decode_detail(value):
+    """Decode a fundamental_detail JSONB column (asyncpg returns it as a str)."""
+    if value is None:
+        return None
+    return json.loads(value) if isinstance(value, str) else value
 
 _INTERVAL_TABLE = {"daily": "daily_ohlcv", "weekly": "weekly_ohlcv", "monthly": "monthly_ohlcv"}
 
@@ -208,18 +216,25 @@ async def get_stock(ticker: str, pool=Depends(get_db), _user=Depends(get_current
         )
         health_score = await conn.fetchrow(
             """
-            SELECT health_score, fundamental_score, momentum_score, scored_at
+            SELECT health_score, fundamental_score, momentum_score, scored_at,
+                   fundamental_detail
             FROM stock_scores WHERE ticker = $1
             ORDER BY scored_at DESC LIMIT 1
             """,
             ticker,
         )
 
+    health_score_dict: dict | None = None
+    if health_score:
+        health_score_dict = dict(health_score)
+        health_score_dict["fundamental_detail"] = _decode_detail(
+            health_score_dict.get("fundamental_detail"))
+
     result = {
         "company": dict(company),
         "latest_price": dict(latest_price) if latest_price else None,
         "fundamentals": dict(latest_fundamentals) if latest_fundamentals else None,
-        "health_score": dict(health_score) if health_score else None,
+        "health_score": health_score_dict,
     }
     await _cache_set(cache_key, result, ttl=300)
     return result
@@ -554,14 +569,19 @@ async def get_health_score(ticker: str, pool=Depends(get_db), _user=Depends(get_
         row = await conn.fetchrow(
             """
             SELECT health_score, fundamental_score, momentum_score,
-                   valuation_score, sentiment_score, scored_at, model_version
+                   valuation_score, sentiment_score, scored_at, model_version,
+                   fundamental_detail
             FROM stock_scores WHERE ticker = $1
             ORDER BY scored_at DESC LIMIT 1
             """,
             ticker,
         )
 
-    result = dict(row) if row else {"ticker": ticker, "health_score": None}
+    if row:
+        result = dict(row)
+        result["fundamental_detail"] = _decode_detail(result.get("fundamental_detail"))
+    else:
+        result = {"ticker": ticker, "health_score": None}
     await _cache_set(cache_key, result, ttl=14400)
     return result
 
