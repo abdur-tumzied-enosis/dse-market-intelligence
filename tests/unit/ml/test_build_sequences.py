@@ -1,4 +1,4 @@
-"""Tests for train_lstm.build_sequences (DB-free, pure DataFrame in)."""
+"""Tests for sequence_builder.build_sequences (DB-free, pure DataFrame in)."""
 from __future__ import annotations
 
 import numpy as np
