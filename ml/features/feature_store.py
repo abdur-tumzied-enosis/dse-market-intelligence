@@ -67,6 +67,7 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
                f.net_profit_bdt, f.total_comprehensive_income_bdt,
                f.dividend_yield_pct, f.institution_pct, f.foreign_pct,
                f.eps_basis,
+               c.short_loan_mn, c.long_loan_mn, c.market_cap_bdt,
                (
                    SELECT sp.close FROM stock_prices sp
                    WHERE sp.ticker = f.ticker
@@ -140,6 +141,14 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         foreign_flow_pp=float(flows["foreign_flow"]) if flows and flows["foreign_flow"] is not None else None,
     )
 
+    from ml.features.fundamental_features import compute_leverage_features
+    lev = compute_leverage_features(
+        short_loan_mn=float(last["short_loan_mn"]) if pd.notna(last.get("short_loan_mn")) else None,
+        long_loan_mn=float(last["long_loan_mn"]) if pd.notna(last.get("long_loan_mn")) else None,
+        market_cap_bdt=float(last["market_cap_bdt"]) if pd.notna(last.get("market_cap_bdt")) else None,
+        net_profit_bdt=float(last["net_profit_bdt"]) if pd.notna(last.get("net_profit_bdt")) else None,
+    )
+
     result = pd.Series({
         "eps_growth_1yr":     float(latest.get("eps_growth_1yr", np.nan)),
         "eps_growth_3yr":     float(latest.get("eps_growth_3yr", np.nan)),
@@ -164,5 +173,7 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         # the fundamentals table's institution_pct/foreign_pct are always NULL.
         "institution_pct":    float(flows["institution_pct"]) if flows and flows["institution_pct"] is not None else np.nan,
         "foreign_pct":        float(flows["foreign_pct"]) if flows and flows["foreign_pct"] is not None else np.nan,
+        "leverage_mktcap":    lev["leverage_mktcap"],
+        "leverage_profit":    lev["leverage_profit"],
     })
     return result

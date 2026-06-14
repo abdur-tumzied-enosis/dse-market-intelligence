@@ -27,6 +27,8 @@ FEATURE_TEMPLATES: dict[str, tuple[str, str]] = {
     "foreign_flow_pp":    ("Foreign ownership change", "pp"),
     "institution_pct":    ("Institutional ownership", "pct_level"),
     "foreign_pct":        ("Foreign ownership", "pct_level"),
+    "leverage_mktcap":    ("Debt vs market value", "x"),
+    "leverage_profit":    ("Debt vs annual profit", "x"),
 }
 
 
