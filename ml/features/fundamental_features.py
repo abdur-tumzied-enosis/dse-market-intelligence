@@ -112,8 +112,8 @@ def compute_leverage_features(
     if short_loan_mn is None and long_loan_mn is None:
         return {"leverage_mktcap": np.nan, "leverage_profit": np.nan}
     total_loan_bdt = ((short_loan_mn or 0.0) + (long_loan_mn or 0.0)) * 1e6
-    mktcap = float(market_cap_bdt) if market_cap_bdt else np.nan
-    profit = float(net_profit_bdt) if net_profit_bdt else np.nan
+    mktcap = float(market_cap_bdt) if market_cap_bdt is not None else np.nan
+    profit = float(net_profit_bdt) if net_profit_bdt is not None else np.nan
     lev_mc = total_loan_bdt / mktcap if mktcap and mktcap > 0 else np.nan
     lev_pf = total_loan_bdt / profit if profit and profit > 0 else np.nan
     return {
@@ -133,7 +133,7 @@ def compute_quarterly_eps_yoy(quarterly: pd.DataFrame) -> float:
     q = quarterly.sort_values(["fiscal_year", "quarter"]).reset_index(drop=True)
     last = q.iloc[-1]
     fy, qtr = int(last["fiscal_year"]), int(last["quarter"])
-    cur = pd.to_numeric(pd.Series([last["eps_basic"]]), errors="coerce").iloc[0]
+    cur = pd.to_numeric(last["eps_basic"], errors="coerce")
     prior = q[(q["fiscal_year"] == fy - 1) & (q["quarter"] == qtr)]
     if prior.empty:
         return np.nan
