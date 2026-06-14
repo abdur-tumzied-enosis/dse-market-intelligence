@@ -125,3 +125,42 @@ def build_sequences(df: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, pd.DataFr
     if nan_count:
         raise ValueError(f"NaN in feature array after cleaning: {nan_count}")
     return X, y, meta
+
+
+def trading_calendar(times: np.ndarray) -> pd.DatetimeIndex:
+    """Sorted, de-duplicated union of all sample dates — the master trading
+    calendar. DSE trades Sun-Thu with holidays, so calendar gaps are irregular;
+    using actual observed dates (not a fixed frequency) is the only correct base
+    for purging by trading bars."""
+    return pd.DatetimeIndex(pd.to_datetime(np.unique(times))).sort_values()
+
+
+def date_boundary(times: np.ndarray, frac: float) -> pd.Timestamp:
+    """Train/val cut on a DATE boundary (not a sample-index boundary), so no
+    single date straddles train and val. Returns the date at the `frac` quantile
+    of unique sorted dates; callers assign dates < boundary to train, >= to val."""
+    uniq = pd.DatetimeIndex(pd.to_datetime(np.unique(times))).sort_values()
+    idx = min(int(len(uniq) * frac), len(uniq) - 1)
+    return uniq[idx]
+
+
+def advance_on_calendar(
+    calendar: pd.DatetimeIndex, start: pd.Timestamp, n_bars: int
+) -> pd.Timestamp:
+    """Advance `n_bars` trading bars forward from `start` on the calendar.
+    Clamps to the last calendar date if it runs off the end."""
+    pos = int(calendar.searchsorted(start, side="left"))
+    return calendar[min(pos + n_bars, len(calendar) - 1)]
+
+
+def purged_val_start(
+    calendar: pd.DatetimeIndex, boundary: pd.Timestamp, gap_bars: int
+) -> pd.Timestamp:
+    """First val date kept after purging. Train labels look forward up to
+    gap_bars from the last train date, so val samples earlier than that overlap
+    train labels and must be dropped. last_train_date = largest date < boundary;
+    advance gap_bars trading bars from it."""
+    train_dates = calendar[calendar < boundary]
+    if len(train_dates) == 0:
+        return boundary
+    return advance_on_calendar(calendar, train_dates[-1], gap_bars)
