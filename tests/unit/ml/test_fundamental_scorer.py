@@ -1,11 +1,12 @@
 """Tests for ml.models.fundamental_scorer."""
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
-from pathlib import Path
-import tempfile
 
 from ml.models.fundamental_scorer import FEATURE_COLS
 

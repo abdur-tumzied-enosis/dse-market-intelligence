@@ -14,6 +14,7 @@ def test_rank_ic_perfect_ranking_is_one():
 
 def test_rank_ic_handles_constant_target_as_nan():
     import math
+
     from ml.train.train_fundamental import rank_ic
     assert math.isnan(rank_ic(np.array([0.1, 0.2, 0.3]), np.array([0.0, 0.0, 0.0])))
 

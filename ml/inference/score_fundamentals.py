@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -30,7 +30,6 @@ async def score_all_tickers(pool, scorer) -> dict[str, dict]:
     """
     from ml.explain.fundamental_explainer import build_explanation
     from ml.features.fundamental_features import compute_pillar_scores
-    from ml.models.fundamental_scorer import FEATURE_COLS
 
     tickers = await pool.fetch(
         "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker")
@@ -104,7 +103,7 @@ async def main() -> None:
     scorer.load(MODEL_PATH)
 
     log.info("Scoring all active tickers...")
-    scored_at = datetime.now(timezone.utc)
+    scored_at = datetime.now(UTC)
     scores = await score_all_tickers(pool, scorer)
     log.info(f"Scored {len(scores)} tickers")
 

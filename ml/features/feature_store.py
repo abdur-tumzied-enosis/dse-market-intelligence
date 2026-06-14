@@ -129,7 +129,8 @@ async def build_fundamental_feature_vector(pool, ticker: str) -> pd.Series:
         columns=["fiscal_year", "quarter", "eps_basic"])
 
     from ml.features.fundamental_features import (
-        compute_quarterly_eps_yoy, compute_track_record_features,
+        compute_quarterly_eps_yoy,
+        compute_track_record_features,
     )
     track = compute_track_record_features(
         df, rights_count_10y=rights or 0,

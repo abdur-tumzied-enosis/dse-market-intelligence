@@ -40,6 +40,7 @@ def test_driver_polarity_follows_contribution_sign():
 
 def test_driver_value_is_none_when_feature_missing():
     import json
+
     from ml.explain.fundamental_explainer import build_explanation
     # contribution references a feature absent from feature_row -> value must be JSON-null
     feature_row = pd.Series({"roe": 0.1})

@@ -1,16 +1,17 @@
 """Tests for ml.inference.score_fundamentals."""
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import numpy as np
 import pandas as pd
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 def _make_scorer_mock(proba: float = 0.7):
     """Mock FundamentalScorer returning fixed probability + zero SHAP contributions."""
-    import numpy as np
     import pandas as pd
+
     from ml.models.fundamental_scorer import FEATURE_COLS
     scorer = MagicMock()
     scorer.predict_proba = MagicMock(side_effect=lambda X: np.full(len(X), proba))
@@ -28,7 +29,6 @@ async def test_score_returns_dict_per_ticker():
         {"ticker": "GP"}, {"ticker": "BRACBANK"}
     ])
 
-    import numpy as np
     from ml.models.fundamental_scorer import FEATURE_COLS
     feature_vec = pd.Series({c: 0.5 for c in FEATURE_COLS})
 
@@ -61,7 +61,6 @@ async def test_score_skips_ticker_with_empty_features():
 async def test_score_attaches_pillars_and_drivers():
     from ml.inference.score_fundamentals import score_all_tickers
     from ml.models.fundamental_scorer import FEATURE_COLS
-    import numpy as np
     pool = MagicMock()
     pool.fetch = AsyncMock(return_value=[{"ticker": "GP"}, {"ticker": "BANK"}])
 

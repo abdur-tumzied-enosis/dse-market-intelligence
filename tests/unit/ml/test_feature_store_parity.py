@@ -1,9 +1,9 @@
 """Guards train/serve feature parity for the fundamental model."""
 from __future__ import annotations
 
-import pandas as pd
-import pytest
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 
 @pytest.mark.asyncio

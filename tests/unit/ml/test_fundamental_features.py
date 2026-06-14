@@ -115,6 +115,7 @@ def test_compute_leverage_features_uses_market_cap_and_profit():
 
 def test_compute_leverage_features_missing_loan_is_nan_not_zero():
     import math
+
     from ml.features.fundamental_features import compute_leverage_features
     f = compute_leverage_features(
         short_loan_mn=None, long_loan_mn=None,
@@ -126,6 +127,7 @@ def test_compute_leverage_features_missing_loan_is_nan_not_zero():
 
 def test_quarterly_eps_yoy():
     import pandas as pd
+
     from ml.features.fundamental_features import compute_quarterly_eps_yoy
     q = pd.DataFrame({
         "fiscal_year": [2023, 2023, 2024, 2024],
@@ -139,7 +141,9 @@ def test_quarterly_eps_yoy():
 
 def test_quarterly_eps_yoy_nan_when_no_prior_year_quarter():
     import math
+
     import pandas as pd
+
     from ml.features.fundamental_features import compute_quarterly_eps_yoy
     q = pd.DataFrame({"fiscal_year": [2024], "quarter": [2], "eps_basic": [1.6]})
     assert math.isnan(compute_quarterly_eps_yoy(q))
@@ -157,7 +161,8 @@ def test_earnings_quality_in_features():
 
 def test_compute_pillar_scores_ranges_and_direction():
     import pandas as pd
-    from ml.features.fundamental_features import compute_pillar_scores, PILLAR_SPEC
+
+    from ml.features.fundamental_features import PILLAR_SPEC, compute_pillar_scores
 
     # 3 tickers, growth ascending; safety: lower leverage = better
     cross = pd.DataFrame({
@@ -187,8 +192,10 @@ def test_compute_pillar_scores_ranges_and_direction():
 
 def test_compute_pillar_scores_nan_handling():
     import math
+
     import numpy as np
     import pandas as pd
+
     from ml.features.fundamental_features import compute_pillar_scores
 
     # missing column (drop quarterly_eps_yoy), one partial-NaN constituent, one all-NaN ownership row

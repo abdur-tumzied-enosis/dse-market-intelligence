@@ -57,6 +57,7 @@ def test_walk_forward_folds_embargo():
 
 def test_label_nan_for_zero_base_price_and_peers_uncorrupted():
     import math
+
     from ml.train.labels import add_neutralized_label
     df = _frame()
     df.loc[0, "price_at_fy_end"] = 0.0  # ticker A: zero base price
