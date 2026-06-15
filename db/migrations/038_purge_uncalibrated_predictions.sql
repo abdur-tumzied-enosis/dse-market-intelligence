@@ -1,0 +1,15 @@
+-- Remove pre-calibration LSTM predictions whose `confidence` was a cross-sectional
+-- percentile rank (a position, not a probability) and whose `predicted_direction`
+-- encoded a RELATIVE 'beats peers' call rather than absolute up/down.
+--
+-- As of ml/inference/predict_prices.py model_version 'lstm_v2_cal', confidence is a
+-- calibrated P(up) and direction is absolute. The predictions API
+-- (api/routers/stocks.py) serves DISTINCT ON (horizon_days) ORDER BY predicted_at
+-- DESC with NO model_version filter, so for the active universe fresh lstm_v2_cal
+-- rows win automatically — BUT a ticker that left the active set (or dropped below
+-- the SEQ_LEN history needed for inference) stops getting fresh rows, leaving its
+-- stale fabricated-high-confidence row as the newest one still served. Deleting the
+-- old lineages here makes those tickers return "no prediction" (honest) instead.
+--
+-- Idempotent: re-running deletes nothing once the old lineages are gone.
+DELETE FROM ml_predictions WHERE model_version IN ('lstm_v0', 'lstm_v1');

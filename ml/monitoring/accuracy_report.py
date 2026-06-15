@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def populate_outcomes(pool) -> int:
 
     Returns count of new outcomes written.
     """
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     pending = await pool.fetch(
         """
@@ -63,6 +63,11 @@ async def populate_outcomes(pool) -> int:
         h_price = float(h_price)
         return_pct = (h_price - p_price) / p_price * 100
         actual_direction = "up" if h_price > p_price else "down"
+        # As of model_version lstm_v2_cal, predicted_direction is an ABSOLUTE
+        # up/down call (from the calibrated P(up)), so comparing it to the
+        # absolute realized direction here is apples-to-apples. (Pre-lstm_v2_cal
+        # rows encoded a RELATIVE 'beats peers' call and this comparison was
+        # mismatched — see spec 2026-06-14-lstm-direction-calibration.)
         correct = actual_direction == row["predicted_direction"]
 
         await pool.execute(
@@ -78,7 +83,7 @@ async def populate_outcomes(pool) -> int:
             row["id"], row["ticker"], row["horizon_days"], row["predicted_at"],
             row["predicted_direction"], float(row["confidence"]),
             p_price, h_price, return_pct, actual_direction, correct,
-            datetime.now(timezone.utc),
+            datetime.now(UTC),
         )
         count += 1
 
@@ -117,7 +122,7 @@ async def generate_report(pool) -> dict:
             }
             for r in rows
         ],
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -132,6 +137,11 @@ async def check_accuracy_thresholds(
 
     Horizons with fewer than min_samples evaluated outcomes are skipped —
     not enough data to distinguish model failure from statistical noise.
+
+    NOTE: warning=0.48 / critical=0.45 assume a ~50% base rate. The D1 validation
+    (ml.eval.lstm_validation) reports the real per-horizon DSE up-fraction; once
+    known, re-set these per horizon relative to that base rate rather than the
+    flat defaults.
 
     Returns dict:
         alert_level:    "CRITICAL" | "WARNING" | None
