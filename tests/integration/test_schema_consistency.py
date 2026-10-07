@@ -76,7 +76,7 @@ FIXTURE_MAP: dict[str, list[tuple[Any, str, callable | None]]] = {
     "live_prices": [
         (BDShareLivePricesAdapter(), "bdshare_current_trade_data_sample.pkl", None),
         (AmarStockLivePricesAdapter(), "amarstock_latest_price_all_sample.pkl", None),
-        (DSEDirectLivePricesAdapter(), "dse_direct_live_prices_df.pkl", None),
+        (DSEDirectLivePricesAdapter(), "dse_direct_live_prices_raw.pkl", None),
     ],
     "historical_ohlcv": [
         (AmarStockCSVAdapter(), "amarstock_historical_gp_sample.pkl", lambda df: df.to_dict("records")),

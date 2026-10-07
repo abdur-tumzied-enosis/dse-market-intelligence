@@ -22,7 +22,7 @@ logger = structlog.get_logger(__name__)
 
 # Primary URL to ping for each data source.
 SOURCE_URLS: dict[str, str] = {
-    "dse_direct":      "https://www.dsebd.org/latest_share_price_scroll_l.php",
+    "dse_direct":      "https://old.dsebd.org/latest_share_price_scroll_l.php",
     "amarstock":       "https://www.amarstock.com",
     "bsec":            "https://sec.gov.bd/home",
     "worldbank":       "https://api.worldbank.org/v2/country/BD/indicator/FP.CPI.TOTL.ZG?format=json&mrv=1",

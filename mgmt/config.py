@@ -118,9 +118,10 @@ class Settings(BaseSettings):
 
     # ── Daily-bar gap backfill ────────────────────────────────────────────
     # job_price_gap_backfill scans the last N days for Sun–Thu dates with zero
-    # stock_prices rows and refills them from the historical_ohlcv chain.
+    # stock_prices rows and refills them (AmarStock daily CSV, then the
+    # historical_ohlcv chain). 120d so a multi-month outage self-heals.
     gap_backfill_enabled: bool = True
-    gap_backfill_window_days: int = 30
+    gap_backfill_window_days: int = 120
     gap_backfill_hour: int = 18      # 18:00 Asia/Dhaka — after EOD + CA refresh chain
     gap_backfill_minute: int = 0
 

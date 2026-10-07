@@ -1,7 +1,7 @@
 """
 Seed the companies roster from the DSE official company listing.
 
-Source: https://www.dsebd.org/company_listing.php — the authoritative DSE
+Source: https://old.dsebd.org/company_listing.php — the authoritative DSE
 listing. The page carries only the trading code per row (no name, sector,
 category, or market cap), so this seed registers the *roster* only: each new
 ticker is inserted as a bare placeholder row (name=ticker, sector='Unknown')
@@ -33,7 +33,7 @@ from extraction.normalizers import normalize_ticker
 load_dotenv()
 logger = structlog.get_logger(__name__)
 
-LISTING_URL = "https://www.dsebd.org/company_listing.php"
+LISTING_URL = "https://old.dsebd.org/company_listing.php"
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -41,7 +41,7 @@ HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
 
 # displayCompany.php?name=<TICKER> — the only reliable carrier of the trading

@@ -11,7 +11,7 @@ from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import to_decimal
 
-MARKET_INFO_URL = "https://www.dsebd.org/index.php"
+MARKET_INFO_URL = "https://old.dsebd.org/index.php"
 
 HEADERS = {
     "User-Agent": (
@@ -21,7 +21,7 @@ HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
 
 # Confirmed 2026-06-01. The homepage market box (selector
@@ -77,7 +77,7 @@ class DSEDirectMarketInfoAdapter(BaseAdapter):
     """
     DSE official site — DSEX, DSES, DS30 index snapshot from the homepage box.
 
-    URL: https://www.dsebd.org/index.php
+    URL: https://old.dsebd.org/index.php
     Method: HTTP + BeautifulSoup (no JS required). Confirmed 2026-06-01.
     Priority 1 — primary for the market_indices stream (more reliable than
     bdshare, which is fragile — see docs/bdshare-issues.md).

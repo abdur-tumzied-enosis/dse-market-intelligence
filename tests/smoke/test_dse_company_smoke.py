@@ -22,9 +22,9 @@ HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
-URL = "https://www.dsebd.org/displayCompany.php?name={ticker}"
+URL = "https://old.dsebd.org/displayCompany.php?name={ticker}"
 
 # Layout-distinct pages: bank (EPS-CO columns, 3 shareholding rows), MNC/telecom,
 # pharma (Jun year-end), Z-category (sparse data).

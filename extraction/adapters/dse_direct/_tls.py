@@ -1,7 +1,7 @@
 """
 Shared TLS policy for the dse_direct adapter family.
 
-www.dsebd.org serves an INCOMPLETE certificate chain: it presents only the
+old.dsebd.org serves an INCOMPLETE certificate chain: it presents only the
 leaf cert (*.dsebd.org) and omits its issuing intermediate
 ("Sectigo Public Server Authentication CA DV R36"). Browsers and Windows hide
 this by AIA-chasing (downloading the missing intermediate on the fly), but
@@ -17,8 +17,8 @@ works identically on Windows and in Docker.
 
 If the cert chain changes (Sectigo rotates the intermediate), refresh the pem:
 
-    URL=$(echo | openssl s_client -connect www.dsebd.org:443 \
-            -servername www.dsebd.org 2>/dev/null \
+    URL=$(echo | openssl s_client -connect old.dsebd.org:443 \
+            -servername old.dsebd.org 2>/dev/null \
           | openssl x509 -noout -text | grep -oP 'CA Issuers - URI:\\K\\S+')
     curl -s "$URL" | openssl x509 -inform DER \
           -out extraction/adapters/dse_direct/certs/dsebd_intermediate.pem

@@ -13,7 +13,7 @@ from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import normalize_ticker, to_decimal
 
-COMPANY_URL = "https://www.dsebd.org/displayCompany.php?name={ticker}"
+COMPANY_URL = "https://old.dsebd.org/displayCompany.php?name={ticker}"
 
 HEADERS = {
     "User-Agent": (
@@ -23,7 +23,7 @@ HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
 
 # Confirmed structure (2026-05-23) via HTML inspection:
@@ -1041,7 +1041,7 @@ def _parse_html(html: str, ticker: str) -> dict[str, Any]:
 class DSEDirectCompanyInfoAdapter(BaseAdapter):
     """
     DSE official site — company fundamentals from /displayCompany.php.
-    URL: https://www.dsebd.org/displayCompany.php?name={ticker}
+    URL: https://old.dsebd.org/displayCompany.php?name={ticker}
     Method: HTTP + BeautifulSoup (no JS). Confirmed working 2026-05-23.
     Priority 3 — fallback when AmarStock AND bdshare both fail.
     Provides: sector, EPS (annual), NAV, P/E, dividend yield, shareholding,

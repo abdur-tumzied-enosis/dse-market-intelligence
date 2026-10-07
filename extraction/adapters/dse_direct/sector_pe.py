@@ -11,7 +11,7 @@ from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import to_decimal
 
-SECTOR_PE_URL = "https://www.dsebd.org/sectoral_PE.php"
+SECTOR_PE_URL = "https://old.dsebd.org/sectoral_PE.php"
 
 HEADERS = {
     "User-Agent": (
@@ -21,7 +21,7 @@ HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
 
 # Confirmed columns (2026-05-23): #, Sector Name, Sectoral Median P/E
@@ -31,7 +31,7 @@ HEADERS = {
 class DSEDirectSectorPEAdapter(BaseAdapter):
     """
     DSE official site — sectoral median P/E ratios.
-    URL: https://www.dsebd.org/sectoral_PE.php
+    URL: https://old.dsebd.org/sectoral_PE.php
     Method: HTTP + BeautifulSoup (no JS). Confirmed working 2026-05-23.
     Returns 18 rows: one per DSE sector.
     """
