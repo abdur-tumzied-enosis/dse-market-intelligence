@@ -2,8 +2,9 @@
 
 job_price_gap_backfill (daily 18:00 BD cron; also caught up by boot recovery)
 scans the last gap_backfill_window_days for Sun–Thu dates with zero
-stock_prices rows, refills them per ticker from the historical_ohlcv chain,
-and refreshes the continuous aggregates so backfilled bars appear in the
+stock_prices rows, refills them from the AmarStock daily CSV (one request per
+day, full OHLCV) — falling back per ticker to the historical_ohlcv chain for
+days the CSV can't serve — and refreshes the continuous aggregates so backfilled bars appear in the
 daily/weekly/monthly/sector views (daily_ohlcv's refresh policy only looks
 back 3 days, so old inserts never materialize on their own).
 
@@ -16,6 +17,7 @@ _get_pool() so tests can patch it.
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -24,9 +26,11 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     import asyncpg
 
+import httpx
 import pandas as pd
 import pytz
 
+from extraction.normalizers import to_decimal
 from extraction.observability import fire_alert
 from mgmt.config import get_settings
 
@@ -39,6 +43,11 @@ _MARKET_WEEKDAYS = {6, 0, 1, 2, 3}
 NO_DATA_REASON = "backfill_no_data"
 _FETCH_CONCURRENCY = 3
 _FETCH_DELAY_SECONDS = 1.5
+
+# Same endpoint + source tag as pull_amarstock_csv.py / load_amarstock_historical.py.
+_CSV_URL = "https://www.amarstock.com/data/download/CSV"
+_CSV_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; DSEIntelBot/1.0)"}
+_CSV_SOURCE = "amarstock_csv"
 
 
 async def _get_pool() -> asyncpg.Pool:
@@ -153,9 +162,10 @@ def rows_from_frame(
     return rows
 
 
-# Refresh order matters: weekly/monthly are hierarchical CAs on daily_ohlcv,
-# and sector_daily_stats joins daily_ohlcv. Daily must materialize first.
-_CA_VIEWS = ("daily_ohlcv", "weekly_ohlcv", "monthly_ohlcv", "sector_daily_stats")
+# Refresh order matters: weekly/monthly are hierarchical CAs on daily_ohlcv.
+# Daily must materialize first. sector_daily_stats is a plain materialized
+# view (not a CA) fully rebuilt by its own daily TimescaleDB job (migration 015).
+_CA_VIEWS = ("daily_ohlcv", "weekly_ohlcv", "monthly_ohlcv")
 
 
 def _now_bd_date() -> date:
@@ -184,6 +194,49 @@ async def _skip_dates(pool: asyncpg.Pool) -> set[date]:
         NO_DATA_REASON,
     )
     return {r["session_date"] for r in rows}
+
+
+def frame_from_csv(text: str) -> pd.DataFrame:
+    """Parse an AmarStock daily CSV (Date,Scrip,Open,High,Low,Close,Volume;
+    Date=YYYYMMDD) into the rows_from_frame shape. 0/blank prices → None."""
+    raw = pd.read_csv(io.StringIO(text), dtype=str)
+    if raw.empty:
+        return pd.DataFrame()
+
+    def _price(v: Any) -> Decimal | None:
+        d = to_decimal(v)
+        return d if d else None
+
+    return pd.DataFrame({
+        "ticker": raw["Scrip"].str.strip(),
+        "date": pd.to_datetime(raw["Date"], format="%Y%m%d", utc=True),
+        "open": raw["Open"].apply(_price),
+        "high": raw["High"].apply(_price),
+        "low": raw["Low"].apply(_price),
+        "close": raw["Close"].apply(_price),
+        "volume": pd.to_numeric(raw["Volume"], errors="coerce"),
+        "source": _CSV_SOURCE,
+    })
+
+
+async def _csv_rows(days: set[date], known: set[str]) -> list[tuple[Any, ...]]:
+    """_INSERT_SQL tuples for `days` from the AmarStock daily CSV. Per-day
+    failures are logged and skipped — pass 2 retries those days per ticker."""
+    rows: list[tuple[Any, ...]] = []
+    async with httpx.AsyncClient(timeout=30, headers=_CSV_HEADERS) as client:
+        for d in sorted(days):
+            try:
+                resp = await client.post(_CSV_URL, data={"QuotesType": 1, "date": d.isoformat()})
+                resp.raise_for_status()
+                df = frame_from_csv(resp.text)
+            except Exception as exc:
+                logger.warning("gap_backfill: csv day failed date=%s error=%s", d, exc)
+                continue
+            finally:
+                await asyncio.sleep(_FETCH_DELAY_SECONDS)
+            if not df.empty:
+                rows += rows_from_frame(df[df["ticker"].isin(known)], days, datetime.now(UTC))
+    return rows
 
 
 async def _fetch_ticker_rows(
@@ -240,7 +293,9 @@ async def _refresh_aggregates(pool: asyncpg.Pool, lo: date, hi: date) -> int:
     for view in _CA_VIEWS:
         try:
             await pool.execute(
-                f"CALL refresh_continuous_aggregate('{view}', $1, $2)", lo_ts, hi_ts
+                # Casts required: Postgres can't infer param types inside CALL.
+                f"CALL refresh_continuous_aggregate('{view}', $1::timestamptz, $2::timestamptz)",
+                lo_ts, hi_ts,
             )
         except Exception as exc:
             logger.warning("gap_backfill: CA refresh failed view=%s error=%s", view, exc)
@@ -279,27 +334,39 @@ async def backfill_missing_dates() -> dict[str, int]:
         logger.warning("gap_backfill: missing dates: %s",
                        ", ".join(d.isoformat() for d in missing))
         missing_set = set(missing)
-        start, end = missing[0].isoformat(), missing[-1].isoformat()
 
-        tickers = [r["ticker"] for r in await pool.fetch(
-            "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker"
-        )]
-        semaphore = asyncio.Semaphore(_FETCH_CONCURRENCY)
+        # Pass 1: AmarStock daily CSV — whole market in one request per day,
+        # full OHLCV. Only known tickers (stock_prices.ticker FK → companies).
+        known = {r["ticker"] for r in await pool.fetch("SELECT ticker FROM companies")}
+        csv_rows = await _csv_rows(missing_set, known)
+        if csv_rows:
+            await pool.executemany(_INSERT_SQL, csv_rows)
+            summary["rows_inserted"] += len(csv_rows)
+            missing_set -= {r[0].date() for r in csv_rows}
 
-        async def _one(ticker: str) -> int:
-            try:
-                rows = await _fetch_ticker_rows(ticker, start, end, missing_set, semaphore)
-            except Exception as exc:
-                summary["tickers_failed"] += 1
-                logger.warning("gap_backfill: ticker failed ticker=%s error=%s",
-                               ticker, exc)
-                return 0
-            if rows:
-                await pool.executemany(_INSERT_SQL, rows)
-            return len(rows)
+        # Pass 2: per-ticker historical_ohlcv chain, only for days the CSV
+        # didn't fill (endpoint down / day not yet published).
+        if missing_set:
+            start, end = min(missing_set).isoformat(), max(missing_set).isoformat()
+            tickers = [r["ticker"] for r in await pool.fetch(
+                "SELECT ticker FROM companies WHERE is_active = true ORDER BY ticker"
+            )]
+            semaphore = asyncio.Semaphore(_FETCH_CONCURRENCY)
 
-        counts = await asyncio.gather(*(_one(t) for t in tickers))
-        summary["rows_inserted"] = sum(counts)
+            async def _one(ticker: str) -> int:
+                try:
+                    rows = await _fetch_ticker_rows(ticker, start, end, missing_set, semaphore)
+                except Exception as exc:
+                    summary["tickers_failed"] += 1
+                    logger.warning("gap_backfill: ticker failed ticker=%s error=%s",
+                                   ticker, exc)
+                    return 0
+                if rows:
+                    await pool.executemany(_INSERT_SQL, rows)
+                return len(rows)
+
+            counts = await asyncio.gather(*(_one(t) for t in tickers))
+            summary["rows_inserted"] += sum(counts)
 
         # Which dates actually filled? Still-empty = holiday/no-data → record
         # so the next scan skips them. Recovered → refresh the CA chain.

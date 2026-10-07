@@ -11,6 +11,7 @@ from extraction.gap_backfill import (
     NO_DATA_REASON,
     backfill_missing_dates,
     find_missing_dates,
+    frame_from_csv,
     rows_from_frame,
 )
 from mgmt.config import get_settings
@@ -19,7 +20,7 @@ from mgmt.config import get_settings
 def test_gap_backfill_settings_defaults():
     cfg = get_settings()
     assert cfg.gap_backfill_enabled is True
-    assert cfg.gap_backfill_window_days == 30
+    assert cfg.gap_backfill_window_days == 120
     assert cfg.gap_backfill_hour == 18
     assert cfg.gap_backfill_minute == 0
 
@@ -208,8 +209,9 @@ def _bar(ticker: str, d: date) -> dict:
             "close": Decimal("100"), "source": "bdshare_historical"}
 
 
-def _run(pool, stream, **settings_overrides):
-    """Run backfill_missing_dates with all collaborators patched."""
+def _run(pool, stream, csv_rows=(), **settings_overrides):
+    """Run backfill_missing_dates with all collaborators patched. The CSV pass
+    returns `csv_rows` (default none → per-ticker chain handles every date)."""
     import asyncio as _asyncio
     cfg = MagicMock()
     cfg.gap_backfill_enabled = settings_overrides.get("enabled", True)
@@ -220,7 +222,7 @@ def _run(pool, stream, **settings_overrides):
          patch("extraction.gap_backfill.fire_alert", AsyncMock()) as alert, \
          patch("extraction.gap_backfill._now_bd_date", return_value=date(2026, 6, 11)), \
          patch.dict("extraction.registry.STREAMS", {"historical_ohlcv": stream}), \
-         patch("extraction.gap_backfill._FETCH_DELAY_SECONDS", 0):
+         patch("extraction.gap_backfill._FETCH_DELAY_SECONDS", 0),          patch("extraction.gap_backfill._csv_rows", AsyncMock(return_value=list(csv_rows))):
         summary = _asyncio.run(backfill_missing_dates())
     return summary, alert
 
@@ -256,9 +258,9 @@ def test_backfill_recovers_missing_date():
     assert summary["rows_inserted"] == 2
     # one executemany per ticker with rows
     assert len(pool.executemany_calls) == 2
-    # CA refresh: daily, weekly, monthly, sector
+    # CA refresh: daily, weekly, monthly
     refresh_calls = [sql for sql, _ in pool.executed if "refresh_continuous_aggregate" in sql]
-    assert len(refresh_calls) == 4
+    assert len(refresh_calls) == 3
     assert any("daily_ohlcv" in sql for sql in refresh_calls)
     alert.assert_called_once()
 
@@ -348,14 +350,14 @@ def test_backfill_ca_refresh_failures_counted():
     stream = _fake_stream({"GP": pd.DataFrame([_bar("GP", gap)])})
     summary, alert = _run(pool, stream)
 
-    # All 4 CA views fail
-    assert summary["ca_refresh_failed"] == 4
+    # All 3 CA views fail
+    assert summary["ca_refresh_failed"] == 3
     # Run still completes with a recovered date
     assert summary["recovered_dates"] == 1
     # alert was still fired and includes the count
     alert.assert_called_once()
     call_kwargs = alert.call_args.kwargs
-    assert call_kwargs["details"]["ca_refresh_failed"] == 4
+    assert call_kwargs["details"]["ca_refresh_failed"] == 3
 
 
 def test_rows_from_frame_single_side_mid_decimal_coercion():
@@ -371,3 +373,37 @@ def test_rows_from_frame_single_side_mid_decimal_coercion():
     assert rows[0][5] == Decimal("308.0")
     assert isinstance(rows[0][5], Decimal)
     assert rows[0][13] == "no_ohlc"
+
+
+# ── AmarStock daily-CSV pass ──────────────────────────────────────────────────
+
+_CSV_TEXT = (
+    "Date,Scrip,Open,High,Low,Close,Volume\n"
+    "20260608,GP,241.3,243,240.5,242.6,30676\n"
+    "20260608,ABBLPBOND,0,0,0,1060,0\n"
+)
+
+
+def test_frame_from_csv_parses_ohlcv_and_zero_prices():
+    df = frame_from_csv(_CSV_TEXT)
+    gp = df.iloc[0]
+    assert gp["ticker"] == "GP" and gp["date"].date() == date(2026, 6, 8)
+    assert gp["open"] == Decimal("241.3") and gp["close"] == Decimal("242.6")
+    bond = df.iloc[1]
+    assert bond["open"] is None and bond["close"] == Decimal("1060")
+    rows = rows_from_frame(df, {date(2026, 6, 8)}, INGESTED)
+    assert [r[13] for r in rows] == ["ok", "ok"]
+    assert rows[0][11] == "amarstock_csv"
+
+
+def test_backfill_csv_pass_fills_day_and_skips_per_ticker_chain():
+    gap = date(2026, 6, 8)
+    present = [d for d in WINDOW if d != gap]
+    pool = FakePool(present, [], ["GP"], WINDOW)
+    stream = _fake_stream({})
+    csv_rows = rows_from_frame(frame_from_csv(_CSV_TEXT), {gap}, INGESTED)
+    summary, _ = _run(pool, stream, csv_rows=csv_rows)
+
+    assert summary["rows_inserted"] == 2
+    assert summary["recovered_dates"] == 1
+    stream.fetch.assert_not_called()          # CSV covered the only missing day
