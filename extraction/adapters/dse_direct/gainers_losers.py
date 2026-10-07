@@ -11,8 +11,8 @@ from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.normalizers import normalize_ticker, to_decimal
 
-GAINERS_URL = "https://www.dsebd.org/top_ten_gainer.php"
-LOSERS_URL  = "https://www.dsebd.org/top_ten_loser.php"
+GAINERS_URL = "https://old.dsebd.org/top_ten_gainer.php"
+LOSERS_URL  = "https://old.dsebd.org/top_ten_loser.php"
 
 HEADERS = {
     "User-Agent": (
@@ -22,7 +22,7 @@ HEADERS = {
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
 
 # Confirmed columns (2026-05-23): #, TRADING CODE, CLOSEP*, HIGH, LOW, YCP*, % CHANGE
@@ -82,7 +82,7 @@ def _normalize(raw: pd.DataFrame, direction: Literal["gainer", "loser"], adapter
 class DSEDirectGainersAdapter(BaseAdapter):
     """
     DSE official site — top 10 gainers by % change.
-    URL: https://www.dsebd.org/top_ten_gainer.php
+    URL: https://old.dsebd.org/top_ten_gainer.php
     Method: HTTP + BeautifulSoup (no JS). Confirmed working 2026-05-23.
     """
     name = "dse_direct_gainers"
@@ -132,7 +132,7 @@ class DSEDirectGainersAdapter(BaseAdapter):
 class DSEDirectLosersAdapter(BaseAdapter):
     """
     DSE official site — top 10 losers by % change.
-    URL: https://www.dsebd.org/top_ten_loser.php
+    URL: https://old.dsebd.org/top_ten_loser.php
     Method: HTTP + BeautifulSoup (no JS). Confirmed working 2026-05-23.
     """
     name = "dse_direct_losers"

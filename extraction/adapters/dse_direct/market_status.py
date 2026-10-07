@@ -13,7 +13,7 @@ from extraction.adapters.dse_direct._tls import dse_client
 from extraction.base import AdapterError, AdapterResult, BaseAdapter
 from extraction.market_status import normalize_status
 
-MARKET_STATUS_URL = "https://www.dsebd.org/index.php"
+MARKET_STATUS_URL = "https://old.dsebd.org/index.php"
 
 HEADERS = {
     "User-Agent": (
@@ -21,7 +21,7 @@ HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
 
 # The homepage carries a literal "Market Status: Open|Closed" string (confirmed
@@ -42,7 +42,7 @@ def _parse_status(html: str) -> dict[str, str]:
 class DSEMarketStatusAdapter(BaseAdapter):
     """DSE official site — trading-session Open/Closed flag from the homepage.
 
-    URL: https://www.dsebd.org/index.php
+    URL: https://old.dsebd.org/index.php
     Method: HTTP + BeautifulSoup (no JS). Priority 1, no fallback adapter —
     the market_status store handles scrape failure with a clock fallback.
     Output schema: status, raw_label, fetched_at, source.

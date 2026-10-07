@@ -39,9 +39,13 @@ def _save_fixture(name: str, df: pd.DataFrame | list) -> None:
 def bd():
     try:
         import bdshare as _bd
-        return _bd
     except ImportError:
         pytest.skip("bdshare not installed — run: uv pip install bdshare==1.2.1")
+    # dsebd.org serves an incomplete cert chain; without the pinned CA bundle every
+    # request fails CERTIFICATE_VERIFY_FAILED. Mirror the production adapter path.
+    from extraction.adapters.dse_direct._tls import use_dse_ca_for_requests
+    use_dse_ca_for_requests()
+    return _bd
 
 
 def test_get_current_trade_data(bd):

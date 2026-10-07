@@ -10,7 +10,7 @@ from extraction.normalizers import normalize_ticker, to_decimal
 
 # Confirmed URL (2026-05-21): dse_graph_chart.php returns 404.
 # mkt_depth_3.php is the active market depth page.
-DEPTH_URL = "https://www.dsebd.org/mkt_depth_3.php"
+DEPTH_URL = "https://old.dsebd.org/mkt_depth_3.php"
 
 # Auth note: DSE requires DSE-Mobile / M-invest login for full bid/ask order book
 # (per site notice). Without auth, the page loads the instrument selector and
@@ -35,7 +35,7 @@ class DSEDirectDepthPlaywrightAdapter(BaseAdapter):
     """
     DSE official site — market depth via Playwright.
 
-    URL: https://www.dsebd.org/mkt_depth_3.php
+    URL: https://old.dsebd.org/mkt_depth_3.php
     Priority 2 — fallback when bdshare_depth fails.
 
     Auth limitation (confirmed 2026-05-21): DSE requires DSE-Mobile app or

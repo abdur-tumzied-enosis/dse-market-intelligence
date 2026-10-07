@@ -21,9 +21,9 @@ from extraction.normalizers import bd_date_str_to_utc, normalize_ticker
 #   <th>Post Date:</th>     <td>2026-05-21</td>
 # Followed by 2 separator rows (no <th>/<td> pair), then next announcement.
 
-NEWS_URL        = "https://www.dsebd.org/display_news.php"
-NEWS_7D_URL     = "https://www.dsebd.org/news_archive_7days.php"
-OLD_NEWS_URL    = "https://www.dsebd.org/old_news.php"
+NEWS_URL        = "https://old.dsebd.org/display_news.php"
+NEWS_7D_URL     = "https://old.dsebd.org/news_archive_7days.php"
+OLD_NEWS_URL    = "https://old.dsebd.org/old_news.php"
 
 _LABEL_MAP = {
     "Trading Code": "ticker",
@@ -110,7 +110,7 @@ class DSEDirectAnnouncementsAdapter(BaseAdapter):
     """
     DSE official site — today's corporate announcements via Playwright.
 
-    URL: https://www.dsebd.org/display_news.php
+    URL: https://old.dsebd.org/display_news.php
     Priority 1 — primary source; bdshare_announcements is dead (returns empty).
 
     Note: news_archive.php (old URL) returns 404. display_news.php loads
@@ -159,7 +159,7 @@ class DSEDirectPSNAdapter(BaseAdapter):
     """
     DSE official site — price-sensitive news (last 7 days) via Playwright.
 
-    URL: https://www.dsebd.org/news_archive_7days.php
+    URL: https://old.dsebd.org/news_archive_7days.php
     Priority 1 — primary source; bdshare_psn is dead (returns empty).
 
     Note: price_sensitive_news.php (old URL) returns 404. The 7-day archive
@@ -228,7 +228,7 @@ async def _httpx_fetch_company_news(
         ),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.5",
-        "Referer": "https://www.dsebd.org/",
+        "Referer": "https://old.dsebd.org/",
     }
     try:
         async with dse_client(timeout=timeout_s) as client:
@@ -267,7 +267,7 @@ class DSEDirectCompanyNewsAdapter(BaseAdapter):
     """
     DSE official site — per-company historical announcements via httpx (static HTML).
 
-    URL: https://www.dsebd.org/old_news.php?inst={ticker}&criteria=3&archive=news
+    URL: https://old.dsebd.org/old_news.php?inst={ticker}&criteria=3&archive=news
 
     Unlike display_news.php (JS-rendered, needs Playwright), old_news.php is
     static HTML — httpx + BeautifulSoup only.

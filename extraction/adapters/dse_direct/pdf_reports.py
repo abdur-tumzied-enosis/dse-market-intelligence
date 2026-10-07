@@ -28,8 +28,8 @@ from extraction.normalizers import normalize_ticker
 # has a registered adapter (required for registry integrity) and will produce
 # a clear error message if invoked.
 
-COMPANY_URL_TPL = "https://www.dsebd.org/displayCompany.php?name={ticker}"
-DSE_BASE = "https://www.dsebd.org"
+COMPANY_URL_TPL = "https://old.dsebd.org/displayCompany.php?name={ticker}"
+DSE_BASE = "https://old.dsebd.org"
 
 _YEAR_RE = re.compile(r"(20\d{2})", re.IGNORECASE)
 _REGULATORY_KEYWORDS = {
