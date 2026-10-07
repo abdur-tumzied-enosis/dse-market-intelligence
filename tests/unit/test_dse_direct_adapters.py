@@ -39,22 +39,21 @@ class TestDSEDirectLivePricesNormalize:
     @pytest.fixture(scope="class")
     def df(self):
         from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
-        # Columns mirror output of _parse_html() — headers already uppercased
-        raw = pd.DataFrame([
-            {
-                "#": "1", "TRADING CODE": "gp", "LTP*": "250.50",
-                "HIGH": "255.00", "LOW": "249.00", "CLOSEP*": "250.50",
-                "YCP*": "248.00", "CHANGE": "2.50", "TRADE": "1,234",
-                "VALUE (MN)": "123.45", "VOLUME": "456,789",
-            },
-            {
-                "#": "2", "TRADING CODE": "BRACBANK", "LTP*": "32.10",
-                "HIGH": "32.80", "LOW": "31.90", "CLOSEP*": "32.10",
-                "YCP*": "31.80", "CHANGE": "0.30", "TRADE": "567",
-                "VALUE (MN)": "18.20", "VOLUME": "567,890",
-            },
-        ])
-        return DSEDirectLivePricesAdapter().normalize(raw)
+        # Shape of www.dse.com.bd/api/live/prices (cols + rows), 2026-10-07
+        payload = {
+            "cols": ["code", "ltp", "ycp", "open", "high", "low", "close", "volume",
+                     "value", "trades", "percent", "category", "board", "sector",
+                     "assetType"],
+            "rows": [
+                ["gp", 250.5, 248, 249.5, 255, 249, 250.5, 456789, 123.45, 1234,
+                 1.0080645161290323, "A", "PUBLIC", "Telecom", "EQ"],
+                ["BRACBANK", 32.1, 31.8, 31.9, 32.8, 31.9, 32.1, 567890, 18.2, 567,
+                 0.9433962264150943, "A", "PUBLIC", "Bank", "EQ"],
+            ],
+            "session": {"isOpen": False},
+        }
+        adapter = DSEDirectLivePricesAdapter()
+        return adapter.normalize(adapter._parse_json(payload))
 
     def test_two_rows(self, df: pd.DataFrame):
         assert len(df) == 2
@@ -72,20 +71,35 @@ class TestDSEDirectLivePricesNormalize:
         assert isinstance(df.iloc[0]["low"], Decimal)
         assert df.iloc[0]["high"] >= df.iloc[0]["low"]
 
-    def test_open_is_none(self, df: pd.DataFrame):
-        # open not in DSE live feed
-        assert df["open"].isna().all()
+    def test_open_populated(self, df: pd.DataFrame):
+        assert df.iloc[0]["open"] == Decimal("249.5")
 
-    def test_change_pct_is_none(self, df: pd.DataFrame):
-        # change_pct not in DSE live feed
-        assert df["change_pct"].isna().all()
+    def test_change_pct_populated(self, df: pd.DataFrame):
+        assert round(df.iloc[0]["change_pct"], 2) == Decimal("1.01")
+
+    def test_change_derived(self, df: pd.DataFrame):
+        assert df.iloc[0]["change"] == Decimal("2.5")
 
     def test_source(self, df: pd.DataFrame):
         assert (df["source"] == "dse_direct_live_prices").all()
 
-    def test_volume_strips_commas(self, df: pd.DataFrame):
+    def test_volume_numeric(self, df: pd.DataFrame):
         assert df.iloc[0]["volume"] == 456789
         assert df.iloc[1]["volume"] == 567890
+
+    def test_untraded_and_tbond_rows(self):
+        from extraction.adapters.dse_direct.live_prices import DSEDirectLivePricesAdapter
+        cols = ["code", "ltp", "ycp", "open", "high", "low", "close", "volume",
+                "value", "trades", "percent", "assetType"]
+        raw = pd.DataFrame([
+            ["ABBLPBOND", 0, 1060, 0, 0, 0, 1060, 0, 0, 0, None, "CB"],
+            ["TB5Y0129", 0, 11.2, 0, 0, 0, 11.2, 0, 0, 0, None, "GOVDBT"],
+        ], columns=cols)
+        df = DSEDirectLivePricesAdapter().normalize(raw)
+        assert list(df["ticker"]) == ["ABBLPBOND"]  # GOVDBT dropped
+        row = df.iloc[0]
+        assert row["close"] == Decimal("1060")       # falls back to official close
+        assert row["open"] is None and row["high"] is None
 
     def test_fetched_at_utc(self, df: pd.DataFrame):
         assert df.iloc[0]["fetched_at"].tzinfo is not None
@@ -117,11 +131,8 @@ class TestDSEDirectLivePricesFixture:
     def test_source(self, df: pd.DataFrame):
         assert (df["source"] == "dse_direct_live_prices").all()
 
-    def test_open_none(self, df: pd.DataFrame):
-        assert df["open"].isna().all()
-
-    def test_change_pct_none(self, df: pd.DataFrame):
-        assert df["change_pct"].isna().all()
+    def test_open_populated(self, df: pd.DataFrame):
+        assert df["open"].notna().any()
 
     def test_close_decimal(self, df: pd.DataFrame):
         val = df["close"].dropna().iloc[0]

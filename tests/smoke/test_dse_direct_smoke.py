@@ -31,9 +31,9 @@ HEADERS = {
         "Chrome/124.0.0.0 Safari/537.36"
     ),
     "Accept": "text/html,application/xhtml+xml",
-    "Referer": "https://www.dsebd.org/",
+    "Referer": "https://old.dsebd.org/",
 }
-BASE = "https://www.dsebd.org"
+BASE = "https://old.dsebd.org"
 
 
 def _save(name: str, obj: object) -> None:
@@ -48,17 +48,16 @@ def _save(name: str, obj: object) -> None:
 # ---------------------------------------------------------------------------
 
 async def test_live_prices_page_reachable():
-    """GET /latest_share_price_scroll_l.php returns 200 with stock table HTML."""
+    """GET www.dse.com.bd/api/live/prices returns 200 with cols+rows JSON."""
+    from extraction.adapters.dse_direct.live_prices import LIVE_PRICE_URL
     async with httpx.AsyncClient(timeout=30, headers=HEADERS, follow_redirects=True) as c:
-        resp = await c.get(f"{BASE}/latest_share_price_scroll_l.php")
+        resp = await c.get(LIVE_PRICE_URL)
 
     print(f"\nHTTP {resp.status_code}  len={len(resp.content)}")
     assert resp.status_code == 200
-    assert len(resp.content) > 1000, "page suspiciously small"
-    # At minimum the page should contain a table tag
-    assert b"<table" in resp.content or b"<TABLE" in resp.content
-
-    _save("live_prices_raw_html", resp.text[:5000])
+    payload = resp.json()
+    assert "cols" in payload and "rows" in payload
+    assert "code" in payload["cols"]
 
 
 async def test_live_prices_parse():
@@ -66,6 +65,8 @@ async def test_live_prices_parse():
     adapter = DSEDirectLivePricesAdapter()
     result = await adapter.fetch()
     df = result.data
+    async with httpx.AsyncClient(timeout=30, headers=HEADERS, follow_redirects=True) as c:
+        _save("live_prices_raw", adapter._parse_json((await c.get(adapter._url)).json()))
 
     print(f"\nLive prices: {df.shape}")
     print(df.dtypes)
