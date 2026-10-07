@@ -130,8 +130,11 @@ async def get_market_status() -> dict:
         row = await pool.fetchrow(
             "SELECT status, source, checked_at FROM market_session ORDER BY checked_at DESC LIMIT 1"
         )
-        if row:
-            checked = row["checked_at"]
+        checked = row["checked_at"] if row else None
+        # A row from a previous BD day is stale (e.g. "Open" left behind by an
+        # outage) — fall through to the clock instead of trusting it.
+        if row and hasattr(checked, "astimezone") and \
+                checked.astimezone(DHAKA_TZ).date() == datetime.now(DHAKA_TZ).date():
             return {
                 "status": row["status"],
                 "source": row["source"],

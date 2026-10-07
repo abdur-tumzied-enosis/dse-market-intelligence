@@ -512,6 +512,8 @@ async def job_news_scrape() -> None:
         # ── 2. Insert new articles, get back IDs of rows actually inserted ─
         # Dedup on content_hash (MD5 of headline+source), NOT url.
         # Google News proxy URLs regenerate for the same article → url dedup fails.
+        # Untargeted ON CONFLICT: news also has UNIQUE(url), and a targeted
+        # content_hash clause let a repeated url abort the whole job.
         newly_inserted: list[dict] = []
         for _, row in df.iterrows():
             rec = await pool.fetchrow(
@@ -520,7 +522,7 @@ async def job_news_scrape() -> None:
                     (source, url, headline, body, language, published_at, fetched_at,
                      tickers, ingestion_job, content_hash)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10)
-                ON CONFLICT (content_hash) WHERE content_hash IS NOT NULL DO NOTHING
+                ON CONFLICT DO NOTHING
                 RETURNING id, headline, body
                 """,
                 row["source"],

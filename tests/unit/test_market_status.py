@@ -74,7 +74,7 @@ async def test_get_market_status_redis_hit():
 @pytest.mark.asyncio
 async def test_get_market_status_db_fallback():
     row = {"status": "Closed", "source": "dse_direct",
-           "checked_at": datetime(2026, 6, 2, 15, 0, tzinfo=DHAKA_TZ)}
+           "checked_at": datetime.now(DHAKA_TZ)}
     pool = MagicMock()
     pool.fetchrow = AsyncMock(return_value=row)
     with patch.object(ms, "cache_get", AsyncMock(return_value=None)), \
@@ -82,6 +82,18 @@ async def test_get_market_status_db_fallback():
         result = await ms.get_market_status()
     assert result["status"] == "Closed"
     assert result["source"] == "dse_direct"
+
+
+@pytest.mark.asyncio
+async def test_get_market_status_stale_db_row_falls_back_to_clock():
+    row = {"status": "Open", "source": "dse_direct",
+           "checked_at": datetime(2026, 6, 15, 10, 15, tzinfo=DHAKA_TZ)}
+    pool = MagicMock()
+    pool.fetchrow = AsyncMock(return_value=row)
+    with patch.object(ms, "cache_get", AsyncMock(return_value=None)), \
+         patch.object(ms, "_get_pool", AsyncMock(return_value=pool)):
+        result = await ms.get_market_status()
+    assert result["source"] == "clock"
 
 
 @pytest.mark.asyncio
